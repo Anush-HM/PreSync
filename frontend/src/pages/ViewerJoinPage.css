@@ -1,0 +1,18 @@
+.join-page{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px; }
+.join-card{
+  width:100%; max-width:400px; background:var(--surface); border:1px solid var(--hairline);
+  border-radius:var(--radius); padding:36px 32px; text-align:center;
+}
+.join-card h1{ font-size:24px; font-weight:600; margin-bottom:8px; }
+.join-sub{ color:var(--muted); font-size:14px; margin-bottom:28px; }
+.join-label{
+  display:block; text-align:left; font-size:11px; letter-spacing:0.08em;
+  color:var(--muted); margin-bottom:6px; margin-top:16px;
+}
+.join-input{
+  width:100%; background:var(--ink); border:1px solid var(--hairline); border-radius:8px;
+  padding:12px 14px; color:var(--text); font-size:15px;
+}
+.join-input:focus{ outline:none; border-color:var(--blue); }
+.join-error{ color:var(--amber); font-size:13px; margin-top:14px; }
+.join-submit{ width:100%; justify-content:center; margin-top:24px; padding:12px; }
