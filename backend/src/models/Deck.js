@@ -26,6 +26,7 @@ const slideSchema = new mongoose.Schema(
     id: { type: String, required: true },
     order: { type: Number, required: true },
     backgroundImageUrl: { type: String }, // fallback flattened background, if any
+    needsImageFallback: { type: Boolean, default: false }, // true until a fallback image is rendered
     blocks: { type: [blockSchema], default: [] }
   },
   { _id: false }
