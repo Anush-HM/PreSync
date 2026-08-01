@@ -2,13 +2,18 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { MOCK_SLIDES } from '../data/mockData.js';
 import { readSlide, subscribeToRoom } from '../data/roomSync.js';
+import { fetchNotes, saveNote } from '../data/notesApi.js';
 import './ViewerLivePage.css';
+
+const NOTE_SAVE_DEBOUNCE_MS = 600;
 
 function ViewerLivePage() {
   const { roomCode } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const displayName = location.state?.displayName ?? 'Guest';
+  const viewerId = location.state?.viewerId;
+  const noteSaveTimer = useRef(null);
 
   // The slide currently pinned on this viewer's screen — only moves when
   // the viewer clicks "Done", per the spec's note-reconciliation rule.
@@ -31,6 +36,13 @@ function ViewerLivePage() {
     });
   }, [roomCode]);
 
+  useEffect(() => {
+    if (!viewerId) return;
+    fetchNotes(roomCode, viewerId).then((loaded) => {
+      setNotes((prev) => ({ ...loaded, ...prev }));
+    });
+  }, [roomCode, viewerId]);
+
   const pinnedSlide = MOCK_SLIDES[pinnedIdx];
   const hasMoved = liveIdx !== pinnedIdx;
 
@@ -39,7 +51,15 @@ function ViewerLivePage() {
   }
 
   function handleNoteChange(e) {
-    setNotes((prev) => ({ ...prev, [pinnedSlide.id]: e.target.value }));
+    const text = e.target.value;
+    const slideId = pinnedSlide.id;
+    setNotes((prev) => ({ ...prev, [slideId]: text }));
+
+    if (!viewerId) return;
+    if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
+    noteSaveTimer.current = setTimeout(() => {
+      saveNote(roomCode, viewerId, slideId, text);
+    }, NOTE_SAVE_DEBOUNCE_MS);
   }
 
   function handleSubmitQuestion(e) {

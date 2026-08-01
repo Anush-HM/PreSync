@@ -1,7 +1,14 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { goLive, joinRoom, getRoomByCode, endRoom } from '../controllers/roomController.js';
+import {
+  goLive,
+  joinRoom,
+  getRoomByCode,
+  endRoom,
+  getViewerNotes,
+  saveViewerNote
+} from '../controllers/roomController.js';
 
 const router = Router();
 
@@ -14,5 +21,7 @@ router.post('/:roomId/end', requireAuth, asyncHandler(endRoom));
 // architectural rather than just a permissions check.
 router.get('/:code', asyncHandler(getRoomByCode));
 router.post('/:code/join', asyncHandler(joinRoom));
+router.get('/:code/notes/:viewerId', asyncHandler(getViewerNotes));
+router.put('/:code/notes/:viewerId', asyncHandler(saveViewerNote));
 
 export default router;

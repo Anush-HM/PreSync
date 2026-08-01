@@ -1,7 +1,17 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { isLoggedIn, clearAuthToken, getCurrentUser } from '../data/apiConfig.js';
 import './Navbar.css';
 
 function Navbar() {
+  const navigate = useNavigate();
+  const loggedIn = isLoggedIn();
+  const user = getCurrentUser();
+
+  function handleLogout() {
+    clearAuthToken();
+    navigate('/');
+  }
+
   return (
     <nav>
       <div className="nav-inner">
@@ -21,7 +31,14 @@ function Navbar() {
         </div>
         <div className="nav-actions">
           <Link to="/join" className="btn btn-ghost mono">Join with code</Link>
-          <Link to="/decks" className="btn btn-solid">Sign in</Link>
+          {loggedIn ? (
+            <>
+              <Link to="/decks" className="btn btn-ghost">{user?.name || user?.email || 'My decks'}</Link>
+              <button className="btn btn-solid" onClick={handleLogout}>Log out</button>
+            </>
+          ) : (
+            <Link to="/login" className="btn btn-solid">Sign in</Link>
+          )}
         </div>
       </div>
     </nav>

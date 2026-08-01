@@ -1,0 +1,69 @@
+// Central place for the backend origin, since nothing in the frontend
+// talked to the real backend yet (everything ran on mockData.js). Swap
+// via a .env VITE_API_URL for non-local setups.
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+export const WS_BASE = API_BASE.replace(/^http/, 'ws');
+
+const TOKEN_KEY = 'presync:token';
+const USER_KEY = 'presync:user';
+
+export function getAuthToken() {
+  return localStorage.getItem(TOKEN_KEY) || '';
+}
+
+export function setAuthToken(token) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearAuthToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+export function getCurrentUser() {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCurrentUser(user) {
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+export function isLoggedIn() {
+  return !!getAuthToken();
+}
+
+// Shared fetch wrapper for editor-only REST calls — attaches the bearer
+// token and throws with the backend's error message on non-2xx so
+// callers can show it directly instead of a generic "failed" string.
+export async function apiFetch(path, options = {}) {
+  const token = getAuthToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      ...(options.body && !(options.body instanceof FormData)
+        ? { 'Content-Type': 'application/json' }
+        : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    }
+  });
+
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = body.error;
+    } catch {
+      // response wasn't JSON — keep the generic message
+    }
+    throw new Error(message);
+  }
+
+  if (res.status === 204) return null;
+  return res.json();
+}

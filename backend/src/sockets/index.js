@@ -39,6 +39,22 @@ export function registerSocketHandlers(io) {
       socket.data.roomCode = code.toUpperCase();
       socket.join(`room:${socket.data.roomCode}`);
       socket.emit('viewer:joined', { currentSlideId: room.currentSlideId });
+
+      // Send this viewer an immediate snapshot of whatever slide is
+      // already live, since slide:sync is otherwise only broadcast on
+      // the *next* presenter navigation — without this, a viewer who
+      // joins mid-session sees nothing until the presenter moves.
+      if (room.currentSlideId) {
+        const deck = await Deck.findById(room.deckId);
+        const slide = deck?.slides.find((s) => s.id === room.currentSlideId);
+        if (slide) {
+          socket.emit('slide:sync', {
+            slideId: slide.id,
+            blocks: slide.blocks,
+            backgroundImageUrl: slide.backgroundImageUrl
+          });
+        }
+      }
     });
 
     // Presenter navigates to a slide. The slide is snapshotted here — we

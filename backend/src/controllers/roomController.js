@@ -75,6 +75,50 @@ export async function getRoomByCode(req, res) {
   res.json({ code: room.code, active: room.active, currentSlideId: room.currentSlideId });
 }
 
+// No auth — same unauthenticated viewer path as join. Notes are private
+// to the viewer that wrote them, scoped by viewerId + the slide they
+// were written on (see Viewer.js), never exposed to the presenter or
+// other viewers, and never queried across viewers.
+export async function getViewerNotes(req, res) {
+  const { code, viewerId } = req.params;
+
+  const room = await Room.findOne({ code: code.toUpperCase() });
+  if (!room) return res.status(404).json({ error: 'No session with that code' });
+
+  const viewer = await Viewer.findOne({ viewerId, roomId: room._id });
+  if (!viewer) return res.status(404).json({ error: 'Viewer not found in this room' });
+
+  res.json({ notes: viewer.notes });
+}
+
+// Upsert-by-slideId: one note per (viewer, slide) pair, matching the
+// per-slide private notes described in the spec. Called on a debounce
+// from the client as the viewer types, tied to whichever slide is
+// currently pinned on their screen — not necessarily the presenter's
+// live slide.
+export async function saveViewerNote(req, res) {
+  const { code, viewerId } = req.params;
+  const { slideId, text } = req.body;
+  if (!slideId) return res.status(400).json({ error: 'slideId is required' });
+
+  const room = await Room.findOne({ code: code.toUpperCase() });
+  if (!room) return res.status(404).json({ error: 'No session with that code' });
+
+  const viewer = await Viewer.findOne({ viewerId, roomId: room._id });
+  if (!viewer) return res.status(404).json({ error: 'Viewer not found in this room' });
+
+  const existing = viewer.notes.find((n) => n.slideId === slideId);
+  if (existing) {
+    existing.text = text ?? '';
+    existing.updatedAt = new Date();
+  } else {
+    viewer.notes.push({ slideId, text: text ?? '', updatedAt: new Date() });
+  }
+  await viewer.save();
+
+  res.json({ notes: viewer.notes });
+}
+
 // Editor-only: ends the live session.
 export async function endRoom(req, res) {
   const room = await Room.findById(req.params.roomId);

@@ -9,6 +9,7 @@ import authRoutes from './routes/authRoutes.js';
 import deckRoutes from './routes/deckRoutes.js';
 import roomRoutes from './routes/roomRoutes.js';
 import { registerSocketHandlers } from './sockets/index.js';
+import { attachYjsServer } from './yjs/server.js';
 
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_ORIGIN }));
@@ -30,6 +31,11 @@ const io = new Server(httpServer, {
   cors: { origin: process.env.CLIENT_ORIGIN }
 });
 registerSocketHandlers(io);
+
+// Yjs concurrent-editing layer. Fully separate from the Socket.io
+// broadcast above — different upgrade path (/yjs/:deckId), different
+// auth (JWT-gated to editors), different protocol.
+attachYjsServer(httpServer);
 
 const PORT = process.env.PORT || 4000;
 
