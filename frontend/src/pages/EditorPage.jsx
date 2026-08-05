@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { fabric } from 'fabric';
-import { MOCK_SLIDES, generateRoomCode } from '../data/mockData.js';
+import { MOCK_SLIDES } from '../data/mockData.js';
 import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from '../data/yjsClient.js';
-import { API_BASE, getAuthToken } from '../data/apiConfig.js';
+import { goLive } from '../data/roomsApi.js';
 import './EditorPage.css';
 
 // Real implementation: Fabric.js canvas + Yjs CRDT sync, replacing the
@@ -23,6 +23,7 @@ function EditorPage() {
 
   const [slides, setSlides] = useState([]);
   const [activeSlideIdx, setActiveSlideIdx] = useState(0);
+  const [goLiveError, setGoLiveError] = useState('');
 
   const canvasElRef = useRef(null);
   const fabricRef = useRef(null);
@@ -145,23 +146,12 @@ function EditorPage() {
   }, [slides, activeSlideIdx]);
 
   async function handleGoLive() {
-    const token = getAuthToken();
-    if (!token) {
-      // No login screen is wired up in the frontend yet -- fall back to
-      // the local mock room so presenting still works end-to-end.
-      navigate(`/presenter/${generateRoomCode()}`, { state: { deckId } });
-      return;
-    }
+    setGoLiveError('');
     try {
-      const res = await fetch(`${API_BASE}/api/rooms/go-live`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ deckId })
-      });
-      const data = await res.json();
-      navigate(`/presenter/${data.code}`, { state: { deckId } });
-    } catch {
-      navigate(`/presenter/${generateRoomCode()}`, { state: { deckId } });
+      const data = await goLive(deckId); // { code, roomId }
+      navigate(`/presenter/${data.code}`, { state: { deckId, roomId: data.roomId } });
+    } catch (err) {
+      setGoLiveError(err.message || 'Could not start the session');
     }
   }
 
@@ -172,6 +162,7 @@ function EditorPage() {
           <button className="btn btn-ghost" onClick={() => navigate('/decks')}>← Decks</button>
           <span className="editor-deck-title">{deckId}</span>
         </div>
+        {goLiveError && <span className="editor-golive-error">{goLiveError}</span>}
         <button className="btn btn-amber" onClick={handleGoLive}>Go Live</button>
       </header>
 

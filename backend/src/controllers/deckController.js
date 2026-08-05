@@ -1,22 +1,39 @@
 import Deck from '../models/Deck.js';
+import User from '../models/User.js';
 
 // Every handler here assumes requireAuth has already run — req.userId is
 // a real editor. Access is scoped to decks the user owns or collaborates
 // on; nothing here is reachable by a viewer, since viewers never carry a
 // JWT in the first place.
 
-function isEditorOf(deck, userId) {
+export function isEditorOf(deck, userId) {
   return (
     deck.ownerId.toString() === userId ||
     deck.collaboratorIds.some((id) => id.toString() === userId)
   );
 }
 
+// Shapes a deck for the client with owner/collaborator emails resolved,
+// instead of making the frontend guess at bare ObjectIds.
+async function serializeDeck(deck, userId) {
+  const populated = await deck.populate([
+    { path: 'ownerId', select: 'email name' },
+    { path: 'collaboratorIds', select: 'email name' }
+  ]);
+  const plain = populated.toObject();
+  return {
+    ...plain,
+    isOwner: plain.ownerId._id.toString() === userId,
+    owner: { id: plain.ownerId._id, email: plain.ownerId.email, name: plain.ownerId.name },
+    collaborators: plain.collaboratorIds.map((c) => ({ id: c._id, email: c.email, name: c.name }))
+  };
+}
+
 export async function listDecks(req, res) {
   const decks = await Deck.find({
     $or: [{ ownerId: req.userId }, { collaboratorIds: req.userId }]
   })
-    .select('title updatedAt slides')
+    .select('title updatedAt slides ownerId')
     .sort({ updatedAt: -1 });
 
   res.json(
@@ -24,7 +41,8 @@ export async function listDecks(req, res) {
       id: d._id,
       title: d.title,
       updatedAt: d.updatedAt,
-      slideCount: d.slides.length
+      slideCount: d.slides.length,
+      isOwner: d.ownerId.toString() === req.userId
     }))
   );
 }
@@ -43,7 +61,7 @@ export async function getDeck(req, res) {
   const deck = await Deck.findById(req.params.deckId);
   if (!deck) return res.status(404).json({ error: 'Deck not found' });
   if (!isEditorOf(deck, req.userId)) return res.status(403).json({ error: 'Not a collaborator on this deck' });
-  res.json(deck);
+  res.json(await serializeDeck(deck, req.userId));
 }
 
 // Full-document replace of slides — the REST path for saving a deck.
@@ -58,6 +76,48 @@ export async function updateDeckSlides(req, res) {
   deck.slides = req.body.slides;
   await deck.save();
   res.json(deck);
+}
+
+// Owner-only: invite another user to co-edit this deck by email. This is
+// the piece that was missing — collaboratorIds existed on the model and
+// was already checked everywhere, but nothing could ever populate it.
+export async function addCollaborator(req, res) {
+  const deck = await Deck.findById(req.params.deckId);
+  if (!deck) return res.status(404).json({ error: 'Deck not found' });
+  if (deck.ownerId.toString() !== req.userId) {
+    return res.status(403).json({ error: 'Only the owner can invite collaborators' });
+  }
+
+  const email = req.body.email?.trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: 'email is required' });
+
+  const user = await User.findOne({ email });
+  if (!user) return res.status(404).json({ error: 'No PreSync account with that email' });
+
+  if (user._id.toString() === deck.ownerId.toString()) {
+    return res.status(400).json({ error: "That's already the deck owner" });
+  }
+  if (deck.collaboratorIds.some((id) => id.toString() === user._id.toString())) {
+    return res.status(400).json({ error: 'Already a collaborator on this deck' });
+  }
+
+  deck.collaboratorIds.push(user._id);
+  await deck.save();
+  res.status(201).json(await serializeDeck(deck, req.userId));
+}
+
+export async function removeCollaborator(req, res) {
+  const deck = await Deck.findById(req.params.deckId);
+  if (!deck) return res.status(404).json({ error: 'Deck not found' });
+  if (deck.ownerId.toString() !== req.userId) {
+    return res.status(403).json({ error: 'Only the owner can remove collaborators' });
+  }
+
+  deck.collaboratorIds = deck.collaboratorIds.filter(
+    (id) => id.toString() !== req.params.userId
+  );
+  await deck.save();
+  res.json(await serializeDeck(deck, req.userId));
 }
 
 export async function deleteDeck(req, res) {

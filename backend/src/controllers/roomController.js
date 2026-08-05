@@ -128,5 +128,13 @@ export async function endRoom(req, res) {
   }
   room.active = false;
   await room.save();
+
+  // Ending a session is a REST action (not a socket event), but anyone
+  // still connected to the broadcast — viewers watching, or the
+  // presenter in a second tab — needs to hear about it in real time,
+  // not just discover it next time they poll.
+  const io = req.app.get('io');
+  io?.to(`room:${room.code}`).emit('room:ended');
+
   res.status(204).end();
 }

@@ -5,7 +5,7 @@
 // to return the literal string "NOT_IN_DECK" and we pass that through
 // as-is rather than ever guessing on the presenter's behalf.
 
-function buildContext(deck, slideId) {
+export function buildContext(deck, slideId) {
   const slides = deck.slides;
   const idx = slides.findIndex((s) => s.id === slideId);
   if (idx === -1) return '';

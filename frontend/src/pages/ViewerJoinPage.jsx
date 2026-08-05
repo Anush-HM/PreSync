@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { joinRoomByCode } from '../data/roomsApi.js';
 import './ViewerJoinPage.css';
 
 function ViewerJoinPage() {
@@ -7,8 +8,9 @@ function ViewerJoinPage() {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [joining, setJoining] = useState(false);
 
-  function handleJoin(e) {
+  async function handleJoin(e) {
     e.preventDefault();
     const cleanCode = code.trim().toUpperCase();
     if (cleanCode.length < 4) {
@@ -19,10 +21,21 @@ function ViewerJoinPage() {
       setError('Add a display name so your notes and questions are yours.');
       return;
     }
-    // Temporary session identity — stands in for a real viewerId issued
-    // by the backend on join.
-    const viewerId = `viewer-${Math.random().toString(36).slice(2, 9)}`;
-    navigate(`/view/${cleanCode}`, { state: { displayName: name.trim(), viewerId } });
+
+    setJoining(true);
+    setError('');
+    try {
+      // Real join-by-code call — issues a viewerId scoped to this room,
+      // used to tag this session's notes and Q&A submissions.
+      const { viewerId, currentSlideId } = await joinRoomByCode(cleanCode, name.trim());
+      navigate(`/view/${cleanCode}`, {
+        state: { displayName: name.trim(), viewerId, currentSlideId }
+      });
+    } catch (err) {
+      setError(err.message || 'Could not join that session.');
+    } finally {
+      setJoining(false);
+    }
   }
 
   return (
@@ -51,7 +64,9 @@ function ViewerJoinPage() {
 
         {error && <p className="join-error">{error}</p>}
 
-        <button className="btn btn-amber join-submit" type="submit">Join session</button>
+        <button className="btn btn-amber join-submit" type="submit" disabled={joining}>
+          {joining ? 'Joining…' : 'Join session'}
+        </button>
       </form>
     </div>
   );

@@ -39,3 +39,14 @@
 .qa-draft.not-in-deck{ background:var(--amber-dim); color:var(--amber); font-family:'IBM Plex Mono', monospace; font-size:12px; }
 .qa-actions{ display:flex; gap:8px; }
 .qa-actions .btn{ font-size:12.5px; padding:7px 12px; }
+
+.presenter-status{ font-size:12px; color:var(--muted); }
+.presenter-error{ font-size:13px; color:var(--amber); padding:10px 24px 0; }
+.qa-draft-pending{ background:var(--surface-raised); color:var(--muted); }
+.qa-draft-input{
+  width:100%; min-height:70px; font-size:13px; color:var(--text); background:var(--blue-dim);
+  border:1px solid transparent; border-radius:6px; padding:10px; margin-bottom:10px; line-height:1.5;
+  font-family:inherit; resize:vertical;
+}
+.qa-draft-input.not-in-deck{ background:var(--amber-dim); color:var(--amber); font-family:'IBM Plex Mono', monospace; font-size:12px; }
+.qa-draft-input:focus{ outline:none; border-color:var(--blue); }

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { MOCK_SLIDES } from '../data/mockData.js';
-import { readSlide, subscribeToRoom } from '../data/roomSync.js';
+import { createSocket } from '../data/socket.js';
 import { fetchNotes, saveNote } from '../data/notesApi.js';
 import './ViewerLivePage.css';
 
@@ -14,27 +13,69 @@ function ViewerLivePage() {
   const displayName = location.state?.displayName ?? 'Guest';
   const viewerId = location.state?.viewerId;
   const noteSaveTimer = useRef(null);
+  const socketRef = useRef(null);
 
   // The slide currently pinned on this viewer's screen — only moves when
   // the viewer clicks "Done", per the spec's note-reconciliation rule.
-  const [pinnedIdx, setPinnedIdx] = useState(0);
-  // The presenter's actual current slide, which may run ahead of pinnedIdx.
-  const [liveIdx, setLiveIdx] = useState(0);
+  // Both pinned/live are the full { slideId, blocks, backgroundImageUrl }
+  // snapshot pushed over the broadcast channel, since a viewer never has
+  // access to the deck's slide list (Yjs is editor-only).
+  const [pinnedSlide, setPinnedSlide] = useState(null);
+  const [liveSlide, setLiveSlide] = useState(null);
+  const [connected, setConnected] = useState(false);
+  const [connectError, setConnectError] = useState('');
+
   const [notes, setNotes] = useState({}); // { slideId: text }
   const [question, setQuestion] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const noteRef = useRef(null);
+  const [justSubmitted, setJustSubmitted] = useState(false);
+  const [answeredQuestions, setAnsweredQuestions] = useState([]); // public feed for the room
+
+  // No account/join info to work with (e.g. a bare page reload landed
+  // here with no router state) — send them back through the join flow
+  // rather than connecting a socket with nothing to identify them.
+  useEffect(() => {
+    if (!viewerId) {
+      navigate('/join', { replace: true });
+    }
+  }, [viewerId, navigate]);
 
   useEffect(() => {
-    const existing = readSlide(roomCode);
-    if (existing) {
-      setPinnedIdx(existing.slideIndex);
-      setLiveIdx(existing.slideIndex);
-    }
-    return subscribeToRoom(roomCode, (payload) => {
-      setLiveIdx(payload.slideIndex);
+    if (!viewerId) return;
+
+    const socket = createSocket();
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      setConnected(true);
+      setConnectError('');
+      socket.emit('viewer:join', { code: roomCode, viewerId });
     });
-  }, [roomCode]);
+
+    socket.on('viewer:joined', () => {
+      // currentSlideId alone isn't enough to render anything — the
+      // actual content snapshot follows right after as slide:sync.
+    });
+
+    socket.on('slide:sync', ({ slideId, blocks, backgroundImageUrl }) => {
+      const slide = { slideId, blocks: blocks || [], backgroundImageUrl };
+      setLiveSlide(slide);
+      setPinnedSlide((prev) => (prev ? prev : slide)); // first snapshot pins immediately
+    });
+
+    socket.on('qa:answer', ({ id, question: q, answer }) => {
+      setAnsweredQuestions((prev) => [{ id, question: q, answer }, ...prev]);
+    });
+
+    socket.on('disconnect', () => setConnected(false));
+    socket.on('error', ({ message }) => setConnectError(message || 'Connection error'));
+
+    socket.connect();
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [roomCode, viewerId]);
 
   useEffect(() => {
     if (!viewerId) return;
@@ -43,16 +84,16 @@ function ViewerLivePage() {
     });
   }, [roomCode, viewerId]);
 
-  const pinnedSlide = MOCK_SLIDES[pinnedIdx];
-  const hasMoved = liveIdx !== pinnedIdx;
+  const hasMoved = liveSlide && pinnedSlide && liveSlide.slideId !== pinnedSlide.slideId;
 
   function handleDone() {
-    setPinnedIdx(liveIdx);
+    setPinnedSlide(liveSlide);
   }
 
   function handleNoteChange(e) {
     const text = e.target.value;
-    const slideId = pinnedSlide.id;
+    const slideId = pinnedSlide?.slideId;
+    if (!slideId) return;
     setNotes((prev) => ({ ...prev, [slideId]: text }));
 
     if (!viewerId) return;
@@ -64,10 +105,16 @@ function ViewerLivePage() {
 
   function handleSubmitQuestion(e) {
     e.preventDefault();
-    if (!question.trim()) return;
-    setSubmitted(true);
+    if (!question.trim() || !socketRef.current) return;
+    socketRef.current.emit('question:submit', { text: question.trim() });
     setQuestion('');
-    setTimeout(() => setSubmitted(false), 2500);
+    setJustSubmitted(true);
+    setTimeout(() => setJustSubmitted(false), 2500);
+  }
+
+  function handleLeave() {
+    socketRef.current?.disconnect();
+    navigate('/');
   }
 
   return (
@@ -75,36 +122,55 @@ function ViewerLivePage() {
       <header className="viewer-topbar">
         <span className="room-code-badge mono">{roomCode}</span>
         <span className="viewer-name mono">{displayName}</span>
-        <button className="btn btn-ghost" onClick={() => navigate('/')}>Leave</button>
+        {!connected && !connectError && <span className="viewer-status mono">Connecting…</span>}
+        {connectError && <span className="viewer-status viewer-status-error mono">{connectError}</span>}
+        <button className="btn btn-ghost" onClick={handleLeave}>Leave</button>
       </header>
 
       <div className="viewer-body">
         <main className="viewer-stage">
           {hasMoved && (
             <div className="moved-banner">
-              <span>Presenter moved to Slide {liveIdx + 1}</span>
+              <span>Presenter moved to a new slide</span>
               <button className="btn btn-amber" onClick={handleDone}>Done</button>
             </div>
           )}
-          <div className="stage-slide">
-            {pinnedSlide.blocks.map((b) => (
-              <div key={b.id} style={{ position: 'absolute', left: b.x, top: b.y, width: b.width, fontSize: b.fontSize, whiteSpace: 'pre-wrap' }}>
-                {b.text}
+
+          {!pinnedSlide ? (
+            <p className="viewer-slide-label mono">Waiting for the presenter to share a slide…</p>
+          ) : (
+            <>
+              <div
+                className="stage-slide"
+                style={
+                  pinnedSlide.backgroundImageUrl
+                    ? { backgroundImage: `url(${pinnedSlide.backgroundImageUrl})`, backgroundSize: 'cover' }
+                    : undefined
+                }
+              >
+                {pinnedSlide.blocks.map((b) => (
+                  <div
+                    key={b.id}
+                    style={{ position: 'absolute', left: b.x, top: b.y, width: b.width, fontSize: b.fontSize, whiteSpace: 'pre-wrap' }}
+                  >
+                    {b.text}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <p className="viewer-slide-label mono">Slide {pinnedIdx + 1} of {MOCK_SLIDES.length}</p>
+              <p className="viewer-slide-label mono">Following the live presentation</p>
+            </>
+          )}
         </main>
 
         <aside className="viewer-sidebar">
           <section className="notes-block">
             <h3>Your notes — this slide</h3>
             <textarea
-              ref={noteRef}
               className="notes-textarea"
               placeholder="Private notes, tied to this slide..."
-              value={notes[pinnedSlide.id] ?? ''}
+              value={pinnedSlide ? notes[pinnedSlide.slideId] ?? '' : ''}
               onChange={handleNoteChange}
+              disabled={!pinnedSlide}
             />
           </section>
 
@@ -117,9 +183,20 @@ function ViewerLivePage() {
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
               />
-              <button className="btn btn-solid qa-submit" type="submit">Submit</button>
+              <button className="btn btn-solid qa-submit" type="submit" disabled={!connected}>Submit</button>
             </form>
-            {submitted && <p className="qa-sent-note">Sent to the presenter for review.</p>}
+            {justSubmitted && <p className="qa-sent-note">Sent to the presenter for review.</p>}
+
+            {answeredQuestions.length > 0 && (
+              <div className="qa-feed">
+                {answeredQuestions.map((a) => (
+                  <div key={a.id} className="qa-feed-item">
+                    <p className="qa-feed-q mono">Q: {a.question}</p>
+                    <p className="qa-feed-a">{a.answer}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </aside>
       </div>

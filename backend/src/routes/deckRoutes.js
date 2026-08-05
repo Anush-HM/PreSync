@@ -7,7 +7,9 @@ import {
   createDeck,
   getDeck,
   updateDeckSlides,
-  deleteDeck
+  deleteDeck,
+  addCollaborator,
+  removeCollaborator
 } from '../controllers/deckController.js';
 import { importPdf } from '../controllers/ingestController.js';
 
@@ -36,6 +38,8 @@ router.post('/', asyncHandler(createDeck));
 router.post('/import', upload.single('pdf'), asyncHandler(importPdf));
 router.get('/:deckId', asyncHandler(getDeck));
 router.put('/:deckId/slides', asyncHandler(updateDeckSlides));
+router.post('/:deckId/collaborators', asyncHandler(addCollaborator));
+router.delete('/:deckId/collaborators/:userId', asyncHandler(removeCollaborator));
 router.delete('/:deckId', asyncHandler(deleteDeck));
 
 export default router;
