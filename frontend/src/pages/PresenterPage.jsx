@@ -11,14 +11,37 @@ function PresenterPage() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const deckId = location.state?.deckId;
-  const roomId = location.state?.roomId;
+  // React Router state doesn't survive a page refresh — persist it to
+  // sessionStorage under the room code so reloading mid-session doesn't
+  // strand the presenter without a working "End session" button.
+  const storageKey = `presync:presenter:${roomCode}`;
+  const [deckId] = useState(() => {
+    if (location.state?.deckId) {
+      sessionStorage.setItem(storageKey, JSON.stringify(location.state));
+      return location.state.deckId;
+    }
+    try {
+      return JSON.parse(sessionStorage.getItem(storageKey))?.deckId ?? null;
+    } catch {
+      return null;
+    }
+  });
+  const [roomId] = useState(() => {
+    if (location.state?.roomId) return location.state.roomId;
+    try {
+      return JSON.parse(sessionStorage.getItem(storageKey))?.roomId ?? null;
+    } catch {
+      return null;
+    }
+  });
 
   const [slides, setSlides] = useState([]);
   const [slideIdx, setSlideIdx] = useState(0);
   const [loadError, setLoadError] = useState('');
   const [connected, setConnected] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [viewerCount, setViewerCount] = useState(0);
+  const [roomEnded, setRoomEnded] = useState(false);
 
   // Each item: { id, question, draft, status: 'pending'|'drafted'|'failed', error? }
   const [queue, setQueue] = useState([]);
@@ -72,6 +95,12 @@ function PresenterPage() {
     socket.on('question:draft-failed', ({ id, error }) => {
       setQueue((q) => q.map((item) => (item.id === id ? { ...item, status: 'failed', error } : item)));
     });
+
+    socket.on('viewer:count', ({ count }) => setViewerCount(count));
+
+    // Covers the case where the session was ended from elsewhere (e.g. a
+    // second presenter tab) rather than this tab's own "End session" click.
+    socket.on('room:ended', () => setRoomEnded(true));
 
     socket.on('disconnect', () => setConnected(false));
     socket.on('error', ({ message }) => setLoadError(message || 'Connection error'));
@@ -129,6 +158,7 @@ function PresenterPage() {
       // presenter view is still the right move — there's nothing more
       // to broadcast either way.
     } finally {
+      sessionStorage.removeItem(storageKey);
       socketRef.current?.disconnect();
       navigate('/decks');
     }
@@ -141,12 +171,15 @@ function PresenterPage() {
           <button className="btn btn-ghost" onClick={() => navigate('/decks')}>← Exit</button>
           <span className="room-code-badge mono">LIVE · {roomCode}</span>
           {!connected && <span className="presenter-status mono">Connecting…</span>}
+          {connected && <span className="viewer-count-badge mono">{viewerCount} watching</span>}
         </div>
         <span className="presenter-hint mono">Share this code with your audience</span>
-        <button className="btn btn-amber" onClick={handleEndSession} disabled={ending}>
-          {ending ? 'Ending…' : 'End session'}
+        <button className="btn btn-amber" onClick={handleEndSession} disabled={ending || roomEnded}>
+          {roomEnded ? 'Session ended' : ending ? 'Ending…' : 'End session'}
         </button>
       </header>
+
+      {roomEnded && <p className="presenter-error">This session was ended (possibly from another tab).</p>}
 
       {loadError && <p className="presenter-error">{loadError}</p>}
 

@@ -10,8 +10,29 @@ function ViewerLivePage() {
   const { roomCode } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const displayName = location.state?.displayName ?? 'Guest';
-  const viewerId = location.state?.viewerId;
+  // Router state doesn't survive a page refresh — this falls back to
+  // whatever was last persisted for this room code rather than always
+  // kicking back to /join.
+  const storageKey = `presync:viewer:${roomCode}`;
+  const [displayName] = useState(() => {
+    if (location.state?.displayName) {
+      sessionStorage.setItem(storageKey, JSON.stringify(location.state));
+      return location.state.displayName;
+    }
+    try {
+      return JSON.parse(sessionStorage.getItem(storageKey))?.displayName ?? 'Guest';
+    } catch {
+      return 'Guest';
+    }
+  });
+  const [viewerId] = useState(() => {
+    if (location.state?.viewerId) return location.state.viewerId;
+    try {
+      return JSON.parse(sessionStorage.getItem(storageKey))?.viewerId ?? null;
+    } catch {
+      return null;
+    }
+  });
   const noteSaveTimer = useRef(null);
   const socketRef = useRef(null);
 
@@ -29,6 +50,7 @@ function ViewerLivePage() {
   const [question, setQuestion] = useState('');
   const [justSubmitted, setJustSubmitted] = useState(false);
   const [answeredQuestions, setAnsweredQuestions] = useState([]); // public feed for the room
+  const [sessionEnded, setSessionEnded] = useState(false);
 
   // No account/join info to work with (e.g. a bare page reload landed
   // here with no router state) — send them back through the join flow
@@ -64,6 +86,10 @@ function ViewerLivePage() {
 
     socket.on('qa:answer', ({ id, question: q, answer }) => {
       setAnsweredQuestions((prev) => [{ id, question: q, answer }, ...prev]);
+    });
+
+    socket.on('room:ended', () => {
+      setSessionEnded(true);
     });
 
     socket.on('disconnect', () => setConnected(false));
@@ -113,6 +139,7 @@ function ViewerLivePage() {
   }
 
   function handleLeave() {
+    sessionStorage.removeItem(storageKey);
     socketRef.current?.disconnect();
     navigate('/');
   }
@@ -129,7 +156,14 @@ function ViewerLivePage() {
 
       <div className="viewer-body">
         <main className="viewer-stage">
-          {hasMoved && (
+          {sessionEnded && (
+            <div className="ended-banner">
+              <span>The presenter ended this session.</span>
+              <button className="btn btn-amber" onClick={() => navigate('/')}>Back home</button>
+            </div>
+          )}
+
+          {hasMoved && !sessionEnded && (
             <div className="moved-banner">
               <span>Presenter moved to a new slide</span>
               <button className="btn btn-amber" onClick={handleDone}>Done</button>
@@ -170,7 +204,7 @@ function ViewerLivePage() {
               placeholder="Private notes, tied to this slide..."
               value={pinnedSlide ? notes[pinnedSlide.slideId] ?? '' : ''}
               onChange={handleNoteChange}
-              disabled={!pinnedSlide}
+              disabled={!pinnedSlide || sessionEnded}
             />
           </section>
 
@@ -183,7 +217,7 @@ function ViewerLivePage() {
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
               />
-              <button className="btn btn-solid qa-submit" type="submit" disabled={!connected}>Submit</button>
+              <button className="btn btn-solid qa-submit" type="submit" disabled={!connected || sessionEnded}>Submit</button>
             </form>
             {justSubmitted && <p className="qa-sent-note">Sent to the presenter for review.</p>}
 

@@ -25,6 +25,12 @@
 }
 .moved-banner .btn{ font-size:12.5px; padding:6px 14px; }
 
+.ended-banner{
+  display:flex; align-items:center; gap:14px; background:var(--surface-raised);
+  color:var(--text); border:1px solid var(--hairline); border-radius:8px; padding:14px 18px;
+  margin-bottom:18px; font-size:13.5px; width:720px; max-width:100%; justify-content:space-between;
+}
+
 .viewer-sidebar{
   width:320px; flex-shrink:0; border-left:1px solid var(--hairline);
   padding:20px; overflow-y:auto; background:var(--surface); display:flex; flex-direction:column; gap:26px;
