@@ -23,9 +23,15 @@ async function serializeDeck(deck, userId) {
   const plain = populated.toObject();
   return {
     ...plain,
+    id: plain._id.toString(),
     isOwner: plain.ownerId._id.toString() === userId,
     owner: { id: plain.ownerId._id, email: plain.ownerId.email, name: plain.ownerId.name },
-    collaborators: plain.collaboratorIds.map((c) => ({ id: c._id, email: c.email, name: c.name }))
+    collaborators: plain.collaboratorIds.map((c) => ({ id: c._id, email: c.email, name: c.name })),
+    // Include slides so the PresenterPage can render content without a
+    // separate fetch — the presenter view is read-only so serving the
+    // full slide array here is safe and keeps the client simpler.
+    slides: plain.slides || [],
+    slideCount: (plain.slides || []).length
   };
 }
 

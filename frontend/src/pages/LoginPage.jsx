@@ -6,7 +6,9 @@ import './LoginPage.css';
 function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = location.state?.from || '/decks';
+  // Support both router state (normal navigation) and ?next= param (401 redirect)
+  const searchParams = new URLSearchParams(location.search);
+  const redirectTo = location.state?.from || searchParams.get('next') || '/decks';
 
   const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');

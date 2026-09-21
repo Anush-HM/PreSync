@@ -58,7 +58,10 @@ function PresenterPage() {
   useEffect(() => {
     if (!deckId) return;
     getDeck(deckId)
-      .then((deck) => setSlides(deck.slides || []))
+      .then((deck) => {
+        // serializeDeck now includes slides in its response
+        setSlides(deck.slides || []);
+      })
       .catch((err) => setLoadError(err.message || 'Could not load this deck'));
   }, [deckId]);
 
@@ -79,8 +82,7 @@ function PresenterPage() {
 
     socket.on('presenter:joined', () => {
       // Push whatever slide is currently selected the moment we're
-      // recognized as this room's presenter, so the broadcast channel
-      // has real content even before the first manual navigation.
+      // recognized as this room's presenter.
       broadcastSlide(slides[slideIdx]);
     });
 
@@ -116,12 +118,27 @@ function PresenterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomCode]);
 
-  // Re-broadcast whenever the presenter navigates. Skipped until slides
-  // have actually loaded so we don't push an empty slide on mount.
+  // Re-broadcast whenever the presenter navigates.
   useEffect(() => {
     if (slides.length === 0) return;
     broadcastSlide(slides[slideIdx]);
   }, [slideIdx, slides, broadcastSlide]);
+
+  // --- Keyboard navigation -------------------------------------------
+  useEffect(() => {
+    function onKey(e) {
+      if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+        e.preventDefault();
+        goTo(slideIdx + 1);
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        goTo(slideIdx - 1);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [slideIdx, slides.length]);
 
   const slide = slides[slideIdx];
 
@@ -155,8 +172,7 @@ function PresenterPage() {
       await endRoom(roomId);
     } catch {
       // Even if the request fails (e.g. already ended), leaving the
-      // presenter view is still the right move — there's nothing more
-      // to broadcast either way.
+      // presenter view is still the right move.
     } finally {
       sessionStorage.removeItem(storageKey);
       socketRef.current?.disconnect();
@@ -173,20 +189,24 @@ function PresenterPage() {
           {!connected && <span className="presenter-status mono">Connecting…</span>}
           {connected && <span className="viewer-count-badge mono">{viewerCount} watching</span>}
         </div>
-        <span className="presenter-hint mono">Share this code with your audience</span>
+        <div className="presenter-topbar-center">
+          <span className="presenter-hint mono">Share this code with your audience</span>
+          <span className="presenter-hint mono slide-counter">
+            {slides.length > 0 ? `${slideIdx + 1} / ${slides.length}` : ''}
+          </span>
+        </div>
         <button className="btn btn-amber" onClick={handleEndSession} disabled={ending || roomEnded}>
           {roomEnded ? 'Session ended' : ending ? 'Ending…' : 'End session'}
         </button>
       </header>
 
       {roomEnded && <p className="presenter-error">This session was ended (possibly from another tab).</p>}
-
       {loadError && <p className="presenter-error">{loadError}</p>}
 
       <div className="presenter-body">
         <main className="presenter-stage">
           {!slide ? (
-            <p className="mono">Loading slides…</p>
+            <p className="mono" style={{ color: 'var(--muted)' }}>Loading slides…</p>
           ) : (
             <>
               <div
@@ -197,23 +217,41 @@ function PresenterPage() {
                     : undefined
                 }
               >
-                {(slide.blocks || []).map((b) => (
-                  <div key={b.id} style={{ position: 'absolute', left: b.x, top: b.y, width: b.width, fontSize: b.fontSize, whiteSpace: 'pre-wrap' }}>
-                    {b.text}
-                  </div>
-                ))}
+                {(() => {
+                  // Auto-scale for old decks with raw PDF coords
+                  const blocks = slide.blocks || [];
+                  let s = 1;
+                  if (blocks.length > 0) {
+                    let mX = 0, mY = 0;
+                    blocks.forEach(b => {
+                      mX = Math.max(mX, (b.x||0) + (b.width||300));
+                      mY = Math.max(mY, (b.y||0) + (b.fontSize||16)*2);
+                    });
+                    if (mX > 960 || mY > 540) {
+                      s = Math.min(mX > 960 ? 940/mX : 1, mY > 540 ? 520/mY : 1);
+                    }
+                  }
+                  return blocks.map((b) => (
+                    <div key={b.id} style={{ position: 'absolute', left: (b.x||0)*s, top: (b.y||0)*s, width: (b.width||300)*s, fontSize: Math.round((b.fontSize||16)*s), whiteSpace: 'pre-wrap', color: '#1a1a2e' }}>
+                      {b.text}
+                    </div>
+                  ));
+                })()}
               </div>
               <div className="stage-nav">
                 <button className="btn btn-ghost" onClick={() => goTo(slideIdx - 1)} disabled={slideIdx === 0}>← Prev</button>
                 <span className="mono">{slideIdx + 1} / {slides.length}</span>
                 <button className="btn btn-ghost" onClick={() => goTo(slideIdx + 1)} disabled={slideIdx === slides.length - 1}>Next →</button>
               </div>
+              <p className="presenter-hint mono" style={{ marginTop: 8, fontSize: 11 }}>
+                ← → arrow keys also navigate
+              </p>
             </>
           )}
         </main>
 
         <aside className="qa-panel">
-          <h3>Live Q&A</h3>
+          <h3>Live Q&amp;A</h3>
           <p className="qa-sub">Drafted from deck content only. Nothing sends until you approve.</p>
           {queue.length === 0 && <p className="qa-empty">No questions waiting.</p>}
           {queue.map((q) => (
