@@ -40,6 +40,8 @@ export function isLoggedIn() {
 // Shared fetch wrapper for editor-only REST calls — attaches the bearer
 // token and throws with the backend's error message on non-2xx so
 // callers can show it directly instead of a generic "failed" string.
+// On a 401, clears auth and reloads to the login page so an expired or
+// revoked token never silently strands the user on a broken page.
 export async function apiFetch(path, options = {}) {
   const token = getAuthToken();
   const res = await fetch(`${API_BASE}${path}`, {
@@ -52,6 +54,16 @@ export async function apiFetch(path, options = {}) {
       ...(options.headers || {})
     }
   });
+
+  // Expired / invalid token — clear auth and redirect so the user lands
+  // on the login page with proper "from" state preserved.
+  if (res.status === 401) {
+    clearAuthToken();
+    const from = window.location.pathname;
+    window.location.href = `/login?next=${encodeURIComponent(from)}`;
+    // Throw so the calling code's catch block also stops processing.
+    throw new Error('Session expired. Please sign in again.');
+  }
 
   if (!res.ok) {
     let message = `Request failed (${res.status})`;

@@ -26,6 +26,7 @@ a{ color:inherit; text-decoration:none; }
 .wrap{ max-width:1180px; margin:0 auto; padding:0 32px; }
 :focus-visible{ outline:2px solid var(--blue); outline-offset:3px; }
 
+/* ── Buttons ── */
 .btn{
   font-family:'Public Sans', sans-serif;
   font-size:14px; font-weight:600;
@@ -35,13 +36,15 @@ a{ color:inherit; text-decoration:none; }
   display:inline-flex; align-items:center; gap:8px;
   white-space:nowrap;
 }
+.btn:disabled{ opacity:0.5; cursor:not-allowed; }
 .btn-ghost{ color:var(--text); border-color:var(--hairline); background:transparent; }
-.btn-ghost:hover{ border-color:var(--blue); background:var(--blue-dim); }
+.btn-ghost:hover:not(:disabled){ border-color:var(--blue); background:var(--blue-dim); }
 .btn-solid{ background:var(--text); color:var(--ink); }
-.btn-solid:hover{ background:var(--blue); color:var(--ink); }
+.btn-solid:hover:not(:disabled){ background:var(--blue); color:var(--ink); }
 .btn-amber{ background:var(--amber); color:#1a1200; }
-.btn-amber:hover{ filter:brightness(1.08); }
+.btn-amber:hover:not(:disabled){ filter:brightness(1.08); }
 
+/* ── Eyebrow label ── */
 .eyebrow{
   font-family:'IBM Plex Mono', monospace;
   font-size:12.5px; letter-spacing:0.14em; text-transform:uppercase;
@@ -51,13 +54,40 @@ a{ color:inherit; text-decoration:none; }
 }
 .eyebrow .dot{ width:6px; height:6px; border-radius:50%; background:var(--amber); box-shadow:0 0 8px var(--amber); }
 
+/* ── Section ── */
 section{ padding:96px 32px; }
 .section-head{ max-width:640px; margin:0 auto 56px; text-align:center; }
 .section-head .eyebrow{ margin-bottom:14px; }
 .section-head h2{ font-size:clamp(26px,3.4vw,38px); font-weight:600; margin-bottom:14px; }
 .section-head p{ color:var(--muted); font-size:16px; }
 
+/* ── Logo ── */
+.logo{
+  display:inline-flex; align-items:center; gap:8px;
+  font-family:'Space Grotesk', sans-serif; font-size:18px; font-weight:600;
+  letter-spacing:-0.02em;
+}
+.logo-mark{ width:22px; height:22px; display:inline-flex; }
+.logo-mark svg{ width:100%; height:100%; }
+
+/* ── Page transitions ── */
 .route-fallback{
   min-height: 100vh; display:flex; align-items:center; justify-content:center;
   color: var(--muted); font-size: 13px;
+}
+
+/* Smooth fade-in for all top-level page containers */
+.decks-page,
+.editor-page,
+.presenter-page,
+.viewer-page,
+.login-page,
+.join-page,
+.notfound-page,
+.hero{
+  animation: fadeIn 0.3s ease-out;
+}
+@keyframes fadeIn{
+  from{ opacity:0; transform:translateY(8px); }
+  to{ opacity:1; transform:translateY(0); }
 }

@@ -149,6 +149,8 @@ function ViewerLivePage() {
       <header className="viewer-topbar">
         <span className="room-code-badge mono">{roomCode}</span>
         <span className="viewer-name mono">{displayName}</span>
+        <span className={`connection-dot ${connected ? 'connected' : 'disconnected'}`}
+              title={connected ? 'Connected' : connectError || 'Disconnected'} />
         {!connected && !connectError && <span className="viewer-status mono">Connecting…</span>}
         {connectError && <span className="viewer-status viewer-status-error mono">{connectError}</span>}
         <button className="btn btn-ghost" onClick={handleLeave}>Leave</button>
@@ -182,14 +184,25 @@ function ViewerLivePage() {
                     : undefined
                 }
               >
-                {pinnedSlide.blocks.map((b) => (
-                  <div
-                    key={b.id}
-                    style={{ position: 'absolute', left: b.x, top: b.y, width: b.width, fontSize: b.fontSize, whiteSpace: 'pre-wrap' }}
-                  >
-                    {b.text}
-                  </div>
-                ))}
+                {(() => {
+                  const blocks = pinnedSlide.blocks || [];
+                  let s = 1;
+                  if (blocks.length > 0) {
+                    let mX = 0, mY = 0;
+                    blocks.forEach(b => {
+                      mX = Math.max(mX, (b.x||0) + (b.width||300));
+                      mY = Math.max(mY, (b.y||0) + (b.fontSize||16)*2);
+                    });
+                    if (mX > 960 || mY > 540) {
+                      s = Math.min(mX > 960 ? 940/mX : 1, mY > 540 ? 520/mY : 1);
+                    }
+                  }
+                  return blocks.map((b) => (
+                    <div key={b.id} style={{ position: 'absolute', left: (b.x||0)*s, top: (b.y||0)*s, width: (b.width||300)*s, fontSize: Math.round((b.fontSize||16)*s), whiteSpace: 'pre-wrap', color: '#1a1a2e' }}>
+                      {b.text}
+                    </div>
+                  ));
+                })()}
               </div>
               <p className="viewer-slide-label mono">Following the live presentation</p>
             </>
@@ -215,6 +228,7 @@ function ViewerLivePage() {
                 className="qa-textarea"
                 placeholder="Answers are grounded in the deck only."
                 value={question}
+                maxLength={500}
                 onChange={(e) => setQuestion(e.target.value)}
               />
               <button className="btn btn-solid qa-submit" type="submit" disabled={!connected || sessionEnded}>Submit</button>

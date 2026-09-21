@@ -51,7 +51,9 @@ function ViewerJoinPage() {
           placeholder="e.g. K7QX2M"
           maxLength={8}
           value={code}
-          onChange={(e) => setCode(e.target.value)}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          autoComplete="off"
+          spellCheck={false}
         />
 
         <label className="join-label mono">DISPLAY NAME</label>

@@ -9,7 +9,8 @@ function Navbar() {
 
   function handleLogout() {
     clearAuthToken();
-    navigate('/');
+    // Navigate triggers a full re-render of the Navbar via the router
+    navigate('/', { replace: true });
   }
 
   return (
@@ -27,7 +28,6 @@ function Navbar() {
         <div className="nav-links">
           <a href="#features">Features</a>
           <a href="#how-it-works">How it works</a>
-          <a href="#access">Roles</a>
         </div>
         <div className="nav-actions">
           <Link to="/join" className="btn btn-ghost mono">Join with code</Link>

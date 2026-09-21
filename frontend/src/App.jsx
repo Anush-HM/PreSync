@@ -2,12 +2,14 @@ import { Suspense, lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import RequireAuth from './components/RequireAuth.jsx';
 
-// LandingPage is the one route worth keeping in the main bundle -- it's
-// almost always the first thing rendered. Everything else is loaded on
-// demand: EditorPage alone pulls in fabric.js + yjs, which is most of
-// what pushed the single-bundle build past the 500kB warning threshold.
+// LandingPage and NotFound are kept in the main bundle — they're the
+// first and last things a user might see, and are tiny.
 import LandingPage from './pages/LandingPage.jsx';
+import NotFound from './pages/NotFound.jsx';
 
+// Everything else is lazy-loaded on demand. EditorPage alone pulls in
+// fabric.js + yjs which is most of what pushed the single-bundle build
+// past the 500kB warning threshold.
 const LoginPage = lazy(() => import('./pages/LoginPage.jsx'));
 const DecksPage = lazy(() => import('./pages/DecksPage.jsx'));
 const EditorPage = lazy(() => import('./pages/EditorPage.jsx'));
@@ -30,6 +32,8 @@ function App() {
         <Route path="/presenter/:roomCode" element={<RequireAuth><PresenterPage /></RequireAuth>} />
         <Route path="/join" element={<ViewerJoinPage />} />
         <Route path="/view/:roomCode" element={<ViewerLivePage />} />
+        {/* Catch-all — must be last */}
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );

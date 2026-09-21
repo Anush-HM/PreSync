@@ -8,16 +8,29 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 // Heuristic grouping: fragments are folded into the same block when
 // they're on the same page, vertically close, and similar in font size.
-// Two knobs control this — tune them here if extraction looks too
-// fragmented (blocks split that should be one) or too merged (unrelated
-// lines glued together).
 const VERTICAL_GAP_THRESHOLD = 10; // px, in PDF user-space units
 const FONT_SIZE_TOLERANCE = 2; // px difference still considered "similar"
+
+// The editor canvas is 960×540 (16:9). All coordinates are normalized to
+// this target so imported content fits without clipping regardless of the
+// PDF's original page size (letter 612×792, A4 595×842, widescreen, etc.)
+const TARGET_WIDTH = 960;
+const TARGET_HEIGHT = 540;
 
 async function extractPageFragments(pdfDocument, pageNumber) {
   const page = await pdfDocument.getPage(pageNumber);
   const viewport = page.getViewport({ scale: 1 });
   const textContent = await page.getTextContent();
+
+  // Compute a uniform scale factor that fits the PDF page inside the
+  // 960×540 canvas while preserving aspect ratio. Any leftover space
+  // (e.g. a 3:4 page inside a 16:9 canvas) is offset so the content
+  // appears centered horizontally and pushed to the top vertically.
+  const scaleX = TARGET_WIDTH / viewport.width;
+  const scaleY = TARGET_HEIGHT / viewport.height;
+  const scale = Math.min(scaleX, scaleY);
+  const offsetX = (TARGET_WIDTH - viewport.width * scale) / 2;
+  const offsetY = 0; // top-aligned; swap to centering with: (TARGET_HEIGHT - viewport.height * scale) / 2
 
   const fragments = textContent.items
     .filter((item) => item.str.trim().length > 0)
@@ -25,10 +38,18 @@ async function extractPageFragments(pdfDocument, pageNumber) {
       // item.transform = [scaleX, skewX, skewY, scaleY, x, y] in PDF space,
       // where y is measured from the bottom of the page. Flip to a
       // top-down y so it matches how the frontend positions blocks.
-      const [, , , scaleY, x, yFromBottom] = item.transform;
-      const fontSize = Math.abs(scaleY);
-      const y = viewport.height - yFromBottom - fontSize;
-      return { text: item.str, x, y, fontSize, width: item.width };
+      const [, , , absScaleY, rawX, yFromBottom] = item.transform;
+      const fontSize = Math.abs(absScaleY);
+      const rawY = viewport.height - yFromBottom - fontSize;
+
+      // Map from PDF space → editor canvas space
+      return {
+        text: item.str,
+        x: rawX * scale + offsetX,
+        y: rawY * scale + offsetY,
+        fontSize: fontSize * scale,
+        width: item.width * scale
+      };
     });
 
   return { fragments, pageWidth: viewport.width, pageHeight: viewport.height };
@@ -42,11 +63,15 @@ function groupFragmentsIntoBlocks(fragments, pageIndex) {
   const blocks = [];
   let current = null;
 
+  // Scale-aware gap threshold — since fragment positions are now in
+  // 960×540 space, the vertical gap needs to be scaled up proportionally.
+  const gapThreshold = VERTICAL_GAP_THRESHOLD * (TARGET_HEIGHT / 540);
+
   for (const frag of sorted) {
     const sameBlock =
       current &&
-      Math.abs(frag.fontSize - current.fontSize) <= FONT_SIZE_TOLERANCE &&
-      frag.y - current.bottomY <= VERTICAL_GAP_THRESHOLD;
+      Math.abs(frag.fontSize - current.fontSize) <= FONT_SIZE_TOLERANCE * 2 &&
+      frag.y - current.bottomY <= gapThreshold;
 
     if (sameBlock) {
       current.lines.push(frag.text);
@@ -89,13 +114,6 @@ export async function extractSlidesFromPdf(buffer) {
     const { fragments } = await extractPageFragments(pdfDocument, pageNum);
     const blocks = groupFragmentsIntoBlocks(fragments, pageNum);
 
-    // Pages with no cleanly extracted text (pure image slides, or a
-    // rendering pdf.js can't parse into positioned glyphs — e.g. some
-    // multi-column or heavily designed layouts) fall back to a flattened
-    // background rather than an empty slide. Actually rendering that
-    // fallback image is a follow-up step (page -> canvas -> PNG); for now
-    // we flag it so the caller/UI knows to treat this slide as
-    // non-editable until that's wired in.
     const needsImageFallback = blocks.length === 0;
 
     slides.push({
