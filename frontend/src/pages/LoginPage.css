@@ -27,3 +27,10 @@
   padding-top:16px; border-top:1px solid var(--hairline);
 }
 .login-join-link:hover{ color:var(--blue); }
+
+@media (max-width:480px){
+  .login-page{ padding:16px; align-items:flex-start; padding-top:48px; }
+  .login-card{ padding:28px 20px; }
+  .login-input{ font-size:16px; min-height:44px; } /* 16px prevents iOS zoom */
+  .login-submit{ min-height:44px; }
+}

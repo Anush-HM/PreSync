@@ -200,6 +200,10 @@ function PresenterPage() {
         </button>
       </header>
 
+      <div className="desktop-banner">
+        💻 For the best presenting experience, use a desktop browser.
+      </div>
+
       {roomEnded && <p className="presenter-error">This session was ended (possibly from another tab).</p>}
       {loadError && <p className="presenter-error">{loadError}</p>}
 
