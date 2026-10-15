@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { listDecks, createDeck, importDeckPdf, deleteDeck } from '../data/decksApi.js';
 import { isLoggedIn, clearAuthToken, getCurrentUser } from '../data/apiConfig.js';
+import SessionHistoryModal from '../components/SessionHistoryModal.jsx';
 import './DecksPage.css';
 
 function formatDate(iso) {
@@ -26,6 +27,7 @@ function DecksPage() {
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [historyDeck, setHistoryDeck] = useState(null); // { id, title }
 
   useEffect(() => { refreshDecks(); }, []);
 
@@ -158,22 +160,39 @@ function DecksPage() {
                     <h3>{d.title}</h3>
                     <p className="mono">Edited {formatDate(d.updatedAt)}</p>
                   </div>
-                  {d.isOwner && (
+                  <div className="deck-card-actions" onClick={(e) => e.stopPropagation()}>
                     <button
-                      className="deck-delete-btn"
-                      title="Delete deck"
-                      disabled={deletingId === id}
-                      onClick={(e) => handleDeleteDeck(e, id)}
+                      className="btn btn-ghost deck-history-btn"
+                      title="View session history"
+                      onClick={() => setHistoryDeck({ id, title: d.title })}
                     >
-                      {deletingId === id ? '…' : '×'}
+                      📋 History
                     </button>
-                  )}
+                    {d.isOwner && (
+                      <button
+                        className="deck-delete-btn"
+                        title="Delete deck"
+                        disabled={deletingId === id}
+                        onClick={(e) => handleDeleteDeck(e, id)}
+                      >
+                        {deletingId === id ? '…' : '×'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {historyDeck && (
+        <SessionHistoryModal
+          deckId={historyDeck.id}
+          deckTitle={historyDeck.title}
+          onClose={() => setHistoryDeck(null)}
+        />
+      )}
     </div>
   );
 }
