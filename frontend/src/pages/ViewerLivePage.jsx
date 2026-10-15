@@ -47,6 +47,7 @@ function ViewerLivePage() {
   const [connectError, setConnectError] = useState('');
 
   const [notes, setNotes] = useState({}); // { slideId: text }
+  const [notesLoaded, setNotesLoaded] = useState(false); // gate: prevent typing before server data arrives
   const [question, setQuestion] = useState('');
   const [justSubmitted, setJustSubmitted] = useState(false);
   const [answeredQuestions, setAnsweredQuestions] = useState([]); // public feed for the room
@@ -106,7 +107,15 @@ function ViewerLivePage() {
   useEffect(() => {
     if (!viewerId) return;
     fetchNotes(roomCode, viewerId).then((loaded) => {
-      setNotes((prev) => ({ ...loaded, ...prev }));
+      // Server data wins for any existing keys — local prev only wins for
+      // keys the user has typed in THIS session that the server doesn't know
+      // about yet (new slides not yet saved). This prevents a refresh from
+      // wiping saved notes when the fetch resolves after the user starts typing.
+      setNotes((prev) => ({ ...prev, ...loaded }));
+      setNotesLoaded(true);
+    }).catch(() => {
+      // Fetch failed (e.g. offline) — still unlock so the user can type.
+      setNotesLoaded(true);
     });
   }, [roomCode, viewerId]);
 
@@ -212,13 +221,17 @@ function ViewerLivePage() {
         <aside className="viewer-sidebar">
           <section className="notes-block">
             <h3>Your notes — this slide</h3>
-            <textarea
-              className="notes-textarea"
-              placeholder="Private notes, tied to this slide..."
-              value={pinnedSlide ? notes[pinnedSlide.slideId] ?? '' : ''}
-              onChange={handleNoteChange}
-              disabled={!pinnedSlide || sessionEnded}
-            />
+            {!notesLoaded ? (
+              <p className="notes-loading mono">Loading notes…</p>
+            ) : (
+              <textarea
+                className="notes-textarea"
+                placeholder="Private notes, tied to this slide..."
+                value={pinnedSlide ? notes[pinnedSlide.slideId] ?? '' : ''}
+                onChange={handleNoteChange}
+                disabled={!pinnedSlide || sessionEnded}
+              />
+            )}
           </section>
 
           <section className="qa-block">
