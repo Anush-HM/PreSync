@@ -34,3 +34,9 @@ export async function getRoomByCode(code) {
   if (!res.ok) return null;
   return res.json();
 }
+
+// Editor-only — fetches past session history for a deck.
+// Returns { sessions: [{ roomId, code, createdAt, durationMin, viewerCount, questions }] }
+export async function getSessionHistory(deckId) {
+  return apiFetch(`/api/rooms/history/${deckId}`);
+}

@@ -1,0 +1,203 @@
+/* ── Overlay ── */
+.sh-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 20, 0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+/* ── Modal ── */
+.sh-modal {
+  background: #12121e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+/* ── Header ── */
+.sh-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.5rem 1.5rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.sh-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #f0f0ff;
+  margin: 0 0 0.2rem;
+}
+
+.sh-subtitle {
+  font-size: 0.78rem;
+  color: var(--muted, #888);
+  margin: 0;
+}
+
+.sh-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 0.25rem;
+  transition: color 0.15s;
+}
+.sh-close:hover { color: #f0f0ff; }
+
+/* ── Scrollable body ── */
+.sh-body {
+  overflow-y: auto;
+  padding: 1rem 1.5rem 1.5rem;
+  flex: 1;
+}
+
+/* ── States ── */
+.sh-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem 0;
+  color: var(--muted, #888);
+}
+
+.sh-error {
+  color: #ff6b6b;
+  font-size: 0.9rem;
+  padding: 1rem 0;
+}
+
+.sh-empty {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--muted, #888);
+}
+
+.sh-empty-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Session card ── */
+.sh-session-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.sh-session-card:hover { border-color: rgba(79, 168, 255, 0.3); }
+
+.sh-session-summary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: #f0f0ff;
+  transition: background 0.15s;
+}
+.sh-session-summary:hover { background: rgba(255, 255, 255, 0.06); }
+
+.sh-session-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 110px;
+}
+
+.sh-session-date {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #f0f0ff;
+}
+
+.sh-session-time {
+  font-size: 0.75rem;
+  color: var(--muted, #888);
+}
+
+.sh-session-meta {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.sh-badge {
+  font-size: 0.75rem;
+  background: rgba(79, 168, 255, 0.12);
+  color: #4FA8FF;
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  white-space: nowrap;
+}
+
+.sh-chevron {
+  font-size: 0.7rem;
+  color: var(--muted, #888);
+  margin-left: auto;
+}
+
+/* ── Expanded Q&A ── */
+.sh-session-detail {
+  padding: 0.75rem 1rem 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sh-no-qa {
+  font-size: 0.82rem;
+  color: var(--muted, #888);
+  margin: 0;
+}
+
+.sh-qa-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.sh-qa-question {
+  font-size: 0.85rem;
+  color: #f0f0ff;
+  font-weight: 500;
+}
+
+.sh-qa-answer {
+  font-size: 0.82rem;
+  color: #a0d4a0;
+  padding-left: 0.75rem;
+  border-left: 2px solid rgba(160, 212, 160, 0.3);
+}
+
+.sh-qa-status {
+  font-size: 0.78rem;
+  padding-left: 0.75rem;
+}
+
+.sh-qa-status--dismissed { color: #ff8c69; }
+.sh-qa-status--pending,
+.sh-qa-status--drafted   { color: var(--muted, #888); }
