@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 vi.mock('../models/Room.js', () => ({ default: { findOne: vi.fn() } }));
 vi.mock('../models/Deck.js', () => ({ default: { findById: vi.fn() } }));
 vi.mock('../models/Question.js', () => ({
-  default: { create: vi.fn(), findById: vi.fn(), findByIdAndUpdate: vi.fn() }
+  default: { create: vi.fn(), findOne: vi.fn(), findOneAndUpdate: vi.fn() }
 }));
 vi.mock('../services/qaService.js', () => ({ draftAnswer: vi.fn() }));
 
@@ -206,8 +206,8 @@ describe('presenter events', () => {
     expect(await emitExpectingError(socket, 'question:dismiss', { questionId: 42 })).toBe(
       'Invalid question id'
     );
-    expect(Question.findById).not.toHaveBeenCalled();
-    expect(Question.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(Question.findOne).not.toHaveBeenCalled();
+    expect(Question.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('rejects a non-text answer', async () => {
@@ -217,6 +217,49 @@ describe('presenter events', () => {
       answer: { text: 'hi' }
     });
     expect(message).toBe('Answer must be text');
+  });
+
+  it("only sends questions from the presenter's own room", async () => {
+    const socket = await joinAsPresenter();
+    Question.findOne.mockResolvedValue(null); // question belongs to another room
+    const answered = vi.fn();
+    socket.on('qa:answer', answered);
+
+    expect(await emitExpectingError(socket, 'question:send', { questionId: QUESTION_ID })).toBe(
+      'Question not found'
+    );
+    expect(Question.findOne).toHaveBeenCalledWith({ _id: QUESTION_ID, roomId: 'room1' });
+    expect(answered).not.toHaveBeenCalled();
+  });
+
+  it('broadcasts an answer to a question in its own room', async () => {
+    const socket = await joinAsPresenter();
+    const question = {
+      _id: QUESTION_ID,
+      text: 'Why?',
+      draftAnswer: 'Because.',
+      save: vi.fn().mockResolvedValue()
+    };
+    Question.findOne.mockResolvedValue(question);
+    const answered = nextEvent(socket, 'qa:answer');
+
+    socket.emit('question:send', { questionId: QUESTION_ID });
+
+    expect(await answered).toEqual({ id: QUESTION_ID, question: 'Why?', answer: 'Because.' });
+    expect(question.status).toBe('sent');
+  });
+
+  it("only dismisses questions from the presenter's own room", async () => {
+    const socket = await joinAsPresenter();
+    Question.findOneAndUpdate.mockResolvedValue(null);
+
+    expect(await emitExpectingError(socket, 'question:dismiss', { questionId: QUESTION_ID })).toBe(
+      'Question not found'
+    );
+    expect(Question.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: QUESTION_ID, roomId: 'room1' },
+      { status: 'dismissed' }
+    );
   });
 });
 
