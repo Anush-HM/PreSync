@@ -52,6 +52,10 @@
 .qa-feed-q{ color:var(--muted); margin-bottom:4px; }
 .qa-feed-a{ color:var(--text); }
 
+/* Dismissed question styles */
+.qa-feed-item--dismissed .qa-feed-q{ opacity:0.5; }
+.qa-feed-dismissed{ color:var(--muted); font-style:italic; font-size:12px; }
+
 /* Connection status dot */
 .connection-dot{
   width:8px; height:8px; border-radius:50%; flex-shrink:0;
