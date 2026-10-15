@@ -77,6 +77,7 @@ export function registerSocketHandlers(io) {
       }
       socket.data.role = 'presenter';
       socket.data.roomCode = roomCode;
+      socket.data.roomId = room._id;
       socket.join(`room:${socket.data.roomCode}`);
       socket.join(`presenter:${socket.data.roomCode}`);
       socket.emit('presenter:joined', { code: socket.data.roomCode });
@@ -196,8 +197,10 @@ export function registerSocketHandlers(io) {
       const questionId = parseQuestionId(rawQuestionId);
       const answer = parseOptionalAnswer(rawAnswer);
 
-      const question = await Question.findById(questionId);
-      if (!question) return;
+      // Scoped to the presenter's own room, so a presenter can't answer
+      // (and broadcast) a question from someone else's session.
+      const question = await Question.findOne({ _id: questionId, roomId: socket.data.roomId });
+      if (!question) return socket.emit('error', { message: 'Question not found' });
 
       question.status = 'sent';
       if (answer) question.draftAnswer = answer;
@@ -212,7 +215,11 @@ export function registerSocketHandlers(io) {
 
     on('question:dismiss', async ({ questionId }) => {
       if (socket.data.role !== 'presenter') return;
-      await Question.findByIdAndUpdate(parseQuestionId(questionId), { status: 'dismissed' });
+      const question = await Question.findOneAndUpdate(
+        { _id: parseQuestionId(questionId), roomId: socket.data.roomId },
+        { status: 'dismissed' }
+      );
+      if (!question) socket.emit('error', { message: 'Question not found' });
     });
   });
 }
