@@ -278,6 +278,22 @@ describe('POST /api/decks/import', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects a file that is not a PDF with a 400', async () => {
+    const form = new FormData();
+    form.append('pdf', new Blob(['hello'], { type: 'text/plain' }), 'notes.txt');
+    const res = await server.request('POST', '/api/decks/import', { token: tokenFor(OWNER_ID), body: form });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Only PDF files are accepted (field name "pdf")');
+    expect(extractSlidesFromPdf).not.toHaveBeenCalled();
+  });
+
+  it('rejects a PDF under the wrong field name with a 400', async () => {
+    const form = new FormData();
+    form.append('file', new Blob(['%PDF-1.4'], { type: 'application/pdf' }), 'deck.pdf');
+    const res = await server.request('POST', '/api/decks/import', { token: tokenFor(OWNER_ID), body: form });
+    expect(res.status).toBe(400);
+  });
+
   it('reports a PDF that cannot be parsed as 422', async () => {
     extractSlidesFromPdf.mockRejectedValue(new Error('bad xref table'));
     const res = await server.request('POST', '/api/decks/import', {

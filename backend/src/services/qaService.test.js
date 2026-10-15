@@ -38,6 +38,22 @@ describe('buildContext', () => {
     expect(buildContext(d, 'a')).toBe('Slide 0:\nOnly this');
   });
 
+  it('returns nothing when the slide and its neighbours have no text', () => {
+    const d = {
+      slides: [
+        { id: 'a', order: 0, blocks: [{ text: '  ' }] },
+        { id: 'b', order: 1, blocks: [] },
+        { id: 'c', order: 2, blocks: [{ text: 'Far away' }] }
+      ]
+    };
+    expect(buildContext(d, 'a')).toBe('');
+  });
+
+  it('keeps a blank slide in the window when a neighbour has text', () => {
+    const d = { slides: [{ id: 'a', order: 0, blocks: [] }, { id: 'b', order: 1, blocks: [{ text: 'Next' }] }] };
+    expect(buildContext(d, 'a')).toBe('Slide 0:\n\n\nSlide 1:\nNext');
+  });
+
   it('returns nothing for an unknown slide', () => {
     expect(buildContext(deck, 'missing')).toBe('');
   });
@@ -99,7 +115,9 @@ describe('draftAnswer', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('does not call the API for a slide that is not in the deck', async () => {
+  it('does not call the API when the slide has no text', async () => {
+    const blank = { slides: [{ id: 'b', order: 0, blocks: [{ text: '   ' }] }] };
+    expect(await draftAnswer({ deck: blank, slideId: 'b', question: 'Why?' })).toBe('NOT_IN_DECK');
     expect(await draftAnswer({ deck, slideId: 'missing', question: 'Why?' })).toBe('NOT_IN_DECK');
     expect(fetchMock).not.toHaveBeenCalled();
   });
