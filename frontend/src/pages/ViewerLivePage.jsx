@@ -46,11 +46,12 @@ function ViewerLivePage() {
   const [connected, setConnected] = useState(false);
   const [connectError, setConnectError] = useState('');
 
-  const [notes, setNotes] = useState({}); // { slideId: text }
+  const [notes, setNotes] = useState({});
   const [question, setQuestion] = useState('');
   const [justSubmitted, setJustSubmitted] = useState(false);
-  const [answeredQuestions, setAnsweredQuestions] = useState([]); // public feed for the room
+  const [answeredQuestions, setAnsweredQuestions] = useState([]);
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [reactionCooldowns, setReactionCooldowns] = useState({}); // emoji -> cooldown end ms
 
   // No account/join info to work with (e.g. a bare page reload landed
   // here with no router state) — send them back through the join flow
@@ -138,6 +139,21 @@ function ViewerLivePage() {
     setTimeout(() => setJustSubmitted(false), 2500);
   }
 
+  const REACTIONS = ['👍', '👏', '🤔', '❓'];
+
+  function handleReaction(emoji) {
+    if (!socketRef.current || !connected || sessionEnded) return;
+    const now = Date.now();
+    if (reactionCooldowns[emoji] && reactionCooldowns[emoji] > now) return;
+    socketRef.current.emit('reaction:send', { emoji });
+    const cooldownEnd = now + 3000;
+    setReactionCooldowns((prev) => ({ ...prev, [emoji]: cooldownEnd }));
+    // Clear cooldown after 3 seconds
+    setTimeout(() => {
+      setReactionCooldowns((prev) => ({ ...prev, [emoji]: 0 }));
+    }, 3000);
+  }
+
   function handleLeave() {
     sessionStorage.removeItem(storageKey);
     socketRef.current?.disconnect();
@@ -205,6 +221,23 @@ function ViewerLivePage() {
                 })()}
               </div>
               <p className="viewer-slide-label mono">Following the live presentation</p>
+              {/* ── Reaction bar ── */}
+              <div className="reaction-bar">
+                {REACTIONS.map((emoji) => {
+                  const onCooldown = reactionCooldowns[emoji] > Date.now();
+                  return (
+                    <button
+                      key={emoji}
+                      className={`reaction-btn${onCooldown ? ' reaction-btn--cooldown' : ''}`}
+                      onClick={() => handleReaction(emoji)}
+                      disabled={onCooldown || !connected || sessionEnded}
+                      title={onCooldown ? 'Wait 3s before reacting again' : `Send ${emoji}`}
+                    >
+                      {emoji}
+                    </button>
+                  );
+                })}
+              </div>
             </>
           )}
         </main>

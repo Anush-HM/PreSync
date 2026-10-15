@@ -56,3 +56,20 @@
 
 /* Viewer count badge — separate rule (was accidentally merged with qa-draft-input:focus) */
 .viewer-count-badge{ font-size:12px; color:var(--blue); background:var(--blue-dim); padding:4px 8px; border-radius:5px; }
+
+/* ── Floating emoji reactions ── */
+.reactions-container{
+  position:absolute; bottom:0; left:0; right:0; height:100%;
+  pointer-events:none; overflow:hidden;
+}
+.reaction-float{
+  position:absolute; bottom:10%;
+  font-size:2.2rem; line-height:1;
+  animation:float-up 2.5s ease-out forwards;
+  pointer-events:none; user-select:none;
+}
+@keyframes float-up{
+  0%   { transform:translateY(0) scale(1);   opacity:1; }
+  60%  { transform:translateY(-180px) scale(1.2); opacity:0.9; }
+  100% { transform:translateY(-320px) scale(0.8); opacity:0; }
+}

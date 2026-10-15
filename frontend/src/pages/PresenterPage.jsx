@@ -45,6 +45,8 @@ function PresenterPage() {
 
   // Each item: { id, question, draft, status: 'pending'|'drafted'|'failed', error? }
   const [queue, setQueue] = useState([]);
+  // Transient floating emoji reactions from viewers: { id, emoji, x }
+  const [reactions, setReactions] = useState([]);
   const socketRef = useRef(null);
 
   // Presenter arrived here without a deck to load (e.g. a raw URL visit
@@ -103,6 +105,17 @@ function PresenterPage() {
     // Covers the case where the session was ended from elsewhere (e.g. a
     // second presenter tab) rather than this tab's own "End session" click.
     socket.on('room:ended', () => setRoomEnded(true));
+
+    // Transient viewer reactions — never persisted, shown as floating emojis.
+    socket.on('reaction:new', ({ emoji }) => {
+      const id = `${Date.now()}-${Math.random()}`;
+      const x = 10 + Math.random() * 80; // random horizontal position %
+      setReactions((prev) => [...prev, { id, emoji, x }]);
+      // Auto-remove after animation completes (2.5s)
+      setTimeout(() => {
+        setReactions((prev) => prev.filter((r) => r.id !== id));
+      }, 2600);
+    });
 
     socket.on('disconnect', () => setConnected(false));
     socket.on('error', ({ message }) => setLoadError(message || 'Connection error'));
@@ -237,6 +250,14 @@ function PresenterPage() {
                     </div>
                   ));
                 })()}
+                {/* Floating reaction emojis from viewers */}
+                <div className="reactions-container">
+                  {reactions.map((r) => (
+                    <span key={r.id} className="reaction-float" style={{ left: `${r.x}%` }}>
+                      {r.emoji}
+                    </span>
+                  ))}
+                </div>
               </div>
               <div className="stage-nav">
                 <button className="btn btn-ghost" onClick={() => goTo(slideIdx - 1)} disabled={slideIdx === 0}>← Prev</button>

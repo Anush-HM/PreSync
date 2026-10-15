@@ -172,5 +172,27 @@ export function registerSocketHandlers(io) {
       if (socket.data.role !== 'presenter') return;
       await Question.findByIdAndUpdate(questionId, { status: 'dismissed' });
     });
+
+    // Viewer sends a reaction emoji. Transient — never persisted to DB.
+    // Rate-limited to 1 per viewer per 3 seconds to prevent spam.
+    // Broadcast only to the presenter's private channel.
+    const reactionCooldowns = new Map(); // viewerId -> last reaction timestamp
+    socket.on('reaction:send', ({ emoji }) => {
+      if (socket.data.role !== 'viewer') return;
+
+      const ALLOWED = ['👍', '👏', '🤔', '❓'];
+      if (!ALLOWED.includes(emoji)) return;
+
+      const viewerId = socket.data.viewerId;
+      const now = Date.now();
+      const lastSent = reactionCooldowns.get(viewerId) ?? 0;
+      if (now - lastSent < 3000) return; // rate limit: 1 per 3s
+      reactionCooldowns.set(viewerId, now);
+
+      io.to(`presenter:${socket.data.roomCode}`).emit('reaction:new', {
+        emoji,
+        viewerId
+      });
+    });
   });
 }
