@@ -43,4 +43,6 @@ This starts the backend (`node --watch`, port 4000) and the frontend (Vite, port
 
 ```bash
 npm test --prefix backend
+npm test --prefix frontend
+npm run lint --prefix frontend
 ```

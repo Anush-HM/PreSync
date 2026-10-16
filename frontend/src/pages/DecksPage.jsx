@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { listDecks, createDeck, importDeckPdf, deleteDeck } from '../data/decksApi.js';
-import { isLoggedIn, clearAuthToken, getCurrentUser } from '../data/apiConfig.js';
+import { clearAuthToken, getCurrentUser } from '../data/apiConfig.js';
 import './DecksPage.css';
 
 function formatDate(iso) {
