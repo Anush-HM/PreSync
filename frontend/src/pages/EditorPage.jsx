@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as fabric from 'fabric';
 import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap, plainToBlockMap } from '../data/yjsClient.js';
 import { goLive } from '../data/roomsApi.js';
 import { getDeck, addCollaborator, removeCollaborator } from '../data/decksApi.js';
 import { getCurrentUser } from '../data/apiConfig.js';
-import * as Y from 'yjs';
 import './EditorPage.css';
 
 // Canvas dimensions — 16:9 aspect ratio, sized generously so imported
