@@ -75,6 +75,18 @@ export async function getRoomByCode(req, res) {
   res.json({ code: room.code, active: room.active, currentSlideId: room.currentSlideId });
 }
 
+// Codes are reused once a room ends, so a code alone can match several
+// rooms. Resolve the viewer first (viewerId is globally unique), then
+// confirm their room carries this code. This keeps notes working for the
+// right session, including after it ends and its code is handed out again.
+async function findViewerInRoom(code, viewerId) {
+  const viewer = await Viewer.findOne({ viewerId });
+  if (!viewer) return null;
+  const room = await Room.findById(viewer.roomId);
+  if (!room || room.code !== code.toUpperCase()) return null;
+  return viewer;
+}
+
 // No auth — same unauthenticated viewer path as join. Notes are private
 // to the viewer that wrote them, scoped by viewerId + the slide they
 // were written on (see Viewer.js), never exposed to the presenter or
@@ -82,10 +94,7 @@ export async function getRoomByCode(req, res) {
 export async function getViewerNotes(req, res) {
   const { code, viewerId } = req.params;
 
-  const room = await Room.findOne({ code: code.toUpperCase() });
-  if (!room) return res.status(404).json({ error: 'No session with that code' });
-
-  const viewer = await Viewer.findOne({ viewerId, roomId: room._id });
+  const viewer = await findViewerInRoom(code, viewerId);
   if (!viewer) return res.status(404).json({ error: 'Viewer not found in this room' });
 
   res.json({ notes: viewer.notes });
@@ -101,10 +110,7 @@ export async function saveViewerNote(req, res) {
   const { slideId, text } = req.body;
   if (!slideId) return res.status(400).json({ error: 'slideId is required' });
 
-  const room = await Room.findOne({ code: code.toUpperCase() });
-  if (!room) return res.status(404).json({ error: 'No session with that code' });
-
-  const viewer = await Viewer.findOne({ viewerId, roomId: room._id });
+  const viewer = await findViewerInRoom(code, viewerId);
   if (!viewer) return res.status(404).json({ error: 'Viewer not found in this room' });
 
   const existing = viewer.notes.find((n) => n.slideId === slideId);

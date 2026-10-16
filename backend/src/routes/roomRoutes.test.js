@@ -180,20 +180,58 @@ describe('POST /api/rooms/:code/join', () => {
 describe('viewer notes', () => {
   const notesPath = '/api/rooms/abc234/notes/viewer-1';
 
-  it('404s for a viewer that is not in the room', async () => {
-    Room.findOne.mockResolvedValue(makeRoom());
+  it('404s for an unknown viewer', async () => {
     Viewer.findOne.mockResolvedValue(null);
     const res = await server.request('GET', notesPath);
     expect(res.status).toBe(404);
-    expect(Viewer.findOne).toHaveBeenCalledWith({ viewerId: 'viewer-1', roomId: ROOM_ID });
+    expect(Viewer.findOne).toHaveBeenCalledWith({ viewerId: 'viewer-1' });
+  });
+
+  it('404s for a viewer whose room has a different code', async () => {
+    Viewer.findOne.mockResolvedValue(makeViewer([{ slideId: 's1', text: 'private' }]));
+    Room.findById.mockResolvedValue(makeRoom({ code: 'ZZZ999' }));
+    const res = await server.request('GET', notesPath);
+    expect(res.status).toBe(404);
+    expect(res.body.notes).toBeUndefined();
   });
 
   it("returns the viewer's own notes", async () => {
-    Room.findOne.mockResolvedValue(makeRoom());
     Viewer.findOne.mockResolvedValue(makeViewer([{ slideId: 's1', text: 'remember this' }]));
+    Room.findById.mockResolvedValue(makeRoom());
     const res = await server.request('GET', notesPath);
     expect(res.status).toBe(200);
     expect(res.body.notes).toEqual([{ slideId: 's1', text: 'remember this' }]);
+    expect(Room.findById).toHaveBeenCalledWith(ROOM_ID);
+  });
+
+  // Codes are reused after a room ends. Looking the room up by code would
+  // hit whichever room Mongo returned first; the viewer's own room must win.
+  it('finds the viewer in the active room when an ended room shares its code', async () => {
+    const NEW_ROOM_ID = '64b0000000000000000000a2';
+    const oldRoom = makeRoom({ active: false });
+    const newRoom = makeRoom({ _id: NEW_ROOM_ID });
+    Room.findOne.mockResolvedValue(oldRoom);
+    Room.findById.mockImplementation(async (id) => (id === NEW_ROOM_ID ? newRoom : oldRoom));
+    const viewer = { ...makeViewer(), roomId: NEW_ROOM_ID };
+    Viewer.findOne.mockImplementation(async (query) =>
+      query.viewerId === viewer.viewerId && (!query.roomId || query.roomId === viewer.roomId)
+        ? viewer
+        : null
+    );
+
+    const res = await server.request('PUT', notesPath, { body: { slideId: 's1', text: 'new session' } });
+    expect(res.status).toBe(200);
+    expect(viewer.notes[0]).toMatchObject({ slideId: 's1', text: 'new session' });
+    expect(viewer.save).toHaveBeenCalled();
+  });
+
+  it('still saves notes after the session has ended', async () => {
+    const viewer = makeViewer();
+    Viewer.findOne.mockResolvedValue(viewer);
+    Room.findById.mockResolvedValue(makeRoom({ active: false }));
+    const res = await server.request('PUT', notesPath, { body: { slideId: 's1', text: 'after' } });
+    expect(res.status).toBe(200);
+    expect(viewer.save).toHaveBeenCalled();
   });
 
   it('requires a slide id when saving', async () => {
@@ -203,8 +241,8 @@ describe('viewer notes', () => {
 
   it('adds a note for a new slide', async () => {
     const viewer = makeViewer();
-    Room.findOne.mockResolvedValue(makeRoom());
     Viewer.findOne.mockResolvedValue(viewer);
+    Room.findById.mockResolvedValue(makeRoom());
     const res = await server.request('PUT', notesPath, { body: { slideId: 's2', text: 'new' } });
     expect(res.status).toBe(200);
     expect(viewer.notes).toHaveLength(1);
@@ -214,8 +252,8 @@ describe('viewer notes', () => {
 
   it('updates the existing note for a slide instead of adding another', async () => {
     const viewer = makeViewer([{ slideId: 's1', text: 'old', updatedAt: new Date(0) }]);
-    Room.findOne.mockResolvedValue(makeRoom());
     Viewer.findOne.mockResolvedValue(viewer);
+    Room.findById.mockResolvedValue(makeRoom());
     const res = await server.request('PUT', notesPath, { body: { slideId: 's1', text: 'edited' } });
     expect(res.status).toBe(200);
     expect(viewer.notes).toHaveLength(1);
