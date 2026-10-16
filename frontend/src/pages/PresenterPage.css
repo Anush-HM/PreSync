@@ -56,3 +56,16 @@
 
 /* Viewer count badge — separate rule (was accidentally merged with qa-draft-input:focus) */
 .viewer-count-badge{ font-size:12px; color:var(--blue); background:var(--blue-dim); padding:4px 8px; border-radius:5px; }
+
+/* ── Desktop-recommended banner (shown only on mobile) ── */
+.desktop-banner{
+  display:none;
+  background:var(--amber-dim); color:var(--amber);
+  padding:10px 20px; font-size:13px; text-align:center;
+  border-bottom:1px solid var(--amber);
+}
+@media (max-width:768px){
+  .desktop-banner{ display:block; }
+  .presenter-topbar{ padding:10px 14px; gap:10px; flex-wrap:wrap; }
+  .presenter-topbar-center{ display:none; }
+}
