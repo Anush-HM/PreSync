@@ -197,11 +197,43 @@ function ViewerLivePage() {
                       s = Math.min(mX > 960 ? 940/mX : 1, mY > 540 ? 520/mY : 1);
                     }
                   }
-                  return blocks.map((b) => (
-                    <div key={b.id} style={{ position: 'absolute', left: (b.x||0)*s, top: (b.y||0)*s, width: (b.width||300)*s, fontSize: Math.round((b.fontSize||16)*s), whiteSpace: 'pre-wrap', color: '#1a1a2e' }}>
-                      {b.text}
-                    </div>
-                  ));
+                  return blocks.map((b) => {
+                    if (b.type === 'image' && b.imageUrl) {
+                      return (
+                        <img
+                          key={b.id}
+                          src={b.imageUrl}
+                          alt=""
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          style={{
+                            position: 'absolute',
+                            left: (b.x||0)*s,
+                            top: (b.y||0)*s,
+                            width: (b.width||300)*s,
+                            height: 'auto',
+                            objectFit: 'contain',
+                            display: 'block',
+                          }}
+                        />
+                      );
+                    }
+                    return (
+                      <div
+                        key={b.id}
+                        style={{
+                          position: 'absolute',
+                          left: (b.x||0)*s,
+                          top: (b.y||0)*s,
+                          width: (b.width||300)*s,
+                          fontSize: Math.round((b.fontSize||16)*s),
+                          whiteSpace: 'pre-wrap',
+                          color: '#1a1a2e',
+                        }}
+                      >
+                        {b.text}
+                      </div>
+                    );
+                  });
                 })()}
               </div>
               <p className="viewer-slide-label mono">Following the live presentation</p>
