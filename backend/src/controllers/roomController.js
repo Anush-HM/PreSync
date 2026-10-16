@@ -4,6 +4,8 @@ import Viewer from '../models/Viewer.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to avoid ambiguity
 
+const MAX_CODE_ATTEMPTS = 5;
+
 function generateCode() {
   let code = '';
   for (let i = 0; i < 6; i++) {
@@ -24,20 +26,25 @@ export async function goLive(req, res) {
     deck.collaboratorIds.some((id) => id.toString() === req.userId);
   if (!isEditor) return res.status(403).json({ error: 'Not a collaborator on this deck' });
 
-  // Retry on the rare collision against an active room with the same code.
-  let code;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    code = generateCode();
-    const clash = await Room.findOne({ code, active: true });
-    if (!clash) break;
+  // Two rooms can draw the same code at the same moment, so a pre-check
+  // can't rule out a clash. Let the code_active_unique index decide: on a
+  // duplicate-key error, draw a new code and try the insert again.
+  let room;
+  for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS && !room; attempt++) {
+    try {
+      room = await Room.create({
+        code: generateCode(),
+        deckId: deck._id,
+        presenterId: req.userId,
+        currentSlideId: deck.slides[0]?.id
+      });
+    } catch (err) {
+      if (err?.code !== 11000) throw err;
+    }
   }
-
-  const room = await Room.create({
-    code,
-    deckId: deck._id,
-    presenterId: req.userId,
-    currentSlideId: deck.slides[0]?.id
-  });
+  if (!room) {
+    return res.status(503).json({ error: 'Could not allocate a room code, please try again' });
+  }
 
   res.status(201).json({ code: room.code, roomId: room._id });
 }

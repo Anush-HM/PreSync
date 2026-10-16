@@ -77,7 +77,6 @@ describe('POST /api/rooms/go-live', () => {
       collaboratorIds: [COLLAB_ID],
       slides: [{ id: 's1' }, { id: 's2' }]
     });
-    Room.findOne.mockResolvedValue(null);
     Room.create.mockImplementation(async (doc) => ({ _id: ROOM_ID, ...doc }));
 
     const res = await goLive(COLLAB_ID);
@@ -93,16 +92,40 @@ describe('POST /api/rooms/go-live', () => {
     });
   });
 
-  it('retries the code when it clashes with an active room', async () => {
+  it('retries with a new code when the insert hits a duplicate code', async () => {
     Deck.findById.mockResolvedValue({ _id: DECK_ID, ownerId: PRESENTER_ID, collaboratorIds: [], slides: [] });
-    Room.findOne.mockResolvedValueOnce(makeRoom()).mockResolvedValueOnce(null);
-    Room.create.mockImplementation(async (doc) => ({ _id: ROOM_ID, ...doc }));
+    const dup = Object.assign(new Error('E11000 duplicate key error'), { code: 11000 });
+    Room.create
+      .mockRejectedValueOnce(dup)
+      .mockImplementationOnce(async (doc) => ({ _id: ROOM_ID, ...doc }));
 
     const res = await goLive(PRESENTER_ID);
 
     expect(res.status).toBe(201);
-    expect(Room.findOne).toHaveBeenCalledTimes(2);
-    expect(Room.findOne.mock.calls[1][0]).toEqual({ code: res.body.code, active: true });
+    expect(Room.create).toHaveBeenCalledTimes(2);
+    expect(Room.create.mock.calls[1][0].code).toBe(res.body.code);
+  });
+
+  it('returns a clear 503 when every code attempt collides', async () => {
+    Deck.findById.mockResolvedValue({ _id: DECK_ID, ownerId: PRESENTER_ID, collaboratorIds: [], slides: [] });
+    Room.create.mockRejectedValue(Object.assign(new Error('E11000 duplicate key error'), { code: 11000 }));
+
+    const res = await goLive(PRESENTER_ID);
+
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/room code/);
+    expect(Room.create).toHaveBeenCalledTimes(5);
+  });
+
+  it('does not retry on other database errors', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    Deck.findById.mockResolvedValue({ _id: DECK_ID, ownerId: PRESENTER_ID, collaboratorIds: [], slides: [] });
+    Room.create.mockRejectedValue(new Error('connection lost'));
+
+    const res = await goLive(PRESENTER_ID);
+
+    expect(res.status).toBe(500);
+    expect(Room.create).toHaveBeenCalledTimes(1);
   });
 });
 
