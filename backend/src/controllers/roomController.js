@@ -5,6 +5,8 @@ import Question from '../models/Question.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to avoid ambiguity
 
+const MAX_CODE_ATTEMPTS = 5;
+
 function generateCode() {
   let code = '';
   for (let i = 0; i < 6; i++) {
@@ -25,20 +27,25 @@ export async function goLive(req, res) {
     deck.collaboratorIds.some((id) => id.toString() === req.userId);
   if (!isEditor) return res.status(403).json({ error: 'Not a collaborator on this deck' });
 
-  // Retry on the rare collision against an active room with the same code.
-  let code;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    code = generateCode();
-    const clash = await Room.findOne({ code, active: true });
-    if (!clash) break;
+  // Two rooms can draw the same code at the same moment, so a pre-check
+  // can't rule out a clash. Let the code_active_unique index decide: on a
+  // duplicate-key error, draw a new code and try the insert again.
+  let room;
+  for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS && !room; attempt++) {
+    try {
+      room = await Room.create({
+        code: generateCode(),
+        deckId: deck._id,
+        presenterId: req.userId,
+        currentSlideId: deck.slides[0]?.id
+      });
+    } catch (err) {
+      if (err?.code !== 11000) throw err;
+    }
   }
-
-  const room = await Room.create({
-    code,
-    deckId: deck._id,
-    presenterId: req.userId,
-    currentSlideId: deck.slides[0]?.id
-  });
+  if (!room) {
+    return res.status(503).json({ error: 'Could not allocate a room code, please try again' });
+  }
 
   res.status(201).json({ code: room.code, roomId: room._id });
 }
@@ -76,6 +83,18 @@ export async function getRoomByCode(req, res) {
   res.json({ code: room.code, active: room.active, currentSlideId: room.currentSlideId });
 }
 
+// Codes are reused once a room ends, so a code alone can match several
+// rooms. Resolve the viewer first (viewerId is globally unique), then
+// confirm their room carries this code. This keeps notes working for the
+// right session, including after it ends and its code is handed out again.
+async function findViewerInRoom(code, viewerId) {
+  const viewer = await Viewer.findOne({ viewerId });
+  if (!viewer) return null;
+  const room = await Room.findById(viewer.roomId);
+  if (!room || room.code !== code.toUpperCase()) return null;
+  return viewer;
+}
+
 // No auth — same unauthenticated viewer path as join. Notes are private
 // to the viewer that wrote them, scoped by viewerId + the slide they
 // were written on (see Viewer.js), never exposed to the presenter or
@@ -83,10 +102,7 @@ export async function getRoomByCode(req, res) {
 export async function getViewerNotes(req, res) {
   const { code, viewerId } = req.params;
 
-  const room = await Room.findOne({ code: code.toUpperCase() });
-  if (!room) return res.status(404).json({ error: 'No session with that code' });
-
-  const viewer = await Viewer.findOne({ viewerId, roomId: room._id });
+  const viewer = await findViewerInRoom(code, viewerId);
   if (!viewer) return res.status(404).json({ error: 'Viewer not found in this room' });
 
   res.json({ notes: viewer.notes });
@@ -102,10 +118,7 @@ export async function saveViewerNote(req, res) {
   const { slideId, text } = req.body;
   if (!slideId) return res.status(400).json({ error: 'slideId is required' });
 
-  const room = await Room.findOne({ code: code.toUpperCase() });
-  if (!room) return res.status(404).json({ error: 'No session with that code' });
-
-  const viewer = await Viewer.findOne({ viewerId, roomId: room._id });
+  const viewer = await findViewerInRoom(code, viewerId);
   if (!viewer) return res.status(404).json({ error: 'Viewer not found in this room' });
 
   const existing = viewer.notes.find((n) => n.slideId === slideId);

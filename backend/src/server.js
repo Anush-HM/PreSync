@@ -1,36 +1,18 @@
 import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 
+import { createApp } from './app.js';
 import { connectDB } from './config/db.js';
-import authRoutes from './routes/authRoutes.js';
-import deckRoutes from './routes/deckRoutes.js';
-import roomRoutes from './routes/roomRoutes.js';
 import { registerSocketHandlers } from './sockets/index.js';
 import { attachYjsServer } from './yjs/server.js';
-
-const app = express();
 
 // Comma-separated in production (e.g. "https://app.example.com,https://presync.example.com").
 // A single localhost origin is fine for local dev and is what ships by default.
 const allowedOrigins = (process.env.CLIENT_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
 const corsOptions = { origin: allowedOrigins.length > 1 ? allowedOrigins : allowedOrigins[0] };
 
-app.use(cors(corsOptions));
-app.use(express.json());
-
-app.get('/health', (req, res) => res.json({ ok: true }));
-app.use('/api/auth', authRoutes);
-app.use('/api/decks', deckRoutes);
-app.use('/api/rooms', roomRoutes);
-
-// Centralized error handler — controllers can throw/reject freely.
-app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+const app = createApp({ corsOptions });
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: corsOptions });
