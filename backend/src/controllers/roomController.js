@@ -1,6 +1,7 @@
 import Deck from '../models/Deck.js';
 import Room from '../models/Room.js';
 import Viewer from '../models/Viewer.js';
+import Question from '../models/Question.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to avoid ambiguity
 
@@ -137,4 +138,56 @@ export async function endRoom(req, res) {
   io?.to(`room:${room.code}`).emit('room:ended');
 
   res.status(204).end();
+}
+
+// Editor-only: returns past session history for a deck.
+// Includes viewer names (from issue #19) and Q&A log per session.
+export async function getSessionHistory(req, res) {
+  const { deckId } = req.params;
+
+  const deck = await Deck.findById(deckId);
+  if (!deck) return res.status(404).json({ error: 'Deck not found' });
+
+  const isEditor =
+    deck.ownerId.toString() === req.userId ||
+    deck.collaboratorIds.some((id) => id.toString() === req.userId);
+  if (!isEditor) return res.status(403).json({ error: 'Not a collaborator on this deck' });
+
+  const rooms = await Room.find({ deckId, active: false }).sort({ createdAt: -1 }).lean();
+
+  const sessions = await Promise.all(
+    rooms.map(async (room) => {
+      const [viewers, questions] = await Promise.all([
+        Viewer.find({ roomId: room._id })
+          .select('displayName joinedAt')
+          .sort({ joinedAt: 1 })
+          .lean(),
+        Question.find({ roomId: room._id })
+          .select('text draftAnswer status createdAt')
+          .sort({ createdAt: 1 })
+          .lean()
+      ]);
+
+      const lastActivity = questions.at(-1)?.createdAt ?? room.createdAt;
+      const durationMs = new Date(lastActivity) - new Date(room.createdAt);
+      const durationMin = Math.max(0, Math.round(durationMs / 60000));
+
+      return {
+        roomId: room._id,
+        code: room.code,
+        createdAt: room.createdAt,
+        durationMin,
+        viewerCount: viewers.length,
+        viewers: viewers.map((v) => ({ name: v.displayName, joinedAt: v.joinedAt })),
+        questions: questions.map((q) => ({
+          id: q._id,
+          text: q.text,
+          answer: q.draftAnswer || null,
+          status: q.status
+        }))
+      };
+    })
+  );
+
+  res.json({ sessions });
 }
