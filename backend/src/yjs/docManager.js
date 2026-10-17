@@ -6,7 +6,8 @@ import Deck from '../models/Deck.js';
 // spec — Mongo (via Deck.slides) is the source of truth at rest, and this
 // module is the only bridge between the two. Live edits never touch
 // Mongo directly; they flow through the Y.Doc and get flushed here.
-const docs = new Map(); // deckId -> { doc, saveTimer, refCount }
+const docs = new Map(); // deckId -> { doc, saveTimer, refCount, ready }
+const pendingFlushes = new Map(); // deckId -> promise of the final persist after release
 const SAVE_DEBOUNCE_MS = 2000;
 
 function blockToPlain(blockMap) {
@@ -65,25 +66,49 @@ async function persist(deckId, doc) {
 // Returns the shared Y.Doc for a deck, creating + hydrating it from Mongo
 // if this is the first connection to touch it. Bumps a refcount so the
 // doc can be released (and flushed) once every editor disconnects.
+//
+// The entry is registered synchronously, before the Mongo read, so editors
+// who connect while hydration is still in flight wait on the same promise
+// and share one Y.Doc instead of each building their own copy.
 export async function getDoc(deckId) {
-  let entry = docs.get(deckId);
-  if (entry) {
-    entry.refCount += 1;
-    return entry.doc;
+  const existing = docs.get(deckId);
+  if (existing) {
+    existing.refCount += 1;
+    try {
+      return await existing.ready;
+    } catch (err) {
+      existing.refCount -= 1;
+      throw err;
+    }
   }
 
   const doc = new Y.Doc();
-  const slidesArr = doc.getArray('slides');
+  const entry = { doc, saveTimer: null, refCount: 1, ready: null };
+  entry.ready = hydrate(deckId, entry);
+  docs.set(deckId, entry);
+
+  try {
+    return await entry.ready;
+  } catch (err) {
+    if (docs.get(deckId) === entry) docs.delete(deckId);
+    throw err;
+  }
+}
+
+async function hydrate(deckId, entry) {
+  const { doc } = entry;
+
+  // If the previous editing session for this deck is still flushing to
+  // Mongo, wait for it so we don't hydrate from stale slides.
+  const flush = pendingFlushes.get(deckId);
+  if (flush) await flush;
 
   const deck = await Deck.findById(deckId).lean();
   if (deck?.slides?.length) {
     doc.transact(() => {
-      slidesArr.push(deck.slides.map(plainToSlideMap));
+      doc.getArray('slides').push(deck.slides.map(plainToSlideMap));
     });
   }
-
-  entry = { doc, saveTimer: null, refCount: 1 };
-  docs.set(deckId, entry);
 
   doc.on('update', () => {
     if (entry.saveTimer) clearTimeout(entry.saveTimer);
@@ -97,14 +122,19 @@ export async function getDoc(deckId) {
 
 // Called when an editor socket disconnects. Once nobody is left editing
 // this deck, flush immediately and drop the in-memory doc — the next
-// connection will rehydrate fresh from Mongo.
+// connection will rehydrate fresh from Mongo once the flush has landed.
 export function releaseDoc(deckId) {
   const entry = docs.get(deckId);
   if (!entry) return;
   entry.refCount -= 1;
   if (entry.refCount <= 0) {
     if (entry.saveTimer) clearTimeout(entry.saveTimer);
-    persist(deckId, entry.doc).catch((err) => console.error(`Yjs final persist failed for deck ${deckId}:`, err));
     docs.delete(deckId);
+    const flush = persist(deckId, entry.doc)
+      .catch((err) => console.error(`Yjs final persist failed for deck ${deckId}:`, err))
+      .finally(() => {
+        if (pendingFlushes.get(deckId) === flush) pendingFlushes.delete(deckId);
+      });
+    pendingFlushes.set(deckId, flush);
   }
 }

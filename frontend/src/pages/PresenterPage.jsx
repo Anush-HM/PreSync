@@ -138,6 +138,8 @@ function PresenterPage() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // goTo only reads slides.length, which is already a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slideIdx, slides.length]);
 
   const slide = slides[slideIdx];

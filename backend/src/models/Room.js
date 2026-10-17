@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 // { code, deckId, presenterId, createdAt, active }
 const roomSchema = new mongoose.Schema(
   {
-    code: { type: String, required: true, unique: true, uppercase: true, index: true },
+    code: { type: String, required: true, uppercase: true },
     deckId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deck', required: true },
     presenterId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     currentSlideId: { type: String },
@@ -13,8 +13,14 @@ const roomSchema = new mongoose.Schema(
   { timestamps: { createdAt: 'createdAt', updatedAt: false } }
 );
 
-// Only one active room per code at a time; ended rooms can be cleaned up
-// or archived on a schedule rather than deleted, for session history.
+// Only one active room per code at a time. Ended rooms keep their code
+// for session history, so uniqueness is partial: a code frees up again
+// as soon as its room ends. This replaces the old `code_1` unique index,
+// which covered ended rooms too; syncRoomIndexes() drops it on startup.
+roomSchema.index(
+  { code: 1 },
+  { name: 'code_active_unique', unique: true, partialFilterExpression: { active: true } }
+);
 roomSchema.index({ code: 1, active: 1 });
 
 export default mongoose.model('Room', roomSchema);

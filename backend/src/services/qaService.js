@@ -12,11 +12,14 @@ export function buildContext(deck, slideId) {
 
   // current slide + one neighbor on each side, in reading order
   const window = slides.slice(Math.max(0, idx - 1), idx + 2);
+  const texts = window.map((s) => s.blocks.map((b) => b.text?.trim()).filter(Boolean).join('\n'));
+  // Nothing to ground an answer in — return no context so draftAnswer
+  // short-circuits to NOT_IN_DECK instead of calling the API with only
+  // "Slide N:" headers.
+  if (!texts.some(Boolean)) return '';
+
   return window
-    .map((s, i) => {
-      const text = s.blocks.map((b) => b.text).filter(Boolean).join('\n');
-      return `Slide ${s.order ?? idx - 1 + i}:\n${text}`;
-    })
+    .map((s, i) => `Slide ${s.order ?? idx - 1 + i}:\n${texts[i]}`)
     .join('\n\n');
 }
 
