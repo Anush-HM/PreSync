@@ -85,7 +85,16 @@ function ViewerLivePage() {
     });
 
     socket.on('qa:answer', ({ id, question: q, answer }) => {
-      setAnsweredQuestions((prev) => [{ id, question: q, answer }, ...prev]);
+      setAnsweredQuestions((prev) => [{ id, question: q, answer, dismissed: false }, ...prev]);
+    });
+
+    socket.on('question:dismissed', ({ questionId, text }) => {
+      // Only this viewer's socket receives this event (targeted by backend).
+      // Add a dismissed entry to the feed so they know it was seen but skipped.
+      setAnsweredQuestions((prev) => [
+        { id: questionId, question: text, answer: null, dismissed: true },
+        ...prev
+      ]);
     });
 
     socket.on('room:ended', () => {
@@ -270,9 +279,13 @@ function ViewerLivePage() {
             {answeredQuestions.length > 0 && (
               <div className="qa-feed">
                 {answeredQuestions.map((a) => (
-                  <div key={a.id} className="qa-feed-item">
+                  <div key={a.id} className={`qa-feed-item${a.dismissed ? ' qa-feed-item--dismissed' : ''}`}>
                     <p className="qa-feed-q mono">Q: {a.question}</p>
-                    <p className="qa-feed-a">{a.answer}</p>
+                    {a.dismissed ? (
+                      <p className="qa-feed-dismissed">Reviewed but not answered by the presenter.</p>
+                    ) : (
+                      <p className="qa-feed-a">{a.answer}</p>
+                    )}
                   </div>
                 ))}
               </div>
