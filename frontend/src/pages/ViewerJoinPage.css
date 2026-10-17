@@ -16,3 +16,10 @@
 .join-input:focus{ outline:none; border-color:var(--blue); }
 .join-error{ color:var(--amber); font-size:13px; margin-top:14px; }
 .join-submit{ width:100%; justify-content:center; margin-top:24px; padding:12px; }
+
+@media (max-width:480px){
+  .join-page{ padding:16px; align-items:flex-start; padding-top:48px; }
+  .join-card{ padding:28px 20px; }
+  .join-input{ font-size:16px; min-height:44px; } /* 16px prevents iOS zoom */
+  .join-submit{ min-height:44px; }
+}

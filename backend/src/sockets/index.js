@@ -170,7 +170,25 @@ export function registerSocketHandlers(io) {
 
     socket.on('question:dismiss', async ({ questionId }) => {
       if (socket.data.role !== 'presenter') return;
-      await Question.findByIdAndUpdate(questionId, { status: 'dismissed' });
+      const question = await Question.findByIdAndUpdate(
+        questionId,
+        { status: 'dismissed' },
+        { new: true }
+      );
+      if (!question) return;
+
+      // Notify only the viewer who submitted this question, not the whole room.
+      // We scan the broadcast channel for the socket whose viewerId matches.
+      const roomSockets = io.sockets.adapter.rooms.get(`room:${socket.data.roomCode}`);
+      if (roomSockets) {
+        for (const socketId of roomSockets) {
+          const s = io.sockets.sockets.get(socketId);
+          if (s?.data.viewerId === question.viewerId) {
+            s.emit('question:dismissed', { questionId, text: question.text });
+            break;
+          }
+        }
+      }
     });
 
     // Viewer sends a reaction emoji. Transient — never persisted to DB.
