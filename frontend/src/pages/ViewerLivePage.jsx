@@ -47,6 +47,7 @@ function ViewerLivePage() {
   const [connectError, setConnectError] = useState('');
 
   const [notes, setNotes] = useState({}); // { slideId: text }
+  const [notesLoaded, setNotesLoaded] = useState(false); // gate: prevent typing before server data arrives
   const [question, setQuestion] = useState('');
   const [justSubmitted, setJustSubmitted] = useState(false);
   const [answeredQuestions, setAnsweredQuestions] = useState([]); // public feed for the room
@@ -85,7 +86,16 @@ function ViewerLivePage() {
     });
 
     socket.on('qa:answer', ({ id, question: q, answer }) => {
-      setAnsweredQuestions((prev) => [{ id, question: q, answer }, ...prev]);
+      setAnsweredQuestions((prev) => [{ id, question: q, answer, dismissed: false }, ...prev]);
+    });
+
+    socket.on('question:dismissed', ({ questionId, text }) => {
+      // Only this viewer's socket receives this event (targeted by backend).
+      // Add a dismissed entry to the feed so they know it was seen but skipped.
+      setAnsweredQuestions((prev) => [
+        { id: questionId, question: text, answer: null, dismissed: true },
+        ...prev
+      ]);
     });
 
     socket.on('room:ended', () => {
@@ -106,7 +116,15 @@ function ViewerLivePage() {
   useEffect(() => {
     if (!viewerId) return;
     fetchNotes(roomCode, viewerId).then((loaded) => {
-      setNotes((prev) => ({ ...loaded, ...prev }));
+      // Server data wins for any existing keys — local prev only wins for
+      // keys the user has typed in THIS session that the server doesn't know
+      // about yet (new slides not yet saved). This prevents a refresh from
+      // wiping saved notes when the fetch resolves after the user starts typing.
+      setNotes((prev) => ({ ...prev, ...loaded }));
+      setNotesLoaded(true);
+    }).catch(() => {
+      // Fetch failed (e.g. offline) — still unlock so the user can type.
+      setNotesLoaded(true);
     });
   }, [roomCode, viewerId]);
 
@@ -197,11 +215,43 @@ function ViewerLivePage() {
                       s = Math.min(mX > 960 ? 940/mX : 1, mY > 540 ? 520/mY : 1);
                     }
                   }
-                  return blocks.map((b) => (
-                    <div key={b.id} style={{ position: 'absolute', left: (b.x||0)*s, top: (b.y||0)*s, width: (b.width||300)*s, fontSize: Math.round((b.fontSize||16)*s), whiteSpace: 'pre-wrap', color: '#1a1a2e' }}>
-                      {b.text}
-                    </div>
-                  ));
+                  return blocks.map((b) => {
+                    if (b.type === 'image' && b.imageUrl) {
+                      return (
+                        <img
+                          key={b.id}
+                          src={b.imageUrl}
+                          alt=""
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          style={{
+                            position: 'absolute',
+                            left: (b.x||0)*s,
+                            top: (b.y||0)*s,
+                            width: (b.width||300)*s,
+                            height: 'auto',
+                            objectFit: 'contain',
+                            display: 'block',
+                          }}
+                        />
+                      );
+                    }
+                    return (
+                      <div
+                        key={b.id}
+                        style={{
+                          position: 'absolute',
+                          left: (b.x||0)*s,
+                          top: (b.y||0)*s,
+                          width: (b.width||300)*s,
+                          fontSize: Math.round((b.fontSize||16)*s),
+                          whiteSpace: 'pre-wrap',
+                          color: '#1a1a2e',
+                        }}
+                      >
+                        {b.text}
+                      </div>
+                    );
+                  });
                 })()}
               </div>
               <p className="viewer-slide-label mono">Following the live presentation</p>
@@ -212,13 +262,17 @@ function ViewerLivePage() {
         <aside className="viewer-sidebar">
           <section className="notes-block">
             <h3>Your notes — this slide</h3>
-            <textarea
-              className="notes-textarea"
-              placeholder="Private notes, tied to this slide..."
-              value={pinnedSlide ? notes[pinnedSlide.slideId] ?? '' : ''}
-              onChange={handleNoteChange}
-              disabled={!pinnedSlide || sessionEnded}
-            />
+            {!notesLoaded ? (
+              <p className="notes-loading mono">Loading notes…</p>
+            ) : (
+              <textarea
+                className="notes-textarea"
+                placeholder="Private notes, tied to this slide..."
+                value={pinnedSlide ? notes[pinnedSlide.slideId] ?? '' : ''}
+                onChange={handleNoteChange}
+                disabled={!pinnedSlide || sessionEnded}
+              />
+            )}
           </section>
 
           <section className="qa-block">
@@ -238,9 +292,13 @@ function ViewerLivePage() {
             {answeredQuestions.length > 0 && (
               <div className="qa-feed">
                 {answeredQuestions.map((a) => (
-                  <div key={a.id} className="qa-feed-item">
+                  <div key={a.id} className={`qa-feed-item${a.dismissed ? ' qa-feed-item--dismissed' : ''}`}>
                     <p className="qa-feed-q mono">Q: {a.question}</p>
-                    <p className="qa-feed-a">{a.answer}</p>
+                    {a.dismissed ? (
+                      <p className="qa-feed-dismissed">Reviewed but not answered by the presenter.</p>
+                    ) : (
+                      <p className="qa-feed-a">{a.answer}</p>
+                    )}
                   </div>
                 ))}
               </div>

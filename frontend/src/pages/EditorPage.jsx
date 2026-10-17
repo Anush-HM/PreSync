@@ -439,6 +439,10 @@ function EditorPage() {
         </button>
       </header>
 
+      <div className="desktop-banner">
+        💻 For the best editing experience, use a desktop browser.
+      </div>
+
       {showCollaborators && (
         <div className="collaborators-panel">
           <div className="collaborators-list">
