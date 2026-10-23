@@ -8,7 +8,8 @@ const roomSchema = new mongoose.Schema(
     deckId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deck', required: true },
     presenterId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     currentSlideId: { type: String },
-    active: { type: Boolean, default: true }
+    active: { type: Boolean, default: true },
+    endedAt: { type: Date } // set when the presenter ends the session
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: false } }
 );
