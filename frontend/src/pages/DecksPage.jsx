@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { listDecks, createDeck, importDeckPdf, deleteDeck } from '../data/decksApi.js';
+import { listDecks, createDeck, importDeckFile, deleteDeck, IMPORT_ACCEPT } from '../data/decksApi.js';
 import { clearAuthToken, getCurrentUser } from '../data/apiConfig.js';
 import SessionHistoryModal from '../components/SessionHistoryModal.jsx';
 import './DecksPage.css';
@@ -62,10 +62,10 @@ function DecksPage() {
     setImporting(true);
     setError('');
     try {
-      const deck = await importDeckPdf(file);
+      const deck = await importDeckFile(file);
       navigate(`/editor/${deck.id || deck._id}`);
     } catch (err) {
-      setError(err.message || 'Could not import that PDF');
+      setError(err.message || 'Could not import that file');
     } finally {
       setImporting(false);
     }
@@ -120,9 +120,9 @@ function DecksPage() {
             <h1>Your decks</h1>
           </div>
           <div className="decks-head-actions">
-            <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handleFileSelected} style={{ display: 'none' }} />
+            <input ref={fileInputRef} type="file" accept={IMPORT_ACCEPT} onChange={handleFileSelected} style={{ display: 'none' }} />
             <button className="btn btn-ghost" onClick={handleImportClick} disabled={importing}>
-              {importing ? 'Importing…' : '↑ Import PDF'}
+              {importing ? 'Importing…' : '↑ Import PDF / PPTX'}
             </button>
             <button className="btn btn-amber" onClick={handleNewDeck}>+ New deck</button>
           </div>
@@ -138,7 +138,7 @@ function DecksPage() {
         ) : decks.length === 0 ? (
           <div className="decks-empty-state">
             <p className="decks-empty-icon">📄</p>
-            <p className="decks-empty">No decks yet — import a PDF or start a new deck.</p>
+            <p className="decks-empty">No decks yet — import a PDF or PowerPoint (.pptx), or start a new deck.</p>
           </div>
         ) : (
           <div className="deck-grid">
