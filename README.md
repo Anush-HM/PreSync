@@ -39,6 +39,12 @@ npm run dev
 
 This starts the backend (`node --watch`, port 4000) and the frontend (Vite, port 5173) together.
 
+## Importing, editing and exporting decks
+
+- **Import:** PDF (`.pdf`) and PowerPoint (`.pptx`), up to 25MB, from the Decks page. Text comes in as editable text boxes with position, size, font, bold/italic/underline, colour and alignment; PowerPoint pictures (PNG/JPEG/GIF up to 1.5MB each, 8MB per deck), slide background colours and speaker notes come along too. Legacy `.ppt` is refused with a prompt to re-save it as `.pptx`. Tables, charts and SmartArt are not extracted.
+- **Edit:** font, size, bold/italic/underline, colour, alignment, line spacing, layer order, slide background, speaker notes, slide reorder/duplicate, undo/redo (Ctrl+Z / Ctrl+Shift+Z). Edits autosave through the live co-editing session; **Save** (Ctrl+S) writes them to the database immediately.
+- **Export:** *Export* in the editor downloads the deck as `.pdf` or `.pptx` (`GET /api/decks/:id/export?format=pdf|pptx`). PPTX keeps text editable, with speaker notes. PDF uses the standard PDF fonts (closest match to the chosen family) and covers Latin-1 text only.
+
 ## Tests
 
 ```bash

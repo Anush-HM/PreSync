@@ -140,7 +140,8 @@ export function registerSocketHandlers(io) {
           socket.emit('slide:sync', {
             slideId: slide.id,
             blocks: slide.blocks,
-            backgroundImageUrl: slide.backgroundImageUrl
+            backgroundImageUrl: slide.backgroundImageUrl,
+            backgroundColor: slide.backgroundColor
           });
         }
       }
@@ -174,7 +175,8 @@ export function registerSocketHandlers(io) {
       io.to(`room:${socket.data.roomCode}`).emit('slide:sync', {
         slideId: slide.id,
         blocks: slide.blocks,
-        backgroundImageUrl: slide.backgroundImageUrl
+        backgroundImageUrl: slide.backgroundImageUrl,
+        backgroundColor: slide.backgroundColor
       });
     });
 

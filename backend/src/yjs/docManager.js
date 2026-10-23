@@ -10,30 +10,55 @@ const docs = new Map(); // deckId -> { doc, saveTimer, refCount, ready }
 const pendingFlushes = new Map(); // deckId -> promise of the final persist after release
 const SAVE_DEBOUNCE_MS = 2000;
 
-function blockToPlain(blockMap) {
-  return {
+// Optional fields copied verbatim between Mongo and the Y.Doc when set.
+// Keep these in step with the Deck model and frontend/src/data/yjsClient.js.
+export const BLOCK_OPTIONAL_KEYS = [
+  'fontFamily',
+  'fontWeight',
+  'fontStyle',
+  'underline',
+  'fill',
+  'textAlign',
+  'lineHeight',
+  'height',
+  'imageUrl'
+];
+export const SLIDE_OPTIONAL_KEYS = ['backgroundImageUrl', 'backgroundColor'];
+
+function copyOptional(keys, read, write) {
+  for (const key of keys) {
+    const value = read(key);
+    if (value !== undefined && value !== null && value !== '') write(key, value);
+  }
+}
+
+export function blockToPlain(blockMap) {
+  const plain = {
     id: blockMap.get('id'),
     type: blockMap.get('type') || 'textbox',
     x: blockMap.get('x'),
     y: blockMap.get('y'),
     width: blockMap.get('width'),
     fontSize: blockMap.get('fontSize') ?? 16,
-    text: blockMap.get('text') ?? '',
-    imageUrl: blockMap.get('imageUrl') || undefined
+    text: blockMap.get('text') ?? ''
   };
+  copyOptional(BLOCK_OPTIONAL_KEYS, (k) => blockMap.get(k), (k, v) => (plain[k] = v));
+  return plain;
 }
 
-function slideToPlain(slideMap) {
-  return {
+export function slideToPlain(slideMap) {
+  const plain = {
     id: slideMap.get('id'),
     order: slideMap.get('order'),
-    backgroundImageUrl: slideMap.get('backgroundImageUrl') || undefined,
     needsImageFallback: !!slideMap.get('needsImageFallback'),
+    notes: slideMap.get('notes') ?? '',
     blocks: slideMap.get('blocks').toArray().map(blockToPlain)
   };
+  copyOptional(SLIDE_OPTIONAL_KEYS, (k) => slideMap.get(k), (k, v) => (plain[k] = v));
+  return plain;
 }
 
-function plainToBlockMap(block) {
+export function plainToBlockMap(block) {
   const m = new Y.Map();
   m.set('id', block.id);
   m.set('type', block.type || 'textbox');
@@ -42,25 +67,31 @@ function plainToBlockMap(block) {
   m.set('width', block.width);
   m.set('fontSize', block.fontSize ?? 16);
   m.set('text', block.text ?? '');
-  if (block.imageUrl) m.set('imageUrl', block.imageUrl);
+  copyOptional(BLOCK_OPTIONAL_KEYS, (k) => block[k], (k, v) => m.set(k, v));
   return m;
 }
 
-function plainToSlideMap(slide) {
+export function plainToSlideMap(slide) {
   const m = new Y.Map();
   m.set('id', slide.id);
   m.set('order', slide.order);
-  if (slide.backgroundImageUrl) m.set('backgroundImageUrl', slide.backgroundImageUrl);
   m.set('needsImageFallback', !!slide.needsImageFallback);
+  m.set('notes', slide.notes ?? '');
+  copyOptional(SLIDE_OPTIONAL_KEYS, (k) => slide[k], (k, v) => m.set(k, v));
   const blocks = new Y.Array();
   blocks.push((slide.blocks || []).map(plainToBlockMap));
   m.set('blocks', blocks);
   return m;
 }
 
+// Slides are re-numbered on the way out so `order` always matches the
+// array position, even after editors reorder or delete slides.
+export function docToSlides(doc) {
+  return doc.getArray('slides').toArray().map((slideMap, i) => ({ ...slideToPlain(slideMap), order: i }));
+}
+
 async function persist(deckId, doc) {
-  const slides = doc.getArray('slides').toArray().map(slideToPlain);
-  await Deck.findByIdAndUpdate(deckId, { slides }).exec();
+  await Deck.findByIdAndUpdate(deckId, { slides: docToSlides(doc) }).exec();
 }
 
 // Returns the shared Y.Doc for a deck, creating + hydrating it from Mongo
@@ -137,4 +168,24 @@ export function releaseDoc(deckId) {
       });
     pendingFlushes.set(deckId, flush);
   }
+}
+
+// Writes a deck's live Y.Doc to Mongo right away instead of waiting for
+// the debounce, so an explicit "Save" or an export sees the latest
+// edits. Returns false when nobody is editing the deck (Mongo is already
+// current, apart from a release flush that is awaited here).
+export async function flushDoc(deckId) {
+  const entry = docs.get(deckId);
+  if (!entry) {
+    const flush = pendingFlushes.get(deckId);
+    if (flush) await flush;
+    return false;
+  }
+  const doc = await entry.ready;
+  if (entry.saveTimer) {
+    clearTimeout(entry.saveTimer);
+    entry.saveTimer = null;
+  }
+  await persist(deckId, doc);
+  return true;
 }

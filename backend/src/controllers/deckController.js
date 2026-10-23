@@ -1,5 +1,6 @@
 import Deck from '../models/Deck.js';
 import User from '../models/User.js';
+import { flushDoc } from '../yjs/docManager.js';
 
 // Every handler here assumes requireAuth has already run — req.userId is
 // a real editor. Access is scoped to decks the user owns or collaborates
@@ -82,6 +83,36 @@ export async function updateDeckSlides(req, res) {
   deck.slides = req.body.slides;
   await deck.save();
   res.json(deck);
+}
+
+const MAX_TITLE_LENGTH = 200;
+
+// Any editor can rename a deck.
+export async function updateDeckMeta(req, res) {
+  const deck = await Deck.findById(req.params.deckId);
+  if (!deck) return res.status(404).json({ error: 'Deck not found' });
+  if (!isEditorOf(deck, req.userId)) return res.status(403).json({ error: 'Not a collaborator on this deck' });
+
+  const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+  if (!title) return res.status(400).json({ error: 'title is required' });
+  if (title.length > MAX_TITLE_LENGTH) {
+    return res.status(400).json({ error: `title must be ${MAX_TITLE_LENGTH} characters or fewer` });
+  }
+
+  deck.title = title;
+  await deck.save();
+  res.json(await serializeDeck(deck, req.userId));
+}
+
+// Explicit "Save now": flushes the live Yjs doc (if anyone is editing)
+// to Mongo immediately rather than waiting for the debounced persist.
+export async function saveDeck(req, res) {
+  const deck = await Deck.findById(req.params.deckId);
+  if (!deck) return res.status(404).json({ error: 'Deck not found' });
+  if (!isEditorOf(deck, req.userId)) return res.status(403).json({ error: 'Not a collaborator on this deck' });
+
+  const flushed = await flushDoc(req.params.deckId);
+  res.json({ savedAt: new Date().toISOString(), flushed });
 }
 
 // Owner-only: invite another user to co-edit this deck by email. This is

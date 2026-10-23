@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { createSocket } from '../data/socket.js';
 import { fetchNotes, saveNote } from '../data/notesApi.js';
+import SlideView from '../components/SlideView.jsx';
 import './ViewerLivePage.css';
 
 const NOTE_SAVE_DEBOUNCE_MS = 600;
@@ -79,8 +80,8 @@ function ViewerLivePage() {
       // actual content snapshot follows right after as slide:sync.
     });
 
-    socket.on('slide:sync', ({ slideId, blocks, backgroundImageUrl }) => {
-      const slide = { slideId, blocks: blocks || [], backgroundImageUrl };
+    socket.on('slide:sync', ({ slideId, blocks, backgroundImageUrl, backgroundColor }) => {
+      const slide = { slideId, blocks: blocks || [], backgroundImageUrl, backgroundColor };
       setLiveSlide(slide);
       setPinnedSlide((prev) => (prev ? prev : slide)); // first snapshot pins immediately
     });
@@ -199,66 +200,7 @@ function ViewerLivePage() {
             <p className="viewer-slide-label mono">Waiting for the presenter to share a slide…</p>
           ) : (
             <>
-              <div
-                className="stage-slide"
-                style={
-                  pinnedSlide.backgroundImageUrl
-                    ? { backgroundImage: `url(${pinnedSlide.backgroundImageUrl})`, backgroundSize: 'cover' }
-                    : undefined
-                }
-              >
-                {(() => {
-                  const blocks = pinnedSlide.blocks || [];
-                  let s = 1;
-                  if (blocks.length > 0) {
-                    let mX = 0, mY = 0;
-                    blocks.forEach(b => {
-                      mX = Math.max(mX, (b.x||0) + (b.width||300));
-                      mY = Math.max(mY, (b.y||0) + (b.fontSize||16)*2);
-                    });
-                    if (mX > 960 || mY > 540) {
-                      s = Math.min(mX > 960 ? 940/mX : 1, mY > 540 ? 520/mY : 1);
-                    }
-                  }
-                  return blocks.map((b) => {
-                    if (b.type === 'image' && b.imageUrl) {
-                      return (
-                        <img
-                          key={b.id}
-                          src={b.imageUrl}
-                          alt=""
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                          style={{
-                            position: 'absolute',
-                            left: (b.x||0)*s,
-                            top: (b.y||0)*s,
-                            width: (b.width||300)*s,
-                            height: 'auto',
-                            objectFit: 'contain',
-                            display: 'block',
-                          }}
-                        />
-                      );
-                    }
-                    return (
-                      <div
-                        key={b.id}
-                        style={{
-                          position: 'absolute',
-                          left: (b.x||0)*s,
-                          top: (b.y||0)*s,
-                          width: (b.width||300)*s,
-                          fontSize: Math.round((b.fontSize||16)*s),
-                          whiteSpace: 'pre-wrap',
-                          color: '#1a1a2e',
-                        }}
-                      >
-                        {b.text}
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
+              <SlideView slide={pinnedSlide} />
               <p className="viewer-slide-label mono">Following the live presentation</p>
             </>
           )}

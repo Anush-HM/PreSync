@@ -1,18 +1,53 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as fabric from 'fabric';
-import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap, plainToBlockMap } from '../data/yjsClient.js';
+import * as Y from 'yjs';
+import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from '../data/yjsClient.js';
+import {
+  addBlock,
+  deleteBlocks,
+  deleteSlide,
+  duplicateBlocks,
+  duplicateSlide,
+  insertSlide,
+  makeBlankSlide,
+  moveSlide,
+  newId,
+  restackBlock,
+  updateBlocks,
+  updateSlide
+} from '../data/deckOps.js';
+import {
+  CANVAS_HEIGHT,
+  CANVAS_WIDTH,
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_LINE_HEIGHT,
+  DEFAULT_SLIDE_BACKGROUND,
+  DEFAULT_TEXT_COLOR,
+  FONT_FAMILIES,
+  SLIDE_BACKGROUNDS,
+  TEXT_ALIGNMENTS,
+  TEXT_COLORS,
+  legacyFitScale
+} from '../data/slideFormat.js';
 import { goLive } from '../data/roomsApi.js';
-import { getDeck, addCollaborator, removeCollaborator } from '../data/decksApi.js';
+import {
+  getDeck,
+  addCollaborator,
+  removeCollaborator,
+  renameDeck,
+  saveDeck,
+  downloadDeckExport,
+  EXPORT_FORMATS
+} from '../data/decksApi.js';
 import { getCurrentUser } from '../data/apiConfig.js';
 import './EditorPage.css';
 
-// Canvas dimensions — 16:9 aspect ratio, sized generously so imported
-// PDF content (which sits in pdfjs user-space, typically ~720×540 for
-// landscape or ~612×792 for portrait) renders without clipping.
-const CANVAS_WIDTH = 960;
-const CANVAS_HEIGHT = 540;
 const CURSOR_COLORS = ['#4FA8FF', '#FFB454', '#6EE7B7', '#F472B6', '#A78BFA', '#F87171'];
+const ALIGN_ICONS = { left: '⇤', center: '↔', right: '⇥', justify: '☰' };
+const LINE_HEIGHTS = [1, 1.16, 1.5, 2];
+// Origin for seeding a brand-new deck — kept out of the undo history.
+const SEED_ORIGIN = 'seed';
 
 function colorForUser(id) {
   let hash = 0;
@@ -21,17 +56,50 @@ function colorForUser(id) {
   return CURSOR_COLORS[hash % CURSOR_COLORS.length];
 }
 
-function makeBlankSlide(order) {
+// Fabric 7 positions objects by their centre by default; blocks are
+// stored by their top-left corner, so every object is pinned to that.
+const BASE_OBJECT_PROPS = { originX: 'left', originY: 'top', strokeWidth: 0 };
+
+function textboxProps(block, scale) {
   return {
-    id: `slide-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    order,
-    backgroundImageUrl: null,
-    needsImageFallback: false,
-    blocks: [
-      { id: `b-${Date.now()}-t`, type: 'textbox', x: 80, y: 60, width: 700, fontSize: 36, text: 'New slide' },
-      { id: `b-${Date.now()}-s`, type: 'textbox', x: 80, y: 130, width: 700, fontSize: 18, text: 'Click to add text' }
-    ]
+    ...BASE_OBJECT_PROPS,
+    left: (block.x || 0) * scale,
+    top: (block.y || 0) * scale,
+    width: (block.width || 300) * scale,
+    scaleX: 1,
+    scaleY: 1,
+    fontSize: (block.fontSize || 16) * scale,
+    text: block.text || '',
+    fill: block.fill || DEFAULT_TEXT_COLOR,
+    fontFamily: block.fontFamily || DEFAULT_FONT_FAMILY,
+    fontWeight: block.fontWeight || 'normal',
+    fontStyle: block.fontStyle || 'normal',
+    underline: !!block.underline,
+    textAlign: block.textAlign || 'left',
+    lineHeight: block.lineHeight || DEFAULT_LINE_HEIGHT
   };
+}
+
+function imageProps(block, img, scale) {
+  const width = (block.width || img.width) * scale;
+  const height = block.height ? block.height * scale : (img.height * width) / img.width;
+  return {
+    ...BASE_OBJECT_PROPS,
+    left: (block.x || 0) * scale,
+    top: (block.y || 0) * scale,
+    scaleX: width / img.width,
+    scaleY: height / img.height
+  };
+}
+
+function formatTime(iso) {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function isTypingInField() {
+  const el = document.activeElement;
+  if (!el) return false;
+  return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
 }
 
 function EditorPage() {
@@ -44,21 +112,37 @@ function EditorPage() {
   const [goingLive, setGoingLive] = useState(false);
 
   const [deckMeta, setDeckMeta] = useState(null);
+  const [titleDraft, setTitleDraft] = useState(null); // non-null while renaming
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [inviteBusy, setInviteBusy] = useState(false);
   const [showCollaborators, setShowCollaborators] = useState(false);
+  const [showNotes, setShowNotes] = useState(true);
   const [peers, setPeers] = useState([]);
 
-  // Toolbar state
-  const [selectedObj, setSelectedObj] = useState(null);
+  // Sync/save state
+  const [syncStatus, setSyncStatus] = useState('connecting');
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(null);
+  const [saveError, setSaveError] = useState('');
+  const [showExport, setShowExport] = useState(false);
+  const [exporting, setExporting] = useState(null); // format being exported
+  const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
+
+  // Toolbar state: ids of the selected blocks on the active slide. Their
+  // formatting is read from `slides`, so it always reflects Yjs.
+  const [selectedIds, setSelectedIds] = useState([]);
   const [zoom, setZoom] = useState(1);
 
   const canvasElRef = useRef(null);
   const fabricRef = useRef(null);
   const yjsRef = useRef(null);
-  const blockMapsRef = useRef(new Map());
+  const undoRef = useRef(null);
   const applyingRemoteRef = useRef(false);
+  const renderedSlideIdRef = useRef(null);
+  const scaleRef = useRef(1);
+  const activeSlideIdxRef = useRef(0);
+  activeSlideIdxRef.current = activeSlideIdx;
 
   useEffect(() => {
     getDeck(deckId)
@@ -71,6 +155,16 @@ function EditorPage() {
     const yjs = connectYjsDoc(deckId);
     yjsRef.current = yjs;
     const slidesArr = getSlidesArray(yjs.doc);
+
+    // Only local edits are undoable; remote ones arrive with the socket
+    // as their transaction origin and are left alone.
+    const undoManager = new Y.UndoManager(slidesArr, { captureTimeout: 500 });
+    undoRef.current = undoManager;
+    const syncHistory = () =>
+      setUndoState({ canUndo: undoManager.undoStack.length > 0, canRedo: undoManager.redoStack.length > 0 });
+    undoManager.on('stack-item-added', syncHistory);
+    undoManager.on('stack-item-popped', syncHistory);
+    undoManager.on('stack-cleared', syncHistory);
 
     const me = getCurrentUser();
     const myClientId = yjs.doc.clientID;
@@ -99,19 +193,20 @@ function EditorPage() {
     slidesArr.observeDeep(syncSlidesState);
     syncSlidesState();
 
-    // If the Yjs doc is still empty after the backend has had time to
-    // hydrate it, seed with a single blank slide so the editor isn't
-    // empty. Only fires for brand-new decks with no content.
-    const seedTimer = setTimeout(() => {
-      if (slidesArr.length === 0) {
+    // Seed a brand-new, empty deck with one blank slide — but only once
+    // the server has sent its copy, so we never race real content.
+    const offStatus = yjs.onStatus((status) => {
+      setSyncStatus(status);
+      if (status === 'synced' && slidesArr.length === 0) {
         yjs.doc.transact(() => {
           slidesArr.push([plainToSlideMap(makeBlankSlide(0))]);
-        });
+        }, SEED_ORIGIN);
       }
-    }, 1200);
+    });
 
     return () => {
-      clearTimeout(seedTimer);
+      offStatus();
+      undoManager.destroy();
       slidesArr.unobserveDeep(syncSlidesState);
       yjs.awareness.off('change', syncPeers);
       yjs.disconnect();
@@ -124,49 +219,80 @@ function EditorPage() {
     yjs.awareness.setLocalStateField('activeSlideIdx', activeSlideIdx);
   }, [activeSlideIdx]);
 
-  // Rebuild block ID -> Y.Map lookup
+  // Keep the active index valid when slides are removed (locally or by a peer).
   useEffect(() => {
-    const yjs = yjsRef.current;
-    if (!yjs) return;
-    const slidesArr = getSlidesArray(yjs.doc);
-    const slideMap = slidesArr.get(activeSlideIdx);
-    if (!slideMap) return;
-    const blocksArr = slideMap.get('blocks');
-    const map = new Map();
-    blocksArr.toArray().forEach((blockMap) => map.set(blockMap.get('id'), blockMap));
-    blockMapsRef.current = map;
-  }, [slides, activeSlideIdx]);
+    if (slides.length > 0 && activeSlideIdx > slides.length - 1) setActiveSlideIdx(slides.length - 1);
+  }, [slides.length, activeSlideIdx]);
 
   // --- Fabric canvas init
   useEffect(() => {
     const canvas = new fabric.Canvas(canvasElRef.current, {
       width: CANVAS_WIDTH,
       height: CANVAS_HEIGHT,
-      backgroundColor: '#ffffff',
+      backgroundColor: DEFAULT_SLIDE_BACKGROUND,
       preserveObjectStacking: true,
     });
     fabricRef.current = canvas;
+    renderedSlideIdRef.current = null;
 
-    function writeBlockChange(obj) {
-      if (applyingRemoteRef.current || !obj?.data?.blockId) return;
-      const blockMap = blockMapsRef.current.get(obj.data.blockId);
+    // Reads an object's geometry back into slide coordinates. Works for
+    // objects inside a multi-selection too, whose own left/top are
+    // relative to the selection group.
+    function blockGeometry(obj) {
+      const s = scaleRef.current;
+      const rect = obj.getBoundingRect();
+      const scaling = obj.getObjectScaling();
+      const geometry = { x: Math.round(rect.left / s), y: Math.round(rect.top / s) };
+      if (obj.type === 'image') {
+        geometry.width = Math.round(rect.width / s);
+        geometry.height = Math.round(rect.height / s);
+      } else {
+        geometry.width = Math.round((obj.width * scaling.x) / s);
+        geometry.fontSize = Math.max(4, Math.round((obj.fontSize * scaling.y) / s));
+      }
+      return geometry;
+    }
+
+    function writeObjects(objects) {
       const doc = yjsRef.current?.doc;
-      if (!blockMap || !doc) return;
+      if (applyingRemoteRef.current || !doc) return;
+      const blocksArr = getSlidesArray(doc).get(activeSlideIdxRef.current)?.get('blocks');
+      if (!blocksArr) return;
+      const byId = new Map(blocksArr.toArray().map((m) => [m.get('id'), m]));
       doc.transact(() => {
-        blockMap.set('x', Math.round(obj.left));
-        blockMap.set('y', Math.round(obj.top));
-        blockMap.set('width', Math.round(obj.width * (obj.scaleX || 1)));
-        if (typeof obj.text === 'string') blockMap.set('text', obj.text);
+        objects.forEach((obj) => {
+          const blockMap = byId.get(obj.data?.blockId);
+          if (!blockMap) return;
+          Object.entries(blockGeometry(obj)).forEach(([k, v]) => blockMap.set(k, v));
+          if (typeof obj.text === 'string') blockMap.set('text', obj.text);
+        });
       });
     }
 
-    canvas.on('object:modified', (e) => writeBlockChange(e.target));
-    canvas.on('text:changed', (e) => writeBlockChange(e.target));
+    function writeText(obj) {
+      const doc = yjsRef.current?.doc;
+      if (applyingRemoteRef.current || !doc || !obj?.data?.blockId) return;
+      const blocksArr = getSlidesArray(doc).get(activeSlideIdxRef.current)?.get('blocks');
+      const blockMap = blocksArr?.toArray().find((m) => m.get('id') === obj.data.blockId);
+      if (blockMap && blockMap.get('text') !== obj.text) {
+        doc.transact(() => blockMap.set('text', obj.text));
+      }
+    }
 
-    // Track selection for the toolbar
-    canvas.on('selection:created', (e) => setSelectedObj(e.selected?.[0] || null));
-    canvas.on('selection:updated', (e) => setSelectedObj(e.selected?.[0] || null));
-    canvas.on('selection:cleared', () => setSelectedObj(null));
+    canvas.on('object:modified', (e) => {
+      const target = e.target;
+      if (!target) return;
+      writeObjects(target.type === 'activeselection' ? target.getObjects() : [target]);
+    });
+    canvas.on('text:changed', (e) => writeText(e.target));
+    canvas.on('text:editing:exited', (e) => writeText(e.target));
+
+    const syncSelection = () => {
+      setSelectedIds(canvas.getActiveObjects().map((o) => o.data?.blockId).filter(Boolean));
+    };
+    canvas.on('selection:created', syncSelection);
+    canvas.on('selection:updated', syncSelection);
+    canvas.on('selection:cleared', syncSelection);
 
     // Cursor broadcast
     let lastSent = 0;
@@ -184,199 +310,295 @@ function EditorPage() {
     return () => canvas.dispose();
   }, [deckId]);
 
-  // --- Render the active slide's blocks onto the Fabric canvas
+  // --- Reconcile the active slide's blocks onto the Fabric canvas.
+  // Objects are updated in place rather than rebuilt, so a block being
+  // typed into keeps its caret while edits (local or remote) land.
   useEffect(() => {
     const canvas = fabricRef.current;
     const slide = slides[activeSlideIdx];
     if (!canvas || !slide) return;
 
     applyingRemoteRef.current = true;
-    canvas.clear();
-    canvas.backgroundColor = '#ffffff';
-    setSelectedObj(null);
 
-    if (slide.needsImageFallback && slide.backgroundImageUrl) {
-      fabric.FabricImage.fromURL(slide.backgroundImageUrl).then((img) => {
-        canvas.backgroundImage = img;
-        canvas.renderAll();
-      }).catch(() => {});
+    if (renderedSlideIdRef.current !== slide.id) {
+      canvas.discardActiveObject();
+      canvas.clear();
+      canvas.backgroundImage = undefined;
+      renderedSlideIdRef.current = slide.id;
+      setSelectedIds([]);
     }
 
-    // Auto-scale: if any block coordinates exceed the canvas bounds
-    // (old decks imported before the PDF coordinate normalization fix),
-    // compute a uniform scale factor to fit all content inside the canvas.
-    let scale = 1;
-    if (slide.blocks.length > 0) {
-      let maxX = 0, maxY = 0;
-      slide.blocks.forEach((b) => {
-        maxX = Math.max(maxX, (b.x || 0) + (b.width || 300));
-        maxY = Math.max(maxY, (b.y || 0) + (b.fontSize || 16) * 2);
-      });
-      if (maxX > CANVAS_WIDTH || maxY > CANVAS_HEIGHT) {
-        const sx = maxX > CANVAS_WIDTH ? (CANVAS_WIDTH - 20) / maxX : 1;
-        const sy = maxY > CANVAS_HEIGHT ? (CANVAS_HEIGHT - 20) / maxY : 1;
-        scale = Math.min(sx, sy);
+    canvas.backgroundColor = slide.backgroundColor || DEFAULT_SLIDE_BACKGROUND;
+    if (slide.backgroundImageUrl) {
+      if (canvas.backgroundImage?.data?.src !== slide.backgroundImageUrl) {
+        const slideId = slide.id;
+        fabric.FabricImage.fromURL(slide.backgroundImageUrl).then((img) => {
+          if (renderedSlideIdRef.current !== slideId) return;
+          img.set({ ...BASE_OBJECT_PROPS, scaleX: CANVAS_WIDTH / img.width, scaleY: CANVAS_HEIGHT / img.height });
+          img.data = { src: slide.backgroundImageUrl };
+          canvas.backgroundImage = img;
+          canvas.requestRenderAll();
+        }).catch(() => {});
       }
+    } else {
+      canvas.backgroundImage = undefined;
     }
 
-    slide.blocks.forEach((block) => {
-      const textbox = new fabric.Textbox(block.text || '', {
-        left: (block.x || 0) * scale,
-        top: (block.y || 0) * scale,
-        width: (block.width || 300) * scale,
-        fontSize: Math.round((block.fontSize || 16) * scale),
-        editable: true,
-        fill: '#1a1a2e',
-        fontFamily: 'Public Sans, sans-serif',
-        splitByGrapheme: false,
-      });
-      textbox.data = { blockId: block.id };
-      canvas.add(textbox);
+    const scale = legacyFitScale(slide.blocks);
+    scaleRef.current = scale;
+
+    const existing = new Map();
+    canvas.getObjects().forEach((o) => {
+      if (o.data?.blockId) existing.set(o.data.blockId, o);
+    });
+    const wanted = new Set(slide.blocks.map((b) => b.id));
+    existing.forEach((obj, id) => {
+      if (!wanted.has(id)) canvas.remove(obj);
     });
 
-    canvas.renderAll();
+    const placeAt = (obj, blockId) => {
+      const idx = slide.blocks.findIndex((b) => b.id === blockId);
+      if (idx >= 0 && canvas.getObjects().indexOf(obj) !== idx) canvas.moveObjectTo(obj, idx);
+    };
+
+    slide.blocks.forEach((block) => {
+      let obj = existing.get(block.id);
+
+      if (block.type === 'image') {
+        if (!block.imageUrl) return;
+        if (obj) {
+          if (!obj.group) obj.set(imageProps(block, { width: obj.width, height: obj.height }, scale));
+          obj.setCoords();
+          placeAt(obj, block.id);
+          return;
+        }
+        const slideId = slide.id;
+        fabric.FabricImage.fromURL(block.imageUrl, { crossOrigin: 'anonymous' }).then((img) => {
+          if (renderedSlideIdRef.current !== slideId) return;
+          img.set(imageProps(block, img, scale));
+          img.data = { blockId: block.id };
+          applyingRemoteRef.current = true;
+          canvas.add(img);
+          placeAt(img, block.id);
+          applyingRemoteRef.current = false;
+          canvas.requestRenderAll();
+        }).catch(() => {});
+        return;
+      }
+
+      const props = textboxProps(block, scale);
+      if (obj) {
+        // Don't fight the user's own typing: Fabric already holds the
+        // newest text for a block that is being edited right now.
+        if (obj.isEditing) delete props.text;
+        // Inside a multi-selection, left/top are relative to the group;
+        // leave geometry alone until the selection is released.
+        if (obj.group) ['left', 'top', 'width', 'scaleX', 'scaleY'].forEach((k) => delete props[k]);
+        obj.set(props);
+        obj.setCoords();
+      } else {
+        obj = new fabric.Textbox(props.text, { ...props, editable: true, splitByGrapheme: false });
+        obj.data = { blockId: block.id };
+        canvas.add(obj);
+      }
+      placeAt(obj, block.id);
+    });
+
+    canvas.requestRenderAll();
     applyingRemoteRef.current = false;
   }, [slides, activeSlideIdx]);
 
+  const activeSlide = slides[activeSlideIdx];
+  const selectedBlocks = (activeSlide?.blocks || []).filter((b) => selectedIds.includes(b.id));
+  const selectedText = selectedBlocks.filter((b) => b.type !== 'image');
+  const primary = selectedText[0];
+  const hasSelection = selectedBlocks.length > 0;
+  const hasTextSelection = selectedText.length > 0;
+
   // --- Toolbar actions ---
 
+  const formatSelected = useCallback((patch) => {
+    const doc = yjsRef.current?.doc;
+    if (!doc || selectedIds.length === 0) return;
+    updateBlocks(doc, activeSlideIdx, selectedIds, patch);
+  }, [selectedIds, activeSlideIdx]);
+
+  function toggleFormat(key, onValue, offValue) {
+    if (!primary) return;
+    const isOn = key === 'underline' ? !!primary.underline : primary[key] === onValue;
+    formatSelected({ [key]: isOn ? offValue : onValue });
+  }
+
   function handleAddTextBlock() {
-    const yjs = yjsRef.current;
-    if (!yjs) return;
-    const slidesArr = getSlidesArray(yjs.doc);
-    const slideMap = slidesArr.get(activeSlideIdx);
-    if (!slideMap) return;
-    const blocksArr = slideMap.get('blocks');
-    const newBlock = {
-      id: `b-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+    const doc = yjsRef.current?.doc;
+    if (!doc) return;
+    addBlock(doc, activeSlideIdx, {
+      id: newId('b'),
       type: 'textbox',
-      x: 100 + Math.random() * 80,
-      y: 100 + Math.random() * 80,
+      x: Math.round(100 + Math.random() * 80),
+      y: Math.round(100 + Math.random() * 80),
       width: 300,
       fontSize: 18,
       text: 'New text'
-    };
-    yjs.doc.transact(() => {
-      blocksArr.push([plainToBlockMap(newBlock)]);
     });
-  }
-
-  function handleBold() {
-    const canvas = fabricRef.current;
-    const obj = canvas?.getActiveObject();
-    if (!obj || obj.type !== 'textbox') return;
-    obj.set('fontWeight', obj.fontWeight === 'bold' ? 'normal' : 'bold');
-    canvas.renderAll();
-  }
-
-  function handleItalic() {
-    const canvas = fabricRef.current;
-    const obj = canvas?.getActiveObject();
-    if (!obj || obj.type !== 'textbox') return;
-    obj.set('fontStyle', obj.fontStyle === 'italic' ? 'normal' : 'italic');
-    canvas.renderAll();
-  }
-
-  function handleUnderline() {
-    const canvas = fabricRef.current;
-    const obj = canvas?.getActiveObject();
-    if (!obj || obj.type !== 'textbox') return;
-    obj.set('underline', !obj.underline);
-    canvas.renderAll();
   }
 
   function handleFontSizeChange(e) {
-    const canvas = fabricRef.current;
-    const obj = canvas?.getActiveObject();
-    if (!obj || obj.type !== 'textbox') return;
     const size = parseInt(e.target.value, 10);
-    if (size > 0 && size < 200) {
-      obj.set('fontSize', size);
-      canvas.renderAll();
-      // Write to Yjs
-      if (obj.data?.blockId) {
-        const blockMap = blockMapsRef.current.get(obj.data.blockId);
-        if (blockMap) {
-          yjsRef.current?.doc.transact(() => { blockMap.set('fontSize', size); });
-        }
-      }
-    }
+    if (size >= 8 && size <= 200) formatSelected({ fontSize: size });
   }
 
-  function handleTextColor(color) {
-    const canvas = fabricRef.current;
-    const obj = canvas?.getActiveObject();
-    if (!obj || obj.type !== 'textbox') return;
-    obj.set('fill', color);
-    canvas.renderAll();
-  }
+  const handleDeleteSelected = useCallback(() => {
+    const doc = yjsRef.current?.doc;
+    if (!doc || selectedIds.length === 0) return;
+    fabricRef.current?.discardActiveObject();
+    deleteBlocks(doc, activeSlideIdx, selectedIds);
+    setSelectedIds([]);
+  }, [selectedIds, activeSlideIdx]);
 
-  function handleDeleteSelected() {
-    const canvas = fabricRef.current;
-    const obj = canvas?.getActiveObject();
-    if (!obj || !obj.data?.blockId) return;
-    const yjs = yjsRef.current;
-    if (!yjs) return;
-    const slidesArr = getSlidesArray(yjs.doc);
-    const slideMap = slidesArr.get(activeSlideIdx);
-    if (!slideMap) return;
-    const blocksArr = slideMap.get('blocks');
-    // Find and remove the block
-    for (let i = 0; i < blocksArr.length; i++) {
-      if (blocksArr.get(i).get('id') === obj.data.blockId) {
-        yjs.doc.transact(() => { blocksArr.delete(i, 1); });
-        break;
-      }
-    }
-  }
+  const handleDuplicateSelected = useCallback(() => {
+    const doc = yjsRef.current?.doc;
+    if (!doc || selectedIds.length === 0) return;
+    duplicateBlocks(doc, activeSlideIdx, selectedIds);
+  }, [selectedIds, activeSlideIdx]);
 
-  function handleBringForward() {
-    const canvas = fabricRef.current;
-    const obj = canvas?.getActiveObject();
-    if (!obj) return;
-    canvas.bringObjectForward(obj);
-    canvas.renderAll();
-  }
-
-  function handleSendBackward() {
-    const canvas = fabricRef.current;
-    const obj = canvas?.getActiveObject();
-    if (!obj) return;
-    canvas.sendObjectBackwards(obj);
-    canvas.renderAll();
+  function handleRestack(to) {
+    const doc = yjsRef.current?.doc;
+    if (!doc || selectedIds.length !== 1) return;
+    restackBlock(doc, activeSlideIdx, selectedIds[0], to);
   }
 
   function handleZoom(delta) {
-    const newZoom = Math.max(0.5, Math.min(2, zoom + delta));
-    setZoom(newZoom);
+    setZoom((z) => Math.round(Math.max(0.5, Math.min(2, z + delta)) * 10) / 10);
   }
+
+  const handleUndo = useCallback(() => {
+    fabricRef.current?.discardActiveObject();
+    undoRef.current?.undo();
+  }, []);
+
+  const handleRedo = useCallback(() => {
+    fabricRef.current?.discardActiveObject();
+    undoRef.current?.redo();
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    setSaveError('');
+    try {
+      const { savedAt: at } = await saveDeck(deckId);
+      setSavedAt(at);
+    } catch (err) {
+      setSaveError(err.message || 'Could not save');
+    } finally {
+      setSaving(false);
+    }
+  }, [deckId]);
 
   // --- Slide ops ---
   function handleAddSlide() {
-    const yjs = yjsRef.current;
-    if (!yjs) return;
-    const slidesArr = getSlidesArray(yjs.doc);
-    const newSlide = makeBlankSlide(slidesArr.length);
-    yjs.doc.transact(() => {
-      slidesArr.push([plainToSlideMap(newSlide)]);
-    });
-    setTimeout(() => setActiveSlideIdx(slidesArr.length - 1), 50);
+    const doc = yjsRef.current?.doc;
+    if (!doc) return;
+    const at = activeSlideIdx + 1;
+    insertSlide(doc, at, makeBlankSlide(at));
+    setActiveSlideIdx(at);
+  }
+
+  function handleDuplicateSlide() {
+    const doc = yjsRef.current?.doc;
+    if (!doc) return;
+    setActiveSlideIdx(duplicateSlide(doc, activeSlideIdx));
+  }
+
+  function handleMoveSlide(delta) {
+    const doc = yjsRef.current?.doc;
+    if (!doc) return;
+    setActiveSlideIdx(moveSlide(doc, activeSlideIdx, delta));
   }
 
   function handleDeleteSlide() {
-    const yjs = yjsRef.current;
-    if (!yjs) return;
-    const slidesArr = getSlidesArray(yjs.doc);
-    if (slidesArr.length <= 1) return;
-    yjs.doc.transact(() => { slidesArr.delete(activeSlideIdx, 1); });
+    const doc = yjsRef.current?.doc;
+    if (!doc || slides.length <= 1) return;
+    if (!window.confirm(`Delete slide ${activeSlideIdx + 1}?`)) return;
+    deleteSlide(doc, activeSlideIdx);
     setActiveSlideIdx((prev) => Math.max(0, prev - 1));
   }
+
+  function handleSlideBackground(color) {
+    const doc = yjsRef.current?.doc;
+    if (!doc) return;
+    updateSlide(doc, activeSlideIdx, { backgroundColor: color });
+  }
+
+  function handleNotesChange(e) {
+    const doc = yjsRef.current?.doc;
+    if (!doc) return;
+    updateSlide(doc, activeSlideIdx, { notes: e.target.value });
+  }
+
+  async function handleExport(format) {
+    setShowExport(false);
+    setExporting(format);
+    setSaveError('');
+    try {
+      await downloadDeckExport(deckId, format);
+    } catch (err) {
+      setSaveError(err.message || 'Could not export the deck');
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  async function commitTitle() {
+    const title = titleDraft?.trim();
+    setTitleDraft(null);
+    if (!title || title === deckMeta?.title) return;
+    try {
+      setDeckMeta(await renameDeck(deckId, title));
+    } catch (err) {
+      setSaveError(err.message || 'Could not rename the deck');
+    }
+  }
+
+  // --- Keyboard shortcuts (skipped while typing in a text block/field)
+  useEffect(() => {
+    function onKeyDown(e) {
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 's') {
+        e.preventDefault();
+        handleSave();
+        return;
+      }
+      if (isTypingInField()) return;
+      if (mod && key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+      } else if (mod && key === 'y') {
+        e.preventDefault();
+        handleRedo();
+      } else if (mod && key === 'd') {
+        e.preventDefault();
+        handleDuplicateSelected();
+      } else if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) {
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          handleDeleteSelected();
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleSave, handleUndo, handleRedo, handleDuplicateSelected, handleDeleteSelected, selectedIds.length]);
 
   async function handleGoLive() {
     if (goingLive) return;
     setGoLiveError('');
     setGoingLive(true);
     try {
+      // Make sure the presenter sees the very latest edits.
+      await saveDeck(deckId).catch(() => {});
       const data = await goLive(deckId);
       navigate(`/presenter/${data.code}`, { state: { deckId, roomId: data.roomId } });
     } catch (err) {
@@ -412,14 +634,42 @@ function EditorPage() {
 
   const peersOnThisSlide = peers.filter((p) => p.activeSlideIdx === activeSlideIdx && p.cursor);
 
-  const TEXT_COLORS = ['#1a1a2e', '#e74c3c', '#2980b9', '#27ae60', '#f39c12', '#8e44ad', '#ffffff'];
+  let saveLabel;
+  if (syncStatus === 'offline') saveLabel = 'Offline · reconnecting';
+  else if (syncStatus === 'connecting') saveLabel = 'Connecting…';
+  else if (saving) saveLabel = 'Saving…';
+  else if (savedAt) saveLabel = `Saved ${formatTime(savedAt)}`;
+  else saveLabel = 'Autosave on';
 
   return (
     <div className="editor-page">
       <header className="editor-topbar">
         <div className="editor-topbar-left">
           <button className="btn btn-ghost" onClick={() => navigate('/decks')}>← Decks</button>
-          <span className="editor-deck-title">{deckMeta?.title || 'Untitled deck'}</span>
+          {titleDraft !== null ? (
+            <input
+              className="editor-title-input"
+              aria-label="Deck title"
+              value={titleDraft}
+              autoFocus
+              maxLength={200}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur();
+                if (e.key === 'Escape') setTitleDraft(null);
+              }}
+            />
+          ) : (
+            <button
+              className="editor-deck-title"
+              title="Rename deck"
+              onClick={() => setTitleDraft(deckMeta?.title || '')}
+            >
+              {deckMeta?.title || 'Untitled deck'}
+            </button>
+          )}
+          <span className={`editor-save-status mono status-${syncStatus}`} role="status">{saveLabel}</span>
         </div>
 
         <div className="presence-bar">
@@ -431,7 +681,31 @@ function EditorPage() {
           {peers.length > 0 && <span className="presence-label mono">{peers.length} editing</span>}
         </div>
 
+        {saveError && <span className="editor-golive-error">{saveError}</span>}
         {goLiveError && <span className="editor-golive-error">{goLiveError}</span>}
+        <button className="btn btn-ghost" onClick={handleSave} disabled={saving} title="Save now (Ctrl+S)">
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <div className="export-menu">
+          <button
+            className="btn btn-ghost"
+            onClick={() => setShowExport((v) => !v)}
+            disabled={!!exporting}
+            aria-haspopup="menu"
+            aria-expanded={showExport}
+          >
+            {exporting ? 'Exporting…' : 'Export ▾'}
+          </button>
+          {showExport && (
+            <div className="export-menu-list" role="menu">
+              {Object.entries(EXPORT_FORMATS).map(([format, { label }]) => (
+                <button key={format} role="menuitem" className="export-menu-item" onClick={() => handleExport(format)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button className="btn btn-ghost" onClick={() => setShowCollaborators((v) => !v)}>Collaborators</button>
         <button className="btn btn-amber" onClick={handleGoLive} disabled={goingLive}>
           {goingLive ? 'Starting…' : 'Go Live'}
@@ -474,6 +748,9 @@ function EditorPage() {
       {/* ── Toolbar ── */}
       <div className="editor-toolbar">
         <div className="toolbar-group">
+          <button className="toolbar-btn" onClick={handleUndo} title="Undo (Ctrl+Z)" disabled={!undoState.canUndo}>↶</button>
+          <button className="toolbar-btn" onClick={handleRedo} title="Redo (Ctrl+Shift+Z)" disabled={!undoState.canRedo}>↷</button>
+          <span className="toolbar-divider" />
           <button className="toolbar-btn" onClick={handleAddTextBlock} title="Add text block">
             <span className="toolbar-icon">T+</span>
           </button>
@@ -481,28 +758,28 @@ function EditorPage() {
         </div>
 
         <div className="toolbar-group">
-          <button className={`toolbar-btn ${selectedObj?.fontWeight === 'bold' ? 'active' : ''}`} onClick={handleBold} title="Bold" disabled={!selectedObj}>
-            <strong>B</strong>
-          </button>
-          <button className={`toolbar-btn ${selectedObj?.fontStyle === 'italic' ? 'active' : ''}`} onClick={handleItalic} title="Italic" disabled={!selectedObj}>
-            <em>I</em>
-          </button>
-          <button className={`toolbar-btn ${selectedObj?.underline ? 'active' : ''}`} onClick={handleUnderline} title="Underline" disabled={!selectedObj}>
-            <span style={{ textDecoration: 'underline' }}>U</span>
-          </button>
-          <span className="toolbar-divider" />
-        </div>
-
-        <div className="toolbar-group">
+          <select
+            className="toolbar-select"
+            aria-label="Font"
+            title="Font"
+            value={primary?.fontFamily || DEFAULT_FONT_FAMILY}
+            onChange={(e) => formatSelected({ fontFamily: e.target.value })}
+            disabled={!hasTextSelection}
+          >
+            {FONT_FAMILIES.map((f) => (
+              <option key={f.value} value={f.value}>{f.label}</option>
+            ))}
+          </select>
           <label className="toolbar-label mono" title="Font size">
             <input
               className="toolbar-font-input mono"
               type="number"
+              aria-label="Font size"
               min={8}
-              max={120}
-              value={selectedObj?.fontSize ?? ''}
+              max={200}
+              value={primary ? Math.round(primary.fontSize) : ''}
               onChange={handleFontSizeChange}
-              disabled={!selectedObj}
+              disabled={!hasTextSelection}
               placeholder="--"
             />
             <span>px</span>
@@ -510,25 +787,100 @@ function EditorPage() {
           <span className="toolbar-divider" />
         </div>
 
-        <div className="toolbar-group toolbar-colors">
-          {TEXT_COLORS.map((c) => (
-            <button
-              key={c}
-              className={`color-swatch ${selectedObj?.fill === c ? 'active' : ''}`}
-              style={{ background: c, border: c === '#ffffff' ? '1px solid var(--hairline)' : 'none' }}
-              onClick={() => handleTextColor(c)}
-              title={c}
-              disabled={!selectedObj}
-            />
-          ))}
+        <div className="toolbar-group">
+          <button className={`toolbar-btn ${primary?.fontWeight === 'bold' ? 'active' : ''}`} onClick={() => toggleFormat('fontWeight', 'bold', 'normal')} title="Bold" disabled={!hasTextSelection}>
+            <strong>B</strong>
+          </button>
+          <button className={`toolbar-btn ${primary?.fontStyle === 'italic' ? 'active' : ''}`} onClick={() => toggleFormat('fontStyle', 'italic', 'normal')} title="Italic" disabled={!hasTextSelection}>
+            <em>I</em>
+          </button>
+          <button className={`toolbar-btn ${primary?.underline ? 'active' : ''}`} onClick={() => toggleFormat('underline', true, false)} title="Underline" disabled={!hasTextSelection}>
+            <span style={{ textDecoration: 'underline' }}>U</span>
+          </button>
           <span className="toolbar-divider" />
         </div>
 
         <div className="toolbar-group">
-          <button className="toolbar-btn" onClick={handleBringForward} title="Bring forward" disabled={!selectedObj}>↑</button>
-          <button className="toolbar-btn" onClick={handleSendBackward} title="Send backward" disabled={!selectedObj}>↓</button>
-          <button className="toolbar-btn toolbar-btn-danger" onClick={handleDeleteSelected} title="Delete selected" disabled={!selectedObj}>🗑</button>
+          {TEXT_ALIGNMENTS.map((align) => (
+            <button
+              key={align}
+              className={`toolbar-btn ${(primary?.textAlign || 'left') === align && hasTextSelection ? 'active' : ''}`}
+              onClick={() => formatSelected({ textAlign: align })}
+              title={`Align ${align}`}
+              disabled={!hasTextSelection}
+            >
+              {ALIGN_ICONS[align]}
+            </button>
+          ))}
+          <select
+            className="toolbar-select toolbar-select-narrow"
+            aria-label="Line spacing"
+            title="Line spacing"
+            value={primary?.lineHeight || DEFAULT_LINE_HEIGHT}
+            onChange={(e) => formatSelected({ lineHeight: Number(e.target.value) })}
+            disabled={!hasTextSelection}
+          >
+            {LINE_HEIGHTS.map((lh) => (
+              <option key={lh} value={lh}>{lh === DEFAULT_LINE_HEIGHT ? '1.15' : lh.toFixed(1)}×</option>
+            ))}
+          </select>
           <span className="toolbar-divider" />
+        </div>
+
+        <div className="toolbar-group toolbar-colors">
+          {TEXT_COLORS.map((c) => (
+            <button
+              key={c}
+              className={`color-swatch ${(primary?.fill || DEFAULT_TEXT_COLOR) === c && hasTextSelection ? 'active' : ''}`}
+              style={{ background: c, border: c === '#ffffff' ? '1px solid var(--hairline)' : 'none' }}
+              onClick={() => formatSelected({ fill: c })}
+              title={c}
+              disabled={!hasTextSelection}
+            />
+          ))}
+          <input
+            type="color"
+            className="toolbar-color-input"
+            aria-label="Custom text colour"
+            title="Custom text colour"
+            value={primary?.fill || DEFAULT_TEXT_COLOR}
+            onChange={(e) => formatSelected({ fill: e.target.value })}
+            disabled={!hasTextSelection}
+          />
+          <span className="toolbar-divider" />
+        </div>
+
+        <div className="toolbar-group">
+          <button className="toolbar-btn" onClick={() => handleRestack('front')} title="Bring to front" disabled={selectedIds.length !== 1}>⤒</button>
+          <button className="toolbar-btn" onClick={() => handleRestack('forward')} title="Bring forward" disabled={selectedIds.length !== 1}>↑</button>
+          <button className="toolbar-btn" onClick={() => handleRestack('backward')} title="Send backward" disabled={selectedIds.length !== 1}>↓</button>
+          <button className="toolbar-btn" onClick={() => handleRestack('back')} title="Send to back" disabled={selectedIds.length !== 1}>⤓</button>
+          <button className="toolbar-btn" onClick={handleDuplicateSelected} title="Duplicate (Ctrl+D)" disabled={!hasSelection}>⧉</button>
+          <button className="toolbar-btn toolbar-btn-danger" onClick={handleDeleteSelected} title="Delete selected (Del)" disabled={!hasSelection}>🗑</button>
+          <span className="toolbar-divider" />
+        </div>
+
+        <div className="toolbar-group toolbar-colors" title="Slide background">
+          <span className="toolbar-label mono">Slide</span>
+          {SLIDE_BACKGROUNDS.map((c) => (
+            <button
+              key={c}
+              className={`color-swatch color-swatch-square ${(activeSlide?.backgroundColor || DEFAULT_SLIDE_BACKGROUND) === c ? 'active' : ''}`}
+              style={{ background: c, border: '1px solid var(--hairline)' }}
+              onClick={() => handleSlideBackground(c)}
+              title={`Slide background ${c}`}
+              disabled={!activeSlide}
+            />
+          ))}
+          <input
+            type="color"
+            className="toolbar-color-input"
+            aria-label="Custom slide background"
+            title="Custom slide background"
+            value={activeSlide?.backgroundColor || DEFAULT_SLIDE_BACKGROUND}
+            onChange={(e) => handleSlideBackground(e.target.value)}
+            disabled={!activeSlide}
+          />
         </div>
 
         <div className="toolbar-group toolbar-right">
@@ -549,13 +901,18 @@ function EditorPage() {
               >
                 <span className="slide-num mono">{i + 1}</span>
                 <span className="slide-thumb-label">
-                  {s.blocks?.[0]?.text?.split('\n')[0]?.slice(0, 20) || `Slide ${i + 1}`}
+                  {s.blocks?.find((b) => b.text)?.text?.split('\n')[0]?.slice(0, 20) || `Slide ${i + 1}`}
                 </span>
               </button>
             ))}
           </div>
           <div className="slide-rail-actions">
             <button className="btn btn-ghost slide-action-btn" onClick={handleAddSlide}>+ Add slide</button>
+            <button className="btn btn-ghost slide-action-btn" onClick={handleDuplicateSlide} disabled={!activeSlide}>Duplicate</button>
+            <div className="slide-move-row">
+              <button className="btn btn-ghost slide-action-btn" onClick={() => handleMoveSlide(-1)} disabled={activeSlideIdx === 0} title="Move slide up">↑ Up</button>
+              <button className="btn btn-ghost slide-action-btn" onClick={() => handleMoveSlide(1)} disabled={activeSlideIdx >= slides.length - 1} title="Move slide down">↓ Down</button>
+            </div>
             {slides.length > 1 && (
               <button className="btn btn-ghost slide-action-btn slide-delete-btn" onClick={handleDeleteSlide}>Delete slide</button>
             )}
@@ -580,8 +937,23 @@ function EditorPage() {
             </div>
           </div>
           <p className="canvas-hint mono">
-            Slide {activeSlideIdx + 1} of {slides.length} · drag to move · double-click to edit
+            Slide {activeSlideIdx + 1} of {slides.length} · drag to move · double-click to edit · Ctrl+S saves
           </p>
+          <section className="notes-panel" style={{ width: CANVAS_WIDTH }}>
+            <button className="notes-toggle mono" onClick={() => setShowNotes((v) => !v)}>
+              {showNotes ? '▾' : '▸'} Speaker notes
+            </button>
+            {showNotes && (
+              <textarea
+                className="notes-input"
+                aria-label="Speaker notes"
+                placeholder="Notes for this slide — only you and co-editors see these, viewers never do."
+                value={activeSlide?.notes || ''}
+                onChange={handleNotesChange}
+                disabled={!activeSlide}
+              />
+            )}
+          </section>
         </main>
       </div>
     </div>
