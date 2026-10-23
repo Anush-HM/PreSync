@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 vi.mock('../models/Room.js', () => ({ default: { findOne: vi.fn() } }));
 vi.mock('../models/Deck.js', () => ({ default: { findById: vi.fn() } }));
 vi.mock('../models/Question.js', () => ({
-  default: { create: vi.fn(), findOne: vi.fn(), findOneAndUpdate: vi.fn() }
+  default: { create: vi.fn(), find: vi.fn(), findOne: vi.fn(), findOneAndUpdate: vi.fn() }
 }));
 vi.mock('../services/qaService.js', () => ({ draftAnswer: vi.fn() }));
 
@@ -32,8 +32,15 @@ beforeAll(async () => {
 
 afterAll(() => new Promise((resolve) => httpServer.close(resolve)));
 
+// Resolves a mongoose query chain like Model.find().sort().lean().
+function queryResolving(value) {
+  const query = { sort: () => query, lean: () => Promise.resolve(value) };
+  return query;
+}
+
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
+  Question.find.mockReturnValue(queryResolving([]));
   Room.findOne.mockResolvedValue({
     _id: 'room1',
     code: 'ABC123',
@@ -289,4 +296,52 @@ it('keeps serving the socket after an error', async () => {
   socket.emit('viewer:join', { code: 'ABC123', viewerId: 'v1' });
   await joined;
   expect(socket.connected).toBe(true);
+});
+
+describe('rejoining after a refresh', () => {
+  it("gives a presenter back the questions still waiting on them", async () => {
+    Question.find.mockReturnValue(
+      queryResolving([
+        { _id: 'q1', text: 'Pending?', status: 'pending' },
+        { _id: 'q2', text: 'Drafted?', draftAnswer: 'Yes.', status: 'drafted' }
+      ])
+    );
+    const socket = await connect();
+    const queue = nextEvent(socket, 'question:queue');
+    socket.emit('presenter:join', {
+      token: jwt.sign({ sub: PRESENTER_ID }, process.env.JWT_SECRET),
+      code: 'abc123'
+    });
+
+    expect(await queue).toEqual({
+      questions: [
+        { id: 'q1', text: 'Pending?', draftAnswer: null, status: 'pending' },
+        { id: 'q2', text: 'Drafted?', draftAnswer: 'Yes.', status: 'drafted' }
+      ]
+    });
+    expect(Question.find).toHaveBeenCalledWith({ roomId: 'room1', status: { $in: ['pending', 'drafted'] } });
+  });
+
+  it("replays the room's answers and only this viewer's dismissed questions", async () => {
+    Question.find.mockReturnValue(
+      queryResolving([
+        { _id: 'q1', text: 'Sent?', draftAnswer: 'Yes.', status: 'sent' },
+        { _id: 'q2', text: 'Mine?', draftAnswer: 'Draft.', status: 'dismissed' }
+      ])
+    );
+    const socket = await connect();
+    const history = nextEvent(socket, 'qa:history');
+    socket.emit('viewer:join', { code: 'abc123', viewerId: 'viewer-1' });
+
+    expect(await history).toEqual({
+      items: [
+        { id: 'q1', question: 'Sent?', answer: 'Yes.', dismissed: false },
+        { id: 'q2', question: 'Mine?', answer: null, dismissed: true }
+      ]
+    });
+    expect(Question.find).toHaveBeenCalledWith({
+      roomId: 'room1',
+      $or: [{ status: 'sent' }, { status: 'dismissed', viewerId: 'viewer-1' }]
+    });
+  });
 });

@@ -82,6 +82,20 @@ export function registerSocketHandlers(io) {
       socket.join(`presenter:${socket.data.roomCode}`);
       socket.emit('presenter:joined', { code: socket.data.roomCode });
       broadcastViewerCount(io, socket.data.roomCode);
+
+      // Questions still waiting on the presenter live in the DB, so a
+      // refreshed or reconnected presenter tab gets its queue back.
+      const open = await Question.find({ roomId: room._id, status: { $in: ['pending', 'drafted'] } })
+        .sort({ createdAt: 1 })
+        .lean();
+      socket.emit('question:queue', {
+        questions: open.map((q) => ({
+          id: q._id,
+          text: q.text,
+          draftAnswer: q.draftAnswer ?? null,
+          status: q.status
+        }))
+      });
     });
 
     on('viewer:join', async ({ code, viewerId }) => {
@@ -97,6 +111,23 @@ export function registerSocketHandlers(io) {
       socket.join(`room:${socket.data.roomCode}`);
       socket.emit('viewer:joined', { currentSlideId: room.currentSlideId });
       broadcastViewerCount(io, socket.data.roomCode);
+
+      // Replay the room's answered questions, plus this viewer's own
+      // dismissed ones, so a refresh doesn't empty the Q&A feed.
+      const past = await Question.find({
+        roomId: room._id,
+        $or: [{ status: 'sent' }, { status: 'dismissed', viewerId: validViewerId }]
+      })
+        .sort({ updatedAt: -1 })
+        .lean();
+      socket.emit('qa:history', {
+        items: past.map((q) => ({
+          id: q._id,
+          question: q.text,
+          answer: q.status === 'sent' ? q.draftAnswer : null,
+          dismissed: q.status === 'dismissed'
+        }))
+      });
 
       // Send this viewer an immediate snapshot of whatever slide is
       // already live, since slide:sync is otherwise only broadcast on

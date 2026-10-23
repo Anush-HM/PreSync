@@ -86,6 +86,17 @@ function PresenterPage() {
       broadcastSlide(slides[slideIdx]);
     });
 
+    // Sent on every (re)join: the server's list of questions still waiting
+    // on the presenter. Keep any draft edits made in this tab.
+    socket.on('question:queue', ({ questions }) => {
+      setQueue((prev) =>
+        questions.map((q) => {
+          const local = prev.find((item) => item.id === q.id);
+          return local ?? { id: q.id, question: q.text, draft: q.draftAnswer || '', status: q.status };
+        })
+      );
+    });
+
     socket.on('question:new', ({ id, text }) => {
       setQueue((q) => [...q, { id, question: text, draft: '', status: 'pending' }]);
     });
