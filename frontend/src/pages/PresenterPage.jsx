@@ -4,6 +4,7 @@ import { getDeck } from '../data/decksApi.js';
 import { endRoom } from '../data/roomsApi.js';
 import { createSocket } from '../data/socket.js';
 import { getAuthToken } from '../data/apiConfig.js';
+import SlideView from '../components/SlideView.jsx';
 import './PresenterPage.css';
 
 function PresenterPage() {
@@ -226,67 +227,7 @@ function PresenterPage() {
             <p className="mono" style={{ color: 'var(--muted)' }}>Loading slides…</p>
           ) : (
             <>
-              <div
-                className="stage-slide"
-                style={
-                  slide.backgroundImageUrl
-                    ? { backgroundImage: `url(${slide.backgroundImageUrl})`, backgroundSize: 'cover' }
-                    : undefined
-                }
-              >
-                {(() => {
-                  // Auto-scale for old decks with raw PDF coords
-                  const blocks = slide.blocks || [];
-                  let s = 1;
-                  if (blocks.length > 0) {
-                    let mX = 0, mY = 0;
-                    blocks.forEach(b => {
-                      mX = Math.max(mX, (b.x||0) + (b.width||300));
-                      mY = Math.max(mY, (b.y||0) + (b.fontSize||16)*2);
-                    });
-                    if (mX > 960 || mY > 540) {
-                      s = Math.min(mX > 960 ? 940/mX : 1, mY > 540 ? 520/mY : 1);
-                    }
-                  }
-                  return blocks.map((b) => {
-                    if (b.type === 'image' && b.imageUrl) {
-                      return (
-                        <img
-                          key={b.id}
-                          src={b.imageUrl}
-                          alt=""
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                          style={{
-                            position: 'absolute',
-                            left: (b.x||0)*s,
-                            top: (b.y||0)*s,
-                            width: (b.width||300)*s,
-                            height: 'auto',
-                            objectFit: 'contain',
-                            display: 'block',
-                          }}
-                        />
-                      );
-                    }
-                    return (
-                      <div
-                        key={b.id}
-                        style={{
-                          position: 'absolute',
-                          left: (b.x||0)*s,
-                          top: (b.y||0)*s,
-                          width: (b.width||300)*s,
-                          fontSize: Math.round((b.fontSize||16)*s),
-                          whiteSpace: 'pre-wrap',
-                          color: '#1a1a2e',
-                        }}
-                      >
-                        {b.text}
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
+              <SlideView slide={slide} />
               <div className="stage-nav">
                 <button className="btn btn-ghost" onClick={() => goTo(slideIdx - 1)} disabled={slideIdx === 0}>← Prev</button>
                 <span className="mono">{slideIdx + 1} / {slides.length}</span>
@@ -295,6 +236,12 @@ function PresenterPage() {
               <p className="presenter-hint mono" style={{ marginTop: 8, fontSize: 11 }}>
                 ← → arrow keys also navigate
               </p>
+              {slide.notes && (
+                <div className="presenter-notes">
+                  <span className="presenter-notes-label mono">Speaker notes</span>
+                  <p>{slide.notes}</p>
+                </div>
+              )}
             </>
           )}
         </main>

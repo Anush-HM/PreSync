@@ -7,6 +7,8 @@ import {
   createDeck,
   getDeck,
   updateDeckSlides,
+  updateDeckMeta,
+  saveDeck,
   deleteDeck,
   addCollaborator,
   removeCollaborator
@@ -50,7 +52,9 @@ router.get('/', asyncHandler(listDecks));
 router.post('/', asyncHandler(createDeck));
 router.post('/import', uploadPdf, asyncHandler(importPdf));
 router.get('/:deckId', asyncHandler(getDeck));
+router.patch('/:deckId', asyncHandler(updateDeckMeta));
 router.put('/:deckId/slides', asyncHandler(updateDeckSlides));
+router.post('/:deckId/save', asyncHandler(saveDeck));
 router.post('/:deckId/collaborators', asyncHandler(addCollaborator));
 router.delete('/:deckId/collaborators/:userId', asyncHandler(removeCollaborator));
 router.delete('/:deckId', asyncHandler(deleteDeck));

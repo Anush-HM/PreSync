@@ -51,3 +51,16 @@ export async function removeCollaborator(deckId, userId) {
     method: 'DELETE'
   });
 }
+// Any editor: rename the deck. Returns updated deck meta.
+export async function renameDeck(deckId, title) {
+  return apiFetch(`/api/decks/${deckId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title })
+  });
+}
+
+// Flush the live co-editing document to the database right now.
+// Resolves to { savedAt, flushed }.
+export async function saveDeck(deckId) {
+  return apiFetch(`/api/decks/${deckId}/save`, { method: 'POST' });
+}

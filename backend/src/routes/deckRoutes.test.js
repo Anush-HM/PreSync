@@ -5,10 +5,12 @@ vi.mock('../models/Deck.js', () => ({
 }));
 vi.mock('../models/User.js', () => ({ default: { findOne: vi.fn() } }));
 vi.mock('../services/pdfIngestService.js', () => ({ extractSlidesFromPdf: vi.fn() }));
+vi.mock('../yjs/docManager.js', () => ({ flushDoc: vi.fn() }));
 
 const { default: Deck } = await import('../models/Deck.js');
 const { default: User } = await import('../models/User.js');
 const { extractSlidesFromPdf } = await import('../services/pdfIngestService.js');
+const { flushDoc } = await import('../yjs/docManager.js');
 const { startTestServer, tokenFor } = await import('../test/httpServer.js');
 
 const OWNER_ID = '64b000000000000000000001';
@@ -164,6 +166,61 @@ describe('PUT /api/decks/:deckId/slides', () => {
     });
     expect(res.status).toBe(403);
     expect(deck.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH /api/decks/:deckId', () => {
+  it('lets a collaborator rename the deck, trimming the title', async () => {
+    const deck = makeDeck();
+    Deck.findById.mockResolvedValue(deck);
+    const res = await server.request('PATCH', `/api/decks/${DECK_ID}`, {
+      token: tokenFor(COLLAB_ID),
+      body: { title: '  Q3 review  ' }
+    });
+    expect(res.status).toBe(200);
+    expect(deck.title).toBe('Q3 review');
+    expect(deck.save).toHaveBeenCalled();
+    expect(res.body.title).toBe('Q3 review');
+  });
+
+  it('rejects an empty or missing title', async () => {
+    const deck = makeDeck();
+    Deck.findById.mockResolvedValue(deck);
+    for (const body of [{}, { title: '   ' }, { title: 42 }]) {
+      const res = await server.request('PATCH', `/api/decks/${DECK_ID}`, { token: tokenFor(OWNER_ID), body });
+      expect(res.status).toBe(400);
+    }
+    expect(deck.save).not.toHaveBeenCalled();
+  });
+
+  it('403s for a user who is not on the deck', async () => {
+    const deck = makeDeck();
+    Deck.findById.mockResolvedValue(deck);
+    const res = await server.request('PATCH', `/api/decks/${DECK_ID}`, {
+      token: tokenFor(STRANGER_ID),
+      body: { title: 'Mine now' }
+    });
+    expect(res.status).toBe(403);
+    expect(deck.title).toBe('Quarterly review');
+  });
+});
+
+describe('POST /api/decks/:deckId/save', () => {
+  it('flushes the live document and reports when it saved', async () => {
+    Deck.findById.mockResolvedValue(makeDeck());
+    flushDoc.mockResolvedValue(true);
+    const res = await server.request('POST', `/api/decks/${DECK_ID}/save`, { token: tokenFor(COLLAB_ID) });
+    expect(res.status).toBe(200);
+    expect(flushDoc).toHaveBeenCalledWith(DECK_ID);
+    expect(res.body.flushed).toBe(true);
+    expect(Date.parse(res.body.savedAt)).not.toBeNaN();
+  });
+
+  it('does not flush for a user who is not on the deck', async () => {
+    Deck.findById.mockResolvedValue(makeDeck());
+    const res = await server.request('POST', `/api/decks/${DECK_ID}/save`, { token: tokenFor(STRANGER_ID) });
+    expect(res.status).toBe(403);
+    expect(flushDoc).not.toHaveBeenCalled();
   });
 });
 
