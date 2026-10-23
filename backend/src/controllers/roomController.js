@@ -1,9 +1,13 @@
+import mongoose from 'mongoose';
 import Deck from '../models/Deck.js';
+import { isEditorOf } from './deckController.js';
 import Room from '../models/Room.js';
 import Viewer from '../models/Viewer.js';
 import Question from '../models/Question.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to avoid ambiguity
+
+const MAX_CODE_ATTEMPTS = 5;
 
 function generateCode() {
   let code = '';
@@ -25,20 +29,25 @@ export async function goLive(req, res) {
     deck.collaboratorIds.some((id) => id.toString() === req.userId);
   if (!isEditor) return res.status(403).json({ error: 'Not a collaborator on this deck' });
 
-  // Retry on the rare collision against an active room with the same code.
-  let code;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    code = generateCode();
-    const clash = await Room.findOne({ code, active: true });
-    if (!clash) break;
+  // Two rooms can draw the same code at the same moment, so a pre-check
+  // can't rule out a clash. Let the code_active_unique index decide: on a
+  // duplicate-key error, draw a new code and try the insert again.
+  let room;
+  for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS && !room; attempt++) {
+    try {
+      room = await Room.create({
+        code: generateCode(),
+        deckId: deck._id,
+        presenterId: req.userId,
+        currentSlideId: deck.slides[0]?.id
+      });
+    } catch (err) {
+      if (err?.code !== 11000) throw err;
+    }
   }
-
-  const room = await Room.create({
-    code,
-    deckId: deck._id,
-    presenterId: req.userId,
-    currentSlideId: deck.slides[0]?.id
-  });
+  if (!room) {
+    return res.status(503).json({ error: 'Could not allocate a room code, please try again' });
+  }
 
   res.status(201).json({ code: room.code, roomId: room._id });
 }
@@ -76,6 +85,18 @@ export async function getRoomByCode(req, res) {
   res.json({ code: room.code, active: room.active, currentSlideId: room.currentSlideId });
 }
 
+// Codes are reused once a room ends, so a code alone can match several
+// rooms. Resolve the viewer first (viewerId is globally unique), then
+// confirm their room carries this code. This keeps notes working for the
+// right session, including after it ends and its code is handed out again.
+async function findViewerInRoom(code, viewerId) {
+  const viewer = await Viewer.findOne({ viewerId });
+  if (!viewer) return null;
+  const room = await Room.findById(viewer.roomId);
+  if (!room || room.code !== code.toUpperCase()) return null;
+  return viewer;
+}
+
 // No auth — same unauthenticated viewer path as join. Notes are private
 // to the viewer that wrote them, scoped by viewerId + the slide they
 // were written on (see Viewer.js), never exposed to the presenter or
@@ -83,10 +104,7 @@ export async function getRoomByCode(req, res) {
 export async function getViewerNotes(req, res) {
   const { code, viewerId } = req.params;
 
-  const room = await Room.findOne({ code: code.toUpperCase() });
-  if (!room) return res.status(404).json({ error: 'No session with that code' });
-
-  const viewer = await Viewer.findOne({ viewerId, roomId: room._id });
+  const viewer = await findViewerInRoom(code, viewerId);
   if (!viewer) return res.status(404).json({ error: 'Viewer not found in this room' });
 
   res.json({ notes: viewer.notes });
@@ -102,10 +120,7 @@ export async function saveViewerNote(req, res) {
   const { slideId, text } = req.body;
   if (!slideId) return res.status(400).json({ error: 'slideId is required' });
 
-  const room = await Room.findOne({ code: code.toUpperCase() });
-  if (!room) return res.status(404).json({ error: 'No session with that code' });
-
-  const viewer = await Viewer.findOne({ viewerId, roomId: room._id });
+  const viewer = await findViewerInRoom(code, viewerId);
   if (!viewer) return res.status(404).json({ error: 'Viewer not found in this room' });
 
   const existing = viewer.notes.find((n) => n.slideId === slideId);
@@ -128,6 +143,7 @@ export async function endRoom(req, res) {
     return res.status(403).json({ error: 'Only the presenter can end this session' });
   }
   room.active = false;
+  room.endedAt = new Date();
   await room.save();
 
   // Ending a session is a REST action (not a socket event), but anyone
@@ -144,14 +160,13 @@ export async function endRoom(req, res) {
 // Includes viewer names (from issue #19) and Q&A log per session.
 export async function getSessionHistory(req, res) {
   const { deckId } = req.params;
+  if (!mongoose.isValidObjectId(deckId)) return res.status(400).json({ error: 'Invalid deck id' });
 
   const deck = await Deck.findById(deckId);
   if (!deck) return res.status(404).json({ error: 'Deck not found' });
-
-  const isEditor =
-    deck.ownerId.toString() === req.userId ||
-    deck.collaboratorIds.some((id) => id.toString() === req.userId);
-  if (!isEditor) return res.status(403).json({ error: 'Not a collaborator on this deck' });
+  if (!isEditorOf(deck, req.userId)) {
+    return res.status(403).json({ error: 'Not a collaborator on this deck' });
+  }
 
   const rooms = await Room.find({ deckId, active: false }).sort({ createdAt: -1 }).lean();
 
@@ -168,8 +183,9 @@ export async function getSessionHistory(req, res) {
           .lean()
       ]);
 
-      const lastActivity = questions.at(-1)?.createdAt ?? room.createdAt;
-      const durationMs = new Date(lastActivity) - new Date(room.createdAt);
+      // Rooms ended before endedAt existed fall back to the last question.
+      const endedAt = room.endedAt ?? questions.at(-1)?.createdAt ?? room.createdAt;
+      const durationMs = new Date(endedAt) - new Date(room.createdAt);
       const durationMin = Math.max(0, Math.round(durationMs / 60000));
 
       return {
@@ -182,7 +198,8 @@ export async function getSessionHistory(req, res) {
         questions: questions.map((q) => ({
           id: q._id,
           text: q.text,
-          answer: q.draftAnswer || null,
+          // Only answers the presenter actually sent; unsent AI drafts stay private.
+          answer: q.status === 'sent' ? q.draftAnswer : null,
           status: q.status
         }))
       };

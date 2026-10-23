@@ -1,5 +1,5 @@
 // Central place for the backend origin, since nothing in the frontend
-// talked to the real backend yet (everything ran on mockData.js). Swap
+// talked to the real backend yet (it all ran on mock data). Swap
 // via a .env VITE_API_URL for non-local setups.
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 export const WS_BASE = API_BASE.replace(/^http/, 'ws');

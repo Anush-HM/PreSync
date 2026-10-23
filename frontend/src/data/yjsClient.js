@@ -10,7 +10,8 @@ const MESSAGE_AWARENESS = 1;
 const RECONNECT_DELAY_MS = 1500;
 
 // Connects a deck's Y.Doc to the backend's Yjs server. Returns
-// { doc, awareness, disconnect }. Reconnects on drop so background
+// { doc, awareness, disconnect, onStatus }, where onStatus(cb) reports
+// 'connecting' | 'synced' | 'offline' and returns an unsubscribe. Reconnects on drop so background
 // editors don't lose the live session over a flaky connection.
 export function connectYjsDoc(deckId) {
   const doc = new Y.Doc();
@@ -19,6 +20,14 @@ export function connectYjsDoc(deckId) {
   let ws = null;
   let shouldReconnect = true;
   let reconnectTimer = null;
+  let status = 'connecting';
+  const statusListeners = new Set();
+
+  function setStatus(next) {
+    if (status === next) return;
+    status = next;
+    statusListeners.forEach((cb) => cb(status));
+  }
 
   function send(encoder) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -43,7 +52,8 @@ export function connectYjsDoc(deckId) {
       if (messageType === MESSAGE_SYNC) {
         const encoder = encoding.createEncoder();
         encoding.writeVarUint(encoder, MESSAGE_SYNC);
-        syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
+        const syncType = syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
+        if (syncType === syncProtocol.messageYjsSyncStep2) setStatus('synced');
         if (encoding.length(encoder) > 1) send(encoder);
       } else if (messageType === MESSAGE_AWARENESS) {
         awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(decoder), ws);
@@ -52,6 +62,7 @@ export function connectYjsDoc(deckId) {
 
     ws.addEventListener('close', () => {
       if (!shouldReconnect) return;
+      setStatus('offline');
       reconnectTimer = setTimeout(open, RECONNECT_DELAY_MS);
     });
   }
@@ -83,7 +94,13 @@ export function connectYjsDoc(deckId) {
     doc.destroy();
   }
 
-  return { doc, awareness, disconnect };
+  function onStatus(cb) {
+    statusListeners.add(cb);
+    cb(status);
+    return () => statusListeners.delete(cb);
+  }
+
+  return { doc, awareness, disconnect, onStatus };
 }
 
 // --- Helpers for reading/writing the shared slide/block shape ---------
@@ -94,18 +111,42 @@ export function getSlidesArray(doc) {
   return doc.getArray('slides');
 }
 
+// Optional fields copied verbatim when set. Keep in step with
+// BLOCK_OPTIONAL_KEYS / SLIDE_OPTIONAL_KEYS in backend/src/yjs/docManager.js.
+export const BLOCK_OPTIONAL_KEYS = [
+  'fontFamily',
+  'fontWeight',
+  'fontStyle',
+  'underline',
+  'fill',
+  'textAlign',
+  'lineHeight',
+  'height',
+  'imageUrl'
+];
+export const SLIDE_OPTIONAL_KEYS = ['backgroundImageUrl', 'backgroundColor'];
+
+function copyOptional(keys, read, write) {
+  for (const key of keys) {
+    const value = read(key);
+    if (value !== undefined && value !== null && value !== '') write(key, value);
+  }
+}
+
 export function slideMapToPlain(slideMap) {
-  return {
+  const plain = {
     id: slideMap.get('id'),
     order: slideMap.get('order'),
-    backgroundImageUrl: slideMap.get('backgroundImageUrl'),
     needsImageFallback: !!slideMap.get('needsImageFallback'),
+    notes: slideMap.get('notes') ?? '',
     blocks: slideMap.get('blocks').toArray().map(blockMapToPlain)
   };
+  copyOptional(SLIDE_OPTIONAL_KEYS, (k) => slideMap.get(k), (k, v) => (plain[k] = v));
+  return plain;
 }
 
 export function blockMapToPlain(blockMap) {
-  return {
+  const plain = {
     id: blockMap.get('id'),
     type: blockMap.get('type') || 'textbox',
     x: blockMap.get('x'),
@@ -114,6 +155,8 @@ export function blockMapToPlain(blockMap) {
     fontSize: blockMap.get('fontSize') ?? 16,
     text: blockMap.get('text') ?? ''
   };
+  copyOptional(BLOCK_OPTIONAL_KEYS, (k) => blockMap.get(k), (k, v) => (plain[k] = v));
+  return plain;
 }
 
 export function plainToBlockMap(block) {
@@ -125,6 +168,7 @@ export function plainToBlockMap(block) {
   m.set('width', block.width);
   m.set('fontSize', block.fontSize ?? 16);
   m.set('text', block.text ?? '');
+  copyOptional(BLOCK_OPTIONAL_KEYS, (k) => block[k], (k, v) => m.set(k, v));
   return m;
 }
 
@@ -132,8 +176,9 @@ export function plainToSlideMap(slide) {
   const m = new Y.Map();
   m.set('id', slide.id);
   m.set('order', slide.order);
-  if (slide.backgroundImageUrl) m.set('backgroundImageUrl', slide.backgroundImageUrl);
   m.set('needsImageFallback', !!slide.needsImageFallback);
+  m.set('notes', slide.notes ?? '');
+  copyOptional(SLIDE_OPTIONAL_KEYS, (k) => slide[k], (k, v) => m.set(k, v));
   const blocks = new Y.Array();
   blocks.push((slide.blocks || []).map(plainToBlockMap));
   m.set('blocks', blocks);
