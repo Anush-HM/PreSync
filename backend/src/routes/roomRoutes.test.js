@@ -2,13 +2,17 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 
 vi.mock('../models/Deck.js', () => ({ default: { findById: vi.fn() } }));
 vi.mock('../models/Room.js', () => ({
-  default: { findOne: vi.fn(), findById: vi.fn(), create: vi.fn() }
+  default: { findOne: vi.fn(), findById: vi.fn(), create: vi.fn(), find: vi.fn() }
 }));
-vi.mock('../models/Viewer.js', () => ({ default: { findOne: vi.fn(), create: vi.fn() } }));
+vi.mock('../models/Viewer.js', () => ({
+  default: { findOne: vi.fn(), create: vi.fn(), find: vi.fn() }
+}));
+vi.mock('../models/Question.js', () => ({ default: { find: vi.fn() } }));
 
 const { default: Deck } = await import('../models/Deck.js');
 const { default: Room } = await import('../models/Room.js');
 const { default: Viewer } = await import('../models/Viewer.js');
+const { default: Question } = await import('../models/Question.js');
 const { startTestServer, tokenFor } = await import('../test/httpServer.js');
 
 const PRESENTER_ID = '64b000000000000000000001';
@@ -149,6 +153,7 @@ describe('POST /api/rooms/:roomId/end', () => {
 
     expect(res.status).toBe(204);
     expect(room.active).toBe(false);
+    expect(room.endedAt).toBeInstanceOf(Date);
     expect(room.save).toHaveBeenCalled();
     expect(to).toHaveBeenCalledWith('room:ABC234');
     expect(emit).toHaveBeenCalledWith('room:ended');
@@ -282,5 +287,79 @@ describe('viewer notes', () => {
     expect(viewer.notes).toHaveLength(1);
     expect(viewer.notes[0].text).toBe('edited');
     expect(viewer.notes[0].updatedAt.getTime()).toBeGreaterThan(0);
+  });
+});
+
+// Resolves a mongoose query chain like Model.find().select().sort().lean().
+function queryResolving(value) {
+  const query = {
+    select: () => query,
+    sort: () => query,
+    lean: () => Promise.resolve(value)
+  };
+  return query;
+}
+
+describe('GET /api/rooms/history/:deckId', () => {
+  const history = (userId, deckId = DECK_ID) =>
+    server.request('GET', `/api/rooms/history/${deckId}`, { token: tokenFor(userId) });
+
+  it('400s for a malformed deck id instead of throwing', async () => {
+    const res = await history(PRESENTER_ID, 'not-an-id');
+    expect(res.status).toBe(400);
+    expect(Deck.findById).not.toHaveBeenCalled();
+  });
+
+  it('403s for a user who is not on the deck', async () => {
+    Deck.findById.mockResolvedValue({ _id: DECK_ID, ownerId: PRESENTER_ID, collaboratorIds: [] });
+    expect((await history(STRANGER_ID)).status).toBe(403);
+    expect(Room.find).not.toHaveBeenCalled();
+  });
+
+  it('times sessions by when they ended and only shows answers that were sent', async () => {
+    Deck.findById.mockResolvedValue({ _id: DECK_ID, ownerId: PRESENTER_ID, collaboratorIds: [COLLAB_ID] });
+    Room.find.mockReturnValue(
+      queryResolving([
+        {
+          _id: ROOM_ID,
+          code: 'ABC234',
+          createdAt: new Date('2026-10-17T10:00:00Z'),
+          endedAt: new Date('2026-10-17T10:45:00Z')
+        }
+      ])
+    );
+    Viewer.find.mockReturnValue(
+      queryResolving([{ displayName: 'Sam', joinedAt: new Date('2026-10-17T10:01:00Z') }])
+    );
+    Question.find.mockReturnValue(
+      queryResolving([
+        { _id: 'q1', text: 'Sent?', draftAnswer: 'Yes.', status: 'sent', createdAt: new Date('2026-10-17T10:05:00Z') },
+        { _id: 'q2', text: 'Skipped?', draftAnswer: 'Draft.', status: 'dismissed', createdAt: new Date('2026-10-17T10:06:00Z') },
+        { _id: 'q3', text: 'Waiting?', draftAnswer: 'Draft.', status: 'drafted', createdAt: new Date('2026-10-17T10:07:00Z') }
+      ])
+    );
+
+    const res = await history(COLLAB_ID);
+
+    expect(res.status).toBe(200);
+    const [session] = res.body.sessions;
+    expect(session.durationMin).toBe(45);
+    expect(session.viewers).toEqual([{ name: 'Sam', joinedAt: '2026-10-17T10:01:00.000Z' }]);
+    expect(session.questions.map((q) => q.answer)).toEqual(['Yes.', null, null]);
+  });
+
+  it('falls back to the last question for sessions ended before endedAt was recorded', async () => {
+    Deck.findById.mockResolvedValue({ _id: DECK_ID, ownerId: PRESENTER_ID, collaboratorIds: [] });
+    Room.find.mockReturnValue(
+      queryResolving([{ _id: ROOM_ID, code: 'ABC234', createdAt: new Date('2026-10-17T10:00:00Z') }])
+    );
+    Viewer.find.mockReturnValue(queryResolving([]));
+    Question.find.mockReturnValue(
+      queryResolving([{ _id: 'q1', text: 'Hi', status: 'pending', createdAt: new Date('2026-10-17T10:20:00Z') }])
+    );
+
+    const res = await history(PRESENTER_ID);
+
+    expect(res.body.sessions[0].durationMin).toBe(20);
   });
 });

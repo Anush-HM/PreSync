@@ -1,4 +1,6 @@
+import mongoose from 'mongoose';
 import Deck from '../models/Deck.js';
+import { isEditorOf } from './deckController.js';
 import Room from '../models/Room.js';
 import Viewer from '../models/Viewer.js';
 import Question from '../models/Question.js';
@@ -141,6 +143,7 @@ export async function endRoom(req, res) {
     return res.status(403).json({ error: 'Only the presenter can end this session' });
   }
   room.active = false;
+  room.endedAt = new Date();
   await room.save();
 
   // Ending a session is a REST action (not a socket event), but anyone
@@ -157,14 +160,13 @@ export async function endRoom(req, res) {
 // Includes viewer names (from issue #19) and Q&A log per session.
 export async function getSessionHistory(req, res) {
   const { deckId } = req.params;
+  if (!mongoose.isValidObjectId(deckId)) return res.status(400).json({ error: 'Invalid deck id' });
 
   const deck = await Deck.findById(deckId);
   if (!deck) return res.status(404).json({ error: 'Deck not found' });
-
-  const isEditor =
-    deck.ownerId.toString() === req.userId ||
-    deck.collaboratorIds.some((id) => id.toString() === req.userId);
-  if (!isEditor) return res.status(403).json({ error: 'Not a collaborator on this deck' });
+  if (!isEditorOf(deck, req.userId)) {
+    return res.status(403).json({ error: 'Not a collaborator on this deck' });
+  }
 
   const rooms = await Room.find({ deckId, active: false }).sort({ createdAt: -1 }).lean();
 
@@ -181,8 +183,9 @@ export async function getSessionHistory(req, res) {
           .lean()
       ]);
 
-      const lastActivity = questions.at(-1)?.createdAt ?? room.createdAt;
-      const durationMs = new Date(lastActivity) - new Date(room.createdAt);
+      // Rooms ended before endedAt existed fall back to the last question.
+      const endedAt = room.endedAt ?? questions.at(-1)?.createdAt ?? room.createdAt;
+      const durationMs = new Date(endedAt) - new Date(room.createdAt);
       const durationMin = Math.max(0, Math.round(durationMs / 60000));
 
       return {
@@ -195,7 +198,8 @@ export async function getSessionHistory(req, res) {
         questions: questions.map((q) => ({
           id: q._id,
           text: q.text,
-          answer: q.draftAnswer || null,
+          // Only answers the presenter actually sent; unsent AI drafts stay private.
+          answer: q.status === 'sent' ? q.draftAnswer : null,
           status: q.status
         }))
       };
