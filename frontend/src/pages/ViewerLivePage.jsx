@@ -85,6 +85,11 @@ function ViewerLivePage() {
       setPinnedSlide((prev) => (prev ? prev : slide)); // first snapshot pins immediately
     });
 
+    // Sent on every (re)join, newest first, so the feed survives a refresh.
+    socket.on('qa:history', ({ items }) => {
+      setAnsweredQuestions(items);
+    });
+
     socket.on('qa:answer', ({ id, question: q, answer }) => {
       setAnsweredQuestions((prev) => [{ id, question: q, answer, dismissed: false }, ...prev]);
     });
