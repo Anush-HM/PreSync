@@ -5,12 +5,20 @@ vi.mock('../models/Deck.js', () => ({
 }));
 vi.mock('../models/User.js', () => ({ default: { findOne: vi.fn() } }));
 vi.mock('../services/pdfIngestService.js', () => ({ extractSlidesFromPdf: vi.fn() }));
+vi.mock('../services/pptxIngestService.js', () => ({ extractSlidesFromPptx: vi.fn() }));
+vi.mock('../services/deckExportService.js', () => ({
+  exportDeckToPdf: vi.fn(),
+  exportDeckToPptx: vi.fn(),
+  exportFileName: (title, ext) => `${title}.${ext}`
+}));
 vi.mock('../yjs/docManager.js', () => ({ flushDoc: vi.fn() }));
 
 const { default: Deck } = await import('../models/Deck.js');
 const { default: User } = await import('../models/User.js');
 const { extractSlidesFromPdf } = await import('../services/pdfIngestService.js');
 const { flushDoc } = await import('../yjs/docManager.js');
+const { extractSlidesFromPptx } = await import('../services/pptxIngestService.js');
+const { exportDeckToPdf, exportDeckToPptx } = await import('../services/deckExportService.js');
 const { startTestServer, tokenFor } = await import('../test/httpServer.js');
 
 const OWNER_ID = '64b000000000000000000001';
@@ -320,59 +328,120 @@ describe('DELETE /api/decks/:deckId', () => {
 });
 
 describe('POST /api/decks/import', () => {
-  const pdfForm = (title) => {
-    const form = new FormData();
-    form.append('pdf', new Blob(['%PDF-1.4'], { type: 'application/pdf' }), 'Launch Plan.pdf');
-    if (title) form.append('title', title);
-    return form;
+  const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  const form = (name, type, { field = 'file', title } = {}) => {
+    const f = new FormData();
+    f.append(field, new Blob(['x'], { type }), name);
+    if (title) f.append('title', title);
+    return f;
   };
+  const upload = (body) => server.request('POST', '/api/decks/import', { token: tokenFor(OWNER_ID), body });
 
   it('requires a file', async () => {
-    const res = await server.request('POST', '/api/decks/import', {
-      token: tokenFor(OWNER_ID),
-      body: new FormData()
-    });
+    const res = await upload(new FormData());
     expect(res.status).toBe(400);
   });
 
-  it('rejects a file that is not a PDF with a 400', async () => {
-    const form = new FormData();
-    form.append('pdf', new Blob(['hello'], { type: 'text/plain' }), 'notes.txt');
-    const res = await server.request('POST', '/api/decks/import', { token: tokenFor(OWNER_ID), body: form });
+  it('rejects a file that is neither PDF nor PPTX with a 400', async () => {
+    const res = await upload(form('notes.txt', 'text/plain'));
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Only PDF files are accepted (field name "pdf")');
+    expect(res.body.error).toBe('Only PDF (.pdf) and PowerPoint (.pptx) files can be imported');
     expect(extractSlidesFromPdf).not.toHaveBeenCalled();
+    expect(extractSlidesFromPptx).not.toHaveBeenCalled();
   });
 
-  it('rejects a PDF under the wrong field name with a 400', async () => {
-    const form = new FormData();
-    form.append('file', new Blob(['%PDF-1.4'], { type: 'application/pdf' }), 'deck.pdf');
-    const res = await server.request('POST', '/api/decks/import', { token: tokenFor(OWNER_ID), body: form });
+  it('explains that legacy .ppt must be re-saved as .pptx', async () => {
+    const res = await upload(form('old.ppt', 'application/vnd.ms-powerpoint'));
+    expect(res.status).toBe(415);
+    expect(res.body.error).toMatch(/save it as \.pptx/);
+  });
+
+  it('rejects a file under an unknown field name with a 400', async () => {
+    const res = await upload(form('deck.pdf', 'application/pdf', { field: 'slides' }));
     expect(res.status).toBe(400);
   });
 
   it('reports a PDF that cannot be parsed as 422', async () => {
     extractSlidesFromPdf.mockRejectedValue(new Error('bad xref table'));
-    const res = await server.request('POST', '/api/decks/import', {
-      token: tokenFor(OWNER_ID),
-      body: pdfForm()
-    });
+    const res = await upload(form('Launch Plan.pdf', 'application/pdf'));
     expect(res.status).toBe(422);
     expect(res.body.error).toBe('Could not parse PDF: bad xref table');
     expect(Deck.create).not.toHaveBeenCalled();
   });
 
-  it('creates a deck from the extracted slides, titled after the file', async () => {
+  it('creates a deck from a PDF, titled after the file (legacy "pdf" field)', async () => {
     const slides = [{ id: 's1', order: 0, blocks: [] }];
     extractSlidesFromPdf.mockResolvedValue(slides);
     Deck.create.mockImplementation(async (doc) => ({ _id: DECK_ID, ...doc }));
-    const res = await server.request('POST', '/api/decks/import', {
-      token: tokenFor(OWNER_ID),
-      body: pdfForm()
-    });
+    const res = await upload(form('Launch Plan.pdf', 'application/pdf', { field: 'pdf' }));
     expect(res.status).toBe(201);
     expect(Buffer.isBuffer(extractSlidesFromPdf.mock.calls[0][0])).toBe(true);
     expect(Deck.create).toHaveBeenCalledWith({ title: 'Launch Plan', ownerId: OWNER_ID, slides });
-    expect(res.body).toEqual({ id: DECK_ID, title: 'Launch Plan', slideCount: 1, slides });
+    expect(res.body).toEqual({ id: DECK_ID, title: 'Launch Plan', format: 'pdf', slideCount: 1, slides });
+  });
+
+  it('creates a deck from a PPTX, even when the browser sends it as octet-stream', async () => {
+    const slides = [{ id: 's1', order: 0, blocks: [] }];
+    extractSlidesFromPptx.mockResolvedValue(slides);
+    Deck.create.mockImplementation(async (doc) => ({ _id: DECK_ID, ...doc }));
+    for (const type of [PPTX_MIME, 'application/octet-stream']) {
+      const res = await upload(form('Board Deck.pptx', type));
+      expect(res.status).toBe(201);
+      expect(res.body.format).toBe('pptx');
+    }
+    expect(Deck.create).toHaveBeenLastCalledWith({ title: 'Board Deck', ownerId: OWNER_ID, slides });
+    expect(extractSlidesFromPdf).not.toHaveBeenCalled();
+  });
+
+  it('reports a PPTX that cannot be parsed as 422', async () => {
+    extractSlidesFromPptx.mockRejectedValue(new Error('Missing ppt/presentation.xml'));
+    const res = await upload(form('broken.pptx', PPTX_MIME));
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Could not parse PowerPoint file: Missing ppt/presentation.xml');
+  });
+});
+
+describe('GET /api/decks/:deckId/export', () => {
+  const exportAs = (format, userId = COLLAB_ID) =>
+    server.request('GET', `/api/decks/${DECK_ID}/export?format=${format}`, { token: tokenFor(userId) });
+
+  it('rejects an unknown format', async () => {
+    const res = await exportAs('docx');
+    expect(res.status).toBe(400);
+    expect(Deck.findById).not.toHaveBeenCalled();
+  });
+
+  it('403s for a user who is not on the deck', async () => {
+    Deck.findById.mockResolvedValue(makeDeck());
+    const res = await exportAs('pdf', STRANGER_ID);
+    expect(res.status).toBe(403);
+    expect(exportDeckToPdf).not.toHaveBeenCalled();
+  });
+
+  it('flushes live edits, then sends the file as a download', async () => {
+    const stale = makeDeck({ slides: [{ id: 'old' }] });
+    const fresh = makeDeck({ slides: [{ id: 'new' }] });
+    Deck.findById.mockResolvedValueOnce(stale).mockResolvedValueOnce(fresh);
+    flushDoc.mockResolvedValue(true);
+    exportDeckToPptx.mockResolvedValue(Buffer.from('PK-fake'));
+
+    const res = await exportAs('pptx');
+    expect(res.status).toBe(200);
+    expect(flushDoc).toHaveBeenCalledWith(DECK_ID);
+    expect(exportDeckToPptx.mock.calls[0][0].slides).toEqual([{ id: 'new' }]);
+    expect(res.headers.get('content-type')).toBe(
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    );
+    expect(res.headers.get('content-disposition')).toContain('attachment; filename="Quarterly review.pptx"');
+  });
+
+  it('exports a PDF without re-reading when nobody is editing', async () => {
+    Deck.findById.mockResolvedValue(makeDeck());
+    flushDoc.mockResolvedValue(false);
+    exportDeckToPdf.mockResolvedValue(Buffer.from('%PDF-fake'));
+    const res = await exportAs('pdf');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/pdf');
+    expect(Deck.findById).toHaveBeenCalledTimes(1);
   });
 });
