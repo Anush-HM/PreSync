@@ -108,3 +108,9 @@ export async function downloadDeckExport(deckId, format) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// Any editor: copy the deck (including unsaved live edits) into a new
+// deck owned by the caller. Resolves to { id, title, slideCount }.
+export async function duplicateDeck(deckId) {
+  return apiFetch(`/api/decks/${deckId}/duplicate`, { method: 'POST' });
+}

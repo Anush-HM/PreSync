@@ -1,47 +1,83 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { isLoggedIn, clearAuthToken, getCurrentUser } from '../data/apiConfig.js';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Menu as MenuIcon, X } from 'lucide-react';
+import Logo from './ui/Logo.jsx';
+import { isLoggedIn } from '../data/apiConfig.js';
 import './Navbar.css';
 
-function Navbar() {
-  const navigate = useNavigate();
-  const loggedIn = isLoggedIn();
-  const user = getCurrentUser();
+const LINKS = [
+  { href: '#features', label: 'Features' },
+  { href: '#how-it-works', label: 'How It Works' },
+  { href: '#collaboration', label: 'Collaboration' },
+  { href: '#documentation', label: 'Documentation' }
+];
 
-  function handleLogout() {
-    clearAuthToken();
-    // Navigate triggers a full re-render of the Navbar via the router
-    navigate('/', { replace: true });
-  }
+// Public site navigation. On small screens the links fold into a menu.
+function Navbar() {
+  const loggedIn = isLoggedIn();
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState('');
+
+  // Highlight the section currently in view.
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return undefined;
+    const targets = LINKS.map((l) => document.querySelector(l.href)).filter(Boolean);
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) setActive(`#${e.target.id}`); });
+    }, { rootMargin: '-45% 0px -50% 0px' });
+    targets.forEach((t) => io.observe(t));
+    return () => io.disconnect();
+  }, []);
 
   return (
-    <nav>
-      <div className="nav-inner">
-        <Link to="/" className="logo">
-          <span className="logo-mark">
-            <svg viewBox="0 0 20 20" fill="none">
-              <path d="M2 13 Q5 6 8 13 T14 13" stroke="#4FA8FF" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
-              <path d="M2 7 Q5 14 8 7 T14 7" stroke="#FFB454" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
-            </svg>
-          </span>
-          PreSync
-        </Link>
-        <div className="nav-links">
-          <a href="#features">Features</a>
-          <a href="#how-it-works">How it works</a>
-        </div>
-        <div className="nav-actions">
-          <Link to="/join" className="btn btn-ghost mono">Join with code</Link>
+    <header className="site-nav">
+      <div className="site-nav-inner">
+        <Logo />
+        <nav className={`site-nav-links${open ? ' open' : ''}`} aria-label="Site">
+          {LINKS.map((l) => (
+            <a
+              key={l.href}
+              href={l.href}
+              className={active === l.href ? 'active' : undefined}
+              aria-current={active === l.href ? 'true' : undefined}
+              onClick={() => setOpen(false)}
+            >
+              {l.label}
+            </a>
+          ))}
+          <div className="site-nav-mobile-actions">
+            {loggedIn ? (
+              <Link to="/decks" className="btn btn-primary btn-block">Open dashboard</Link>
+            ) : (
+              <>
+                <Link to="/login" className="btn btn-ghost btn-block">Sign In</Link>
+                <Link to="/login?mode=register" className="btn btn-primary btn-block">Get Started</Link>
+              </>
+            )}
+          </div>
+        </nav>
+        <div className="site-nav-actions">
+          <Link to="/join" className="btn btn-quiet">Join a session</Link>
           {loggedIn ? (
-            <>
-              <Link to="/decks" className="btn btn-ghost">{user?.name || user?.email || 'My decks'}</Link>
-              <button className="btn btn-solid" onClick={handleLogout}>Log out</button>
-            </>
+            <Link to="/decks" className="btn btn-primary">Open dashboard</Link>
           ) : (
-            <Link to="/login" className="btn btn-solid">Sign in</Link>
+            <>
+              <Link to="/login" className="btn btn-ghost">Sign In</Link>
+              <Link to="/login?mode=register" className="btn btn-primary">Get Started</Link>
+            </>
           )}
         </div>
+        <button
+          type="button"
+          className="icon-btn site-nav-toggle"
+          aria-label={open ? 'Close menu' : 'Open menu'}
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? <X /> : <MenuIcon />}
+        </button>
       </div>
-    </nav>
+    </header>
   );
 }
 

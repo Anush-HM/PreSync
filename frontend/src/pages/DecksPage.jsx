@@ -1,55 +1,150 @@
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { listDecks, createDeck, importDeckFile, deleteDeck, IMPORT_ACCEPT } from '../data/decksApi.js';
-import { clearAuthToken, getCurrentUser } from '../data/apiConfig.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Plus, Upload, Search, FileText, Presentation, ArrowRight, RefreshCw, X } from 'lucide-react';
+import AppShell from '../components/layout/AppShell.jsx';
+import DeckCard from '../components/decks/DeckCard.jsx';
+import RenameDeckDialog from '../components/decks/RenameDeckDialog.jsx';
+import ShareDeckDialog from '../components/decks/ShareDeckDialog.jsx';
+import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
 import SessionHistoryModal from '../components/SessionHistoryModal.jsx';
+import { useToast } from '../components/ui/Toast.jsx';
+import { listDecks, createDeck, importDeckFile, deleteDeck, duplicateDeck, IMPORT_ACCEPT } from '../data/decksApi.js';
+import { getCurrentUser } from '../data/apiConfig.js';
+import { greetingFor, plural } from '../data/format.js';
 import './DecksPage.css';
 
-function formatDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const VIEWS = {
+  home: { title: null, subtitle: 'Pick up where you left off, or start something new.' },
+  mine: { title: 'My presentations', subtitle: 'Presentations you own.' },
+  shared: { title: 'Shared with me', subtitle: 'Presentations other people invited you to co-edit.' }
+};
+
+const SORTS = {
+  recent: { label: 'Last edited', compare: (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0) },
+  title: { label: 'Name (A–Z)', compare: (a, b) => a.title.localeCompare(b.title) },
+  created: { label: 'Date created', compare: (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0) },
+  slides: { label: 'Most slides', compare: (a, b) => b.slideCount - a.slideCount }
+};
+
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'owned', label: 'Owned by me' },
+  { key: 'shared', label: 'Shared with me' }
+];
+
+const RECENT_LIMIT = 8;
+const SHARED_PREVIEW_LIMIT = 4;
+
+function normalise(d) {
+  return { ...d, id: String(d.id || d._id) };
 }
 
-function colorFor(id) {
-  const s = String(id);
-  let hash = 0;
-  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
-  return hash % 2 === 0 ? 'blue' : 'amber';
+function DeckGrid({ decks, cardProps, busyId }) {
+  return (
+    <div className="deck-grid">
+      {decks.map((d) => <DeckCard key={d.id} deck={d} busy={busyId === d.id} {...cardProps} />)}
+    </div>
+  );
 }
 
-function DecksPage() {
+function SkeletonGrid() {
+  return (
+    <div className="deck-grid" aria-hidden="true">
+      {Array.from({ length: 4 }, (_, i) => (
+        <div key={i} className="deck-skeleton">
+          <div className="skeleton" style={{ aspectRatio: '16 / 9' }} />
+          <div className="skeleton" style={{ height: 14, width: '70%', marginTop: 14 }} />
+          <div className="skeleton" style={{ height: 11, width: '40%', marginTop: 8 }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Onboarding({ onCreate, onImport, importing }) {
+  return (
+    <section className="onboarding card" aria-labelledby="onboarding-title">
+      <div className="onboarding-copy">
+        <span className="eyebrow"><span className="dot" />Getting started</span>
+        <h2 id="onboarding-title">Create your first presentation</h2>
+        <p>Start from a blank canvas, or bring in slides you already have. Everything you make here can be co-edited live and presented to an audience.</p>
+      </div>
+      <div className="onboarding-actions">
+        <button type="button" className="onboarding-option" onClick={onCreate}>
+          <span className="onboarding-icon is-primary"><Plus aria-hidden="true" /></span>
+          <span className="onboarding-text">
+            <strong>Start from scratch</strong>
+            <span>A blank 16:9 presentation, ready to edit.</span>
+          </span>
+          <ArrowRight className="onboarding-arrow" aria-hidden="true" />
+        </button>
+        <button type="button" className="onboarding-option" onClick={onImport} disabled={importing}>
+          <span className="onboarding-icon"><Presentation aria-hidden="true" /></span>
+          <span className="onboarding-text">
+            <strong>Import a PowerPoint</strong>
+            <span>.pptx text, pictures, backgrounds and speaker notes.</span>
+          </span>
+          <ArrowRight className="onboarding-arrow" aria-hidden="true" />
+        </button>
+        <button type="button" className="onboarding-option" onClick={onImport} disabled={importing}>
+          <span className="onboarding-icon"><FileText aria-hidden="true" /></span>
+          <span className="onboarding-text">
+            <strong>Import a PDF</strong>
+            <span>Each page becomes an editable slide.</span>
+          </span>
+          <ArrowRight className="onboarding-arrow" aria-hidden="true" />
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function DecksPage({ view = 'home' }) {
   const navigate = useNavigate();
+  const toast = useToast();
   const fileInputRef = useRef(null);
   const user = getCurrentUser();
+  const viewInfo = VIEWS[view] || VIEWS.home;
 
   const [decks, setDecks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [importing, setImporting] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
-  const [historyDeck, setHistoryDeck] = useState(null); // { id, title }
+  const [loadError, setLoadError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [importingName, setImportingName] = useState('');
+  const [busyId, setBusyId] = useState(null);
+
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [sort, setSort] = useState('recent');
+
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [shareTarget, setShareTarget] = useState(null);
+  const [historyTarget, setHistoryTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => { refreshDecks(); }, []);
 
   async function refreshDecks() {
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
       const data = await listDecks();
-      setDecks(data);
+      setDecks(data.map(normalise));
     } catch (err) {
-      setError(err.message || 'Could not load decks');
+      setLoadError(err.message || 'Could not load your presentations');
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleNewDeck() {
+  async function handleCreate() {
+    setCreating(true);
     try {
-      const deck = await createDeck('Untitled deck');
-      navigate(`/editor/${deck._id}`);
+      const deck = await createDeck('Untitled presentation');
+      navigate(`/editor/${deck._id || deck.id}`);
     } catch (err) {
-      setError(err.message || 'Could not create deck');
+      toast.error(err.message || 'Could not create a presentation');
+      setCreating(false);
     }
   }
 
@@ -59,141 +154,248 @@ function DecksPage() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    setImporting(true);
-    setError('');
+    setImportingName(file.name);
     try {
       const deck = await importDeckFile(file);
       navigate(`/editor/${deck.id || deck._id}`);
     } catch (err) {
-      setError(err.message || 'Could not import that file');
-    } finally {
-      setImporting(false);
+      toast.error(err.message || 'Could not import that file');
+      setImportingName('');
     }
   }
 
-  async function handleDeleteDeck(e, deckId) {
-    e.stopPropagation();
-    e.preventDefault();
-    if (!window.confirm('Delete this deck? This cannot be undone.')) return;
-    setDeletingId(deckId);
-    setError('');
+  async function handleDuplicate(deck) {
+    setBusyId(deck.id);
     try {
-      await deleteDeck(deckId);
-      setDecks((prev) => prev.filter((d) => (d.id || d._id) !== deckId));
+      const copy = await duplicateDeck(deck.id);
+      toast.success(`Created “${copy.title}”`);
+      await refreshDecks();
     } catch (err) {
-      setError(err.message || 'Could not delete deck');
+      toast.error(err.message || 'Could not duplicate that presentation');
     } finally {
-      setDeletingId(null);
+      setBusyId(null);
     }
   }
 
-  function handleLogout() {
-    clearAuthToken();
-    navigate('/', { replace: true });
+  async function confirmDelete() {
+    const target = deleteTarget;
+    await deleteDeck(target.id);
+    setDecks((prev) => prev.filter((d) => d.id !== target.id));
+    setDeleteTarget(null);
+    toast.success(`Deleted “${target.title}”`);
   }
+
+  function handleRenamed(updated) {
+    setDecks((prev) => prev.map((d) => (d.id === renameTarget.id ? { ...d, title: updated.title, updatedAt: updated.updatedAt || d.updatedAt } : d)));
+    toast.success('Presentation renamed');
+    setRenameTarget(null);
+  }
+
+  function handleShareChanged(updated) {
+    setDecks((prev) => prev.map((d) => (d.id === shareTarget.id ? { ...d, collaborators: updated.collaborators } : d)));
+  }
+
+  const cardProps = {
+    currentUserId: user?.id,
+    onRename: setRenameTarget,
+    onDuplicate: handleDuplicate,
+    onShare: setShareTarget,
+    onHistory: setHistoryTarget,
+    onDelete: setDeleteTarget
+  };
+
+  // Decks this view is about, before search/filter.
+  const scoped = useMemo(() => {
+    if (view === 'mine') return decks.filter((d) => d.isOwner);
+    if (view === 'shared') return decks.filter((d) => !d.isOwner);
+    return decks;
+  }, [decks, view]);
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let list = scoped;
+    if (view === 'home' && filter === 'owned') list = list.filter((d) => d.isOwner);
+    if (view === 'home' && filter === 'shared') list = list.filter((d) => !d.isOwner);
+    if (q) list = list.filter((d) => d.title.toLowerCase().includes(q));
+    return [...list].sort(SORTS[sort].compare);
+  }, [scoped, query, filter, sort, view]);
+
+  // The home view shows curated sections until the user searches,
+  // filters or re-sorts; then it shows one results grid.
+  const showSections = view === 'home' && !query.trim() && filter === 'all' && sort === 'recent';
+  const recent = results.slice(0, RECENT_LIMIT);
+  const sharedPreview = decks.filter((d) => !d.isOwner).sort(SORTS.recent.compare).slice(0, SHARED_PREVIEW_LIMIT);
+
+  const firstName = (user?.name || '').trim().split(/\s+/)[0];
+  const heading = viewInfo.title || (firstName ? `${greetingFor()}, ${firstName}` : greetingFor());
+  const isEmptyAccount = !loading && !loadError && decks.length === 0;
 
   return (
-    <div className="decks-page">
-      {/* ── Mini navbar for inner pages ── */}
-      <nav className="decks-nav">
-        <div className="decks-nav-inner">
-          <Link to="/" className="logo">
-            <span className="logo-mark">
-              <svg viewBox="0 0 20 20" fill="none">
-                <path d="M2 13 Q5 6 8 13 T14 13" stroke="#4FA8FF" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
-                <path d="M2 7 Q5 14 8 7 T14 7" stroke="#FFB454" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
-              </svg>
-            </span>
-            PreSync
-          </Link>
-          <div className="decks-nav-right">
-            <span className="decks-nav-user mono">{user?.name || user?.email || ''}</span>
-            <button className="btn btn-ghost" onClick={handleLogout}>Log out</button>
-          </div>
-        </div>
-      </nav>
-
-      <div className="wrap">
-        <div className="decks-head">
+    <AppShell>
+      <div className="decks-page">
+        <header className="dash-head">
           <div>
-            <div className="eyebrow"><span className="dot"></span>EDITOR</div>
-            <h1>Your decks</h1>
+            <h1>{heading}</h1>
+            <p className="dash-sub">{viewInfo.subtitle}</p>
           </div>
-          <div className="decks-head-actions">
-            <input ref={fileInputRef} type="file" accept={IMPORT_ACCEPT} onChange={handleFileSelected} style={{ display: 'none' }} />
-            <button className="btn btn-ghost" onClick={handleImportClick} disabled={importing}>
-              {importing ? 'Importing…' : '↑ Import PDF / PPTX'}
+          <div className="dash-actions">
+            <input ref={fileInputRef} type="file" accept={IMPORT_ACCEPT} onChange={handleFileSelected} hidden />
+            <button type="button" className="btn btn-secondary" onClick={handleImportClick} disabled={!!importingName}>
+              <Upload /> Import PowerPoint or PDF
             </button>
-            <button className="btn btn-amber" onClick={handleNewDeck}>+ New deck</button>
+            <button type="button" className="btn btn-primary" onClick={handleCreate} disabled={creating}>
+              <Plus /> {creating ? 'Creating…' : 'Create presentation'}
+            </button>
           </div>
-        </div>
+        </header>
 
-        {error && <p className="decks-error">{error}</p>}
+        {importingName && (
+          <div className="import-banner" role="status">
+            <span className="spinner" aria-hidden="true" />
+            <span>Importing <strong>{importingName}</strong>… extracting slides, text and images.</span>
+          </div>
+        )}
 
-        {loading ? (
-          <div className="decks-loading">
-            <div className="loading-spinner" />
-            <p className="mono">Loading decks…</p>
+        {loadError && (
+          <div className="alert alert-error dash-alert" role="alert">
+            <span style={{ flex: 1 }}>{loadError}</span>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={refreshDecks}><RefreshCw /> Retry</button>
           </div>
-        ) : decks.length === 0 ? (
-          <div className="decks-empty-state">
-            <p className="decks-empty-icon">📄</p>
-            <p className="decks-empty">No decks yet — import a PDF or PowerPoint (.pptx), or start a new deck.</p>
-          </div>
+        )}
+
+        {isEmptyAccount && view === 'home' ? (
+          <Onboarding onCreate={handleCreate} onImport={handleImportClick} importing={!!importingName} />
         ) : (
-          <div className="deck-grid">
-            {decks.map((d) => {
-              const id = d.id || d._id;
-              return (
-                <div
-                  key={id}
-                  className="deck-card"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate(`/editor/${id}`)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/editor/${id}`); }}
-                >
-                  <div className={`deck-thumb thumb-${colorFor(id)}`}>
-                    <span>{d.slideCount} slide{d.slideCount === 1 ? '' : 's'}</span>
-                  </div>
-                  <div className="deck-info">
-                    <h3>{d.title}</h3>
-                    <p className="mono">Edited {formatDate(d.updatedAt)}</p>
-                  </div>
-                  <div className="deck-card-actions" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      className="btn btn-ghost deck-history-btn"
-                      title="View session history"
-                      onClick={() => setHistoryDeck({ id, title: d.title })}
-                    >
-                      📋 History
+          <>
+            {!loadError && (
+              <div className="dash-toolbar" role="search">
+                <div className="dash-search">
+                  <Search aria-hidden="true" />
+                  <label htmlFor="deck-search" className="sr-only">Search presentations</label>
+                  <input
+                    id="deck-search"
+                    className="input"
+                    type="search"
+                    placeholder="Search presentations"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  {query && (
+                    <button type="button" className="icon-btn dash-search-clear" aria-label="Clear search" onClick={() => setQuery('')}>
+                      <X />
                     </button>
-                    {d.isOwner && (
-                      <button
-                        className="deck-delete-btn"
-                        title="Delete deck"
-                        disabled={deletingId === id}
-                        onClick={(e) => handleDeleteDeck(e, id)}
-                      >
-                        {deletingId === id ? '…' : '×'}
-                      </button>
-                    )}
-                  </div>
+                  )}
                 </div>
-              );
-            })}
-          </div>
+                {view === 'home' && (
+                  <div className="segmented" role="group" aria-label="Filter presentations">
+                    {FILTERS.map((f) => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        className="segmented-item"
+                        aria-pressed={filter === f.key}
+                        onClick={() => setFilter(f.key)}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <label className="dash-sort">
+                  <span className="sr-only">Sort by</span>
+                  <select className="select" value={sort} onChange={(e) => setSort(e.target.value)}>
+                    {Object.entries(SORTS).map(([key, s]) => <option key={key} value={key}>{s.label}</option>)}
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {loading ? (
+              <SkeletonGrid />
+            ) : loadError ? null : showSections ? (
+              <>
+                <section className="dash-section" aria-labelledby="recent-title">
+                  <div className="dash-section-head">
+                    <h2 id="recent-title">Recent presentations</h2>
+                    {decks.length > RECENT_LIMIT && <Link to="/decks/mine" className="dash-link">View all <ArrowRight /></Link>}
+                  </div>
+                  <DeckGrid decks={recent} cardProps={cardProps} busyId={busyId} />
+                </section>
+                {sharedPreview.length > 0 && (
+                  <section className="dash-section" aria-labelledby="shared-title">
+                    <div className="dash-section-head">
+                      <h2 id="shared-title">Shared with you</h2>
+                      <Link to="/decks/shared" className="dash-link">View all <ArrowRight /></Link>
+                    </div>
+                    <DeckGrid decks={sharedPreview} cardProps={cardProps} busyId={busyId} />
+                  </section>
+                )}
+              </>
+            ) : results.length > 0 ? (
+              <section className="dash-section" aria-label="Presentations">
+                <p className="dash-count">{plural(results.length, 'presentation')}</p>
+                <DeckGrid decks={results} cardProps={cardProps} busyId={busyId} />
+              </section>
+            ) : (
+              <div className="dash-empty">
+                {query.trim() ? (
+                  <>
+                    <h2>No matches for “{query.trim()}”</h2>
+                    <p>Try a different name, or clear the search.</p>
+                    <button type="button" className="btn btn-ghost" onClick={() => setQuery('')}>Clear search</button>
+                  </>
+                ) : view === 'shared' ? (
+                  <>
+                    <h2>Nothing shared with you yet</h2>
+                    <p>When someone invites you to co-edit a presentation, it shows up here.</p>
+                  </>
+                ) : (
+                  <>
+                    <h2>No presentations here yet</h2>
+                    <p>Create one from scratch or import a PowerPoint or PDF.</p>
+                    <button type="button" className="btn btn-primary" onClick={handleCreate}><Plus /> Create presentation</button>
+                  </>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {historyDeck && (
-        <SessionHistoryModal
-          deckId={historyDeck.id}
-          deckTitle={historyDeck.title}
-          onClose={() => setHistoryDeck(null)}
+      {renameTarget && (
+        <RenameDeckDialog
+          deckId={renameTarget.id}
+          currentTitle={renameTarget.title}
+          onClose={() => setRenameTarget(null)}
+          onRenamed={handleRenamed}
         />
       )}
-    </div>
+      {shareTarget && (
+        <ShareDeckDialog
+          deckId={shareTarget.id}
+          deckTitle={shareTarget.title}
+          onClose={() => setShareTarget(null)}
+          onChanged={handleShareChanged}
+        />
+      )}
+      {historyTarget && (
+        <SessionHistoryModal
+          deckId={historyTarget.id}
+          deckTitle={historyTarget.title}
+          onClose={() => setHistoryTarget(null)}
+        />
+      )}
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete presentation?"
+          message={`“${deleteTarget.title}” and its slides will be permanently deleted for you and every collaborator. This cannot be undone.`}
+          confirmLabel="Delete presentation"
+          destructive
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+    </AppShell>
   );
 }
 

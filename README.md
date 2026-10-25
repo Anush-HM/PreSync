@@ -45,6 +45,19 @@ This starts the backend (`node --watch`, port 4000) and the frontend (Vite, port
 - **Edit:** font, size, bold/italic/underline, colour, alignment, line spacing, layer order, slide background, speaker notes, slide reorder/duplicate, undo/redo (Ctrl+Z / Ctrl+Shift+Z). Edits autosave through the live co-editing session; **Save** (Ctrl+S) writes them to the database immediately.
 - **Export:** *Export* in the editor downloads the deck as `.pdf` or `.pptx` (`GET /api/decks/:id/export?format=pdf|pptx`). PPTX keeps text editable, with speaker notes. PDF uses the standard PDF fonts (closest match to the chosen family) and covers Latin-1 text only.
 
+## Design system
+
+The UI follows the *Dark Forest Studio* theme: charcoal surfaces, forest green for primary actions and selection, crimson for live and destructive states. All colours, radii, shadows and fonts are CSS custom properties in `frontend/src/styles/theme.css`; shared primitives (dialog, confirm dialog, toast, menu, avatar, logo) live in `frontend/src/components/ui/`. Icons come from [`lucide-react`](https://lucide.dev).
+
+Signed-in pages use the sidebar layout in `frontend/src/components/layout/AppShell.jsx`:
+
+| Route | Page |
+| --- | --- |
+| `/decks` | Dashboard: recent and shared presentations, search, filter, sort |
+| `/decks/mine` | Presentations you own |
+| `/decks/shared` | Presentations shared with you |
+| `/sessions` | Your live and recent sessions (`GET /api/rooms/mine`) |
+
 ## Tests
 
 ```bash

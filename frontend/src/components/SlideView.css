@@ -1,0 +1,18 @@
+.stage-slide {
+  position: relative; width: 960px; max-width: 100%; aspect-ratio: 16 / 9;
+  background: #ffffff; overflow: hidden;
+}
+.slide-image-placeholder {
+  position: absolute;
+  background: repeating-linear-gradient(135deg, rgba(23, 26, 25, 0.06) 0 10px, rgba(23, 26, 25, 0.1) 10px 20px);
+  border-radius: 4px;
+}
+
+/* A slide rendered at true 960×540 and scaled to fit its box, so text
+   wraps exactly as it does in the editor at any size. */
+.scaled-slide { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #ffffff; }
+.scaled-slide-inner { position: absolute; top: 0; left: 0; width: 960px; height: 540px; transform-origin: 0 0; }
+.scaled-slide-inner .stage-slide {
+  width: 960px; height: 540px; max-width: none;
+  border: none; border-radius: 0; box-shadow: none;
+}

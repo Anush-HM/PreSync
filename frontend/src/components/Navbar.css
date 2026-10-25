@@ -1,30 +1,37 @@
-nav{
-  padding:14px 32px;
-  border-bottom:1px solid var(--hairline);
-  background:rgba(19,22,29,0.85);
-  backdrop-filter:blur(12px);
-  -webkit-backdrop-filter:blur(12px);
-  position:sticky; top:0; z-index:50;
+.site-nav {
+  position: sticky; top: 0; z-index: 40;
+  background: rgba(23, 26, 25, 0.86); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-subtle);
 }
-.nav-inner{
-  max-width:1180px; margin:0 auto;
-  display:flex; align-items:center; justify-content:space-between;
+.site-nav-inner {
+  max-width: 1240px; margin: 0 auto; height: 64px;
+  padding: 0 var(--gutter);
+  display: flex; align-items: center; gap: 28px;
 }
-.nav-links{
-  display:flex; gap:28px;
+.site-nav-links { display: flex; align-items: center; gap: 4px; flex: 1; }
+.site-nav-links > a {
+  font-size: 14px; color: var(--text-secondary); padding: 8px 12px; border-radius: var(--radius-sm);
+  transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
 }
-.nav-links a{
-  font-size:14px; color:var(--muted);
-  transition:color .18s ease;
+.site-nav-links > a:hover { color: var(--text-primary); background: rgba(242, 244, 240, 0.05); }
+.site-nav-links > a.active { color: var(--color-forest-light); background: var(--forest-tint); }
+.site-nav-actions { display: flex; align-items: center; gap: 8px; }
+.site-nav-toggle, .site-nav-mobile-actions { display: none; }
+
+@media (max-width: 960px) {
+  .site-nav-inner { gap: 12px; justify-content: space-between; }
+  .site-nav-actions { display: none; }
+  .site-nav-toggle { display: inline-flex; }
+  .site-nav-links {
+    position: absolute; top: 64px; left: 0; right: 0;
+    flex-direction: column; align-items: stretch; gap: 2px;
+    padding: 10px 16px 18px;
+    background: var(--bg-secondary); border-bottom: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-elevated);
+    display: none;
+  }
+  .site-nav-links.open { display: flex; }
+  .site-nav-links > a { padding: 12px; font-size: 15px; }
+  .site-nav-mobile-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .site-nav-mobile-actions .btn { min-height: 44px; }
 }
-.nav-links a:hover{ color:var(--text); }
-.nav-actions{
-  display:flex; align-items:center; gap:10px;
-}
-@media(max-width:720px){
-  .nav-links{ display:none; }
-}
-@media(max-width:480px){
-  nav{ padding:10px 16px; }
-  .nav-actions .btn{ padding:8px 12px; min-height:44px; }
-}

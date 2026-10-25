@@ -1,11 +1,14 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import Logo from '../components/ui/Logo.jsx';
 import { joinRoomByCode } from '../data/roomsApi.js';
-import './ViewerJoinPage.css';
+import '../styles/auth.css';
 
 function ViewerJoinPage() {
   const navigate = useNavigate();
-  const [code, setCode] = useState('');
+  const [params] = useSearchParams();
+  // A shared join link (/join?code=K7QX2M) pre-fills the code.
+  const [code, setCode] = useState(() => (params.get('code') || '').toUpperCase().slice(0, 8));
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [joining, setJoining] = useState(false);
@@ -39,34 +42,44 @@ function ViewerJoinPage() {
   }
 
   return (
-    <div className="join-page">
-      <form className="join-card" onSubmit={handleJoin}>
-        <div className="eyebrow"><span className="dot"></span>JOIN A SESSION</div>
+    <div className="auth-page join-page">
+      <Logo />
+      <form className="auth-card card" onSubmit={handleJoin} noValidate>
         <h1>Enter the room code</h1>
-        <p className="join-sub">No account needed — just the code and a name.</p>
+        <p className="auth-sub">No account needed, just the code and a name.</p>
 
-        <label className="join-label mono">ROOM CODE</label>
-        <input
-          className="join-input mono"
-          placeholder="e.g. K7QX2M"
-          maxLength={8}
-          value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase())}
-          autoComplete="off"
-          spellCheck={false}
-        />
+        <div className="field">
+          <label className="field-label" htmlFor="join-code">Session code</label>
+          <input
+            id="join-code"
+            className="input code-input"
+            placeholder="e.g. K7QX2M"
+            maxLength={8}
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            inputMode="text"
+          />
+        </div>
 
-        <label className="join-label mono">DISPLAY NAME</label>
-        <input
-          className="join-input"
-          placeholder="e.g. Priya"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
+        <div className="field">
+          <label className="field-label" htmlFor="join-name">Display name</label>
+          <input
+            id="join-name"
+            className="input"
+            placeholder="e.g. Priya"
+            autoComplete="nickname"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <span className="field-hint">Your presenter sees this name in the session’s attendee list.</span>
+        </div>
 
-        {error && <p className="join-error">{error}</p>}
+        {error && <p className="alert alert-error" role="alert">{error}</p>}
 
-        <button className="btn btn-amber join-submit" type="submit" disabled={joining}>
+        <button className="btn btn-primary btn-lg auth-submit" type="submit" disabled={joining}>
           {joining ? 'Joining…' : 'Join session'}
         </button>
       </form>
