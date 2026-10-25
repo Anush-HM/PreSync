@@ -110,3 +110,4 @@
   .dash-sort .select { width: 100%; min-height: 40px; }
   .deck-grid { grid-template-columns: 1fr; }
 }
+.onboarding-foot { margin-top: 2px; padding-left: 4px; }

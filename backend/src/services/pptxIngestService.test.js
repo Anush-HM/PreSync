@@ -99,3 +99,26 @@ describe('extractSlidesFromPptx', () => {
     );
   });
 });
+
+describe('analyzePptx', () => {
+  it('reports titles, tables and charts that are not imported, and keeps slide order', async () => {
+    const { analyzePptx } = await import('./pptxAnalysisService.js');
+    const pptx = new PptxGenJS();
+    pptx.layout = 'LAYOUT_16x9';
+    const s1 = pptx.addSlide();
+    s1.addText('Overview', { x: 1, y: 0.5, w: 8, h: 1, fontSize: 40 });
+    const s2 = pptx.addSlide();
+    s2.addText('Numbers', { x: 0.5, y: 0.3, w: 8, h: 0.8, fontSize: 32 });
+    s2.addTable([[{ text: 'A' }, { text: 'B' }]], { x: 1, y: 2, w: 4 });
+    s2.addChart(pptx.ChartType.bar, [{ name: 'S', labels: ['a'], values: [1] }], { x: 5, y: 2, w: 4, h: 3 });
+    const buf = await pptx.write({ outputType: 'nodebuffer' });
+
+    const { slides, analysis, outline } = await analyzePptx(buf, 'numbers.pptx');
+    expect(slides).toHaveLength(2);
+    expect(analysis.slideCount).toBe(2);
+    expect(analysis.stats).toMatchObject({ slides: 2, tables: 1, charts: 1 });
+    expect(analysis.headings.map((h) => h.text)).toEqual(['Overview', 'Numbers']);
+    expect(outline.map((o) => o.title)).toEqual(['Overview', 'Numbers']);
+    expect(analysis.warnings.join(' ')).toMatch(/slide 2 \(1 table, 1 chart\)/);
+  });
+});

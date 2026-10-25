@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
-import { DOMParser } from '@xmldom/xmldom';
 import path from 'path';
+import { attr, child, children, find, num, readRels, readXml, relOfType } from './ooxml.js';
 
 // Extracts editable content from a .pptx (Office Open XML) deck: every
 // text shape becomes a textbox block with its position, size, font,
@@ -27,74 +27,6 @@ const DEFAULT_FONT_PT = 18;
 const ALIGN = { l: 'left', ctr: 'center', r: 'right', just: 'justify', dist: 'justify' };
 
 export class PptxParseError extends Error {}
-
-// --- tiny DOM helpers (namespace-agnostic, by qualified tag name) ------
-
-function children(node, tag) {
-  const out = [];
-  if (!node) return out;
-  for (let c = node.firstChild; c; c = c.nextSibling) {
-    if (c.nodeType === 1 && (!tag || c.nodeName === tag)) out.push(c);
-  }
-  return out;
-}
-
-function child(node, tag) {
-  return children(node, tag)[0] || null;
-}
-
-// Follows a path of tag names, e.g. find(sp, 'p:spPr', 'a:xfrm', 'a:off').
-function find(node, ...tags) {
-  let cur = node;
-  for (const tag of tags) {
-    cur = child(cur, tag);
-    if (!cur) return null;
-  }
-  return cur;
-}
-
-function attr(node, name) {
-  return node?.getAttribute(name) || null;
-}
-
-function num(node, name) {
-  const v = attr(node, name);
-  return v === null ? null : Number(v);
-}
-
-function parseXml(text) {
-  return new DOMParser({ onError: () => {} }).parseFromString(text, 'text/xml').documentElement;
-}
-
-// --- package helpers ----------------------------------------------------
-
-async function readXml(zip, partPath) {
-  const file = zip.file(partPath);
-  if (!file) return null;
-  return parseXml(await file.async('string'));
-}
-
-// Relationships for a part, as Map(rId -> absolute part path).
-async function readRels(zip, partPath) {
-  const relsPath = path.posix.join(path.posix.dirname(partPath), '_rels', `${path.posix.basename(partPath)}.rels`);
-  const root = await readXml(zip, relsPath);
-  const rels = new Map();
-  if (!root) return rels;
-  for (const rel of children(root, 'Relationship')) {
-    if (attr(rel, 'TargetMode') === 'External') continue;
-    const target = attr(rel, 'Target');
-    const resolved = target.startsWith('/')
-      ? target.slice(1)
-      : path.posix.normalize(path.posix.join(path.posix.dirname(partPath), target));
-    rels.set(attr(rel, 'Id'), { target: resolved, type: attr(rel, 'Type') || '' });
-  }
-  return rels;
-}
-
-function relOfType(rels, suffix) {
-  for (const rel of rels.values()) if (rel.type.endsWith(suffix)) return rel.target;
-  return null;
-}
 
 // --- colours --------------------------------------------------------------
 
@@ -137,7 +69,7 @@ function isHexColor(v) {
 
 // --- placeholders (layout/master inheritance) ----------------------------
 
-function placeholderOf(sp) {
+export function placeholderOf(sp) {
   const ph = find(sp, 'p:nvSpPr', 'p:nvPr', 'p:ph') || find(sp, 'p:nvPicPr', 'p:nvPr', 'p:ph');
   if (!ph) return null;
   return { type: attr(ph, 'type') || 'body', idx: attr(ph, 'idx') };
@@ -206,7 +138,7 @@ function fontSizeOf(sp) {
 
 // --- text ---------------------------------------------------------------
 
-function paragraphText(p) {
+export function paragraphText(p) {
   let text = '';
   for (const c of children(p)) {
     if (c.nodeName === 'a:r' || c.nodeName === 'a:fld') text += child(c, 'a:t')?.textContent || '';

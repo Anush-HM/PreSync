@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Presentation, Users, Radio, LogOut, Menu as MenuIcon, X, LogIn } from 'lucide-react';
+import { LayoutDashboard, Presentation, FileText, Users, Radio, LogOut, Menu as MenuIcon, X, LogIn } from 'lucide-react';
 import Logo from '../ui/Logo.jsx';
 import Avatar from '../ui/Avatar.jsx';
 import { clearAuthToken, getCurrentUser } from '../../data/apiConfig.js';
@@ -11,6 +11,7 @@ import './AppShell.css';
 const NAV = [
   { to: '/decks', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/decks/mine', label: 'My Presentations', icon: Presentation },
+  { to: '/documents', label: 'Documents', icon: FileText },
   { to: '/decks/shared', label: 'Shared With Me', icon: Users },
   { to: '/sessions', label: 'Live Sessions', icon: Radio }
 ];
