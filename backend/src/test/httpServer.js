@@ -31,7 +31,7 @@ export async function startTestServer() {
     } catch {
       json = undefined;
     }
-    return { status: res.status, body: json };
+    return { status: res.status, headers: res.headers, body: json };
   }
 
   return {

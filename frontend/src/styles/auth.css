@@ -1,0 +1,36 @@
+/* Shared layout for the small standalone forms: sign in, join a session. */
+.auth-page {
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 28px; padding: 40px 16px;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% -10%, rgba(52, 118, 83, 0.22), transparent 70%),
+    var(--bg-primary);
+}
+.auth-card {
+  width: 100%; max-width: 420px;
+  padding: clamp(24px, 5vw, 36px);
+  display: flex; flex-direction: column; gap: 16px;
+}
+.auth-card h1 { font-size: 24px; }
+.auth-sub { color: var(--text-secondary); font-size: 14px; margin-top: -8px; }
+.auth-card .input { min-height: 44px; font-size: 15px; }
+.auth-submit { width: 100%; margin-top: 4px; }
+.auth-switch { font-size: 13.5px; color: var(--text-secondary); text-align: center; }
+.link-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--color-forest-light); font-size: inherit; font-weight: 550;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.auth-foot {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding-top: 16px; border-top: 1px solid var(--border-subtle);
+  font-size: 13px; color: var(--text-muted);
+}
+.auth-foot a { color: var(--text-secondary); }
+.auth-foot a:hover { color: var(--color-forest-light); }
+.auth-foot svg { width: 14px; height: 14px; }
+.code-input { font-family: var(--font-mono); letter-spacing: 0.24em; text-transform: uppercase; font-size: 18px !important; }
+@media (max-width: 480px) {
+  .auth-page { justify-content: flex-start; padding-top: 32px; }
+  .auth-card .input { font-size: 16px; } /* 16px prevents iOS zoom */
+}

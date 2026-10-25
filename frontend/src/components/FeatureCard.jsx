@@ -1,7 +1,7 @@
-function FeatureCard({ tagLabel, tagColor, title, description }) {
+function FeatureCard({ icon: Icon, title, description }) {
   return (
     <div className="feature-card">
-      <span className={`feature-tag tag-${tagColor}`}>{tagLabel}</span>
+      {Icon && <span className="feature-icon"><Icon aria-hidden="true" /></span>}
       <h3>{title}</h3>
       <p>{description}</p>
     </div>

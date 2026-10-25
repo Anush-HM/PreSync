@@ -1,11 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../models/Deck.js', () => ({ default: { findById: vi.fn() } }));
+vi.mock('../models/Deck.js', () => ({ default: { findById: vi.fn(), find: vi.fn() } }));
 vi.mock('../models/Room.js', () => ({
   default: { findOne: vi.fn(), findById: vi.fn(), create: vi.fn(), find: vi.fn() }
 }));
 vi.mock('../models/Viewer.js', () => ({
-  default: { findOne: vi.fn(), create: vi.fn(), find: vi.fn() }
+  default: { findOne: vi.fn(), create: vi.fn(), find: vi.fn(), countDocuments: vi.fn() }
 }));
 vi.mock('../models/Question.js', () => ({ default: { find: vi.fn() } }));
 
@@ -361,5 +361,37 @@ describe('GET /api/rooms/history/:deckId', () => {
     const res = await history(PRESENTER_ID);
 
     expect(res.body.sessions[0].durationMin).toBe(20);
+  });
+});
+
+describe('GET /api/rooms/mine', () => {
+  it('requires a login', async () => {
+    const res = await server.request('GET', '/api/rooms/mine');
+    expect(res.status).toBe(401);
+  });
+
+  it("lists the caller's sessions with deck titles and viewer counts", async () => {
+    const createdAt = '2026-03-01T10:00:00.000Z';
+    Room.find.mockReturnValue({
+      sort: () => ({
+        limit: () => ({
+          lean: async () => [
+            { _id: ROOM_ID, code: 'ABC234', deckId: DECK_ID, active: true, createdAt },
+            { _id: 'room-2', code: 'XYZ789', deckId: 'gone', active: false, createdAt, endedAt: createdAt }
+          ]
+        })
+      })
+    });
+    Deck.find.mockReturnValue({ select: () => ({ lean: async () => [{ _id: DECK_ID, title: 'Roadmap' }] }) });
+    Viewer.countDocuments.mockResolvedValueOnce(4).mockResolvedValueOnce(0);
+
+    const res = await server.request('GET', '/api/rooms/mine', { token: tokenFor(PRESENTER_ID) });
+
+    expect(res.status).toBe(200);
+    expect(Room.find).toHaveBeenCalledWith({ presenterId: PRESENTER_ID });
+    expect(res.body.sessions).toEqual([
+      { roomId: ROOM_ID, code: 'ABC234', deckId: DECK_ID, deckTitle: 'Roadmap', active: true, createdAt, endedAt: null, viewerCount: 4 },
+      { roomId: 'room-2', code: 'XYZ789', deckId: 'gone', deckTitle: null, active: false, createdAt, endedAt: createdAt, viewerCount: 0 }
+    ]);
   });
 });

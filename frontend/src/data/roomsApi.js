@@ -39,4 +39,9 @@ export async function getRoomByCode(code) {
 // Returns { sessions: [{ roomId, code, createdAt, durationMin, viewerCount, viewers, questions }] }
 export async function getSessionHistory(deckId) {
   return apiFetch(`/api/rooms/history/${deckId}`);
-}
+}
+// Editor-only — the caller's live and recent sessions across all decks.
+// Returns { sessions: [{ roomId, code, deckId, deckTitle, active, createdAt, endedAt, viewerCount }] }
+export async function listMySessions() {
+  return apiFetch('/api/rooms/mine');
+}

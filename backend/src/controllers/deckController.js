@@ -7,6 +7,8 @@ import { flushDoc } from '../yjs/docManager.js';
 // on; nothing here is reachable by a viewer, since viewers never carry a
 // JWT in the first place.
 
+const MAX_TITLE_LENGTH = 200;
+
 export function isEditorOf(deck, userId) {
   return (
     deck.ownerId.toString() === userId ||
@@ -36,22 +38,85 @@ async function serializeDeck(deck, userId) {
   };
 }
 
+// Data URLs above this size are left out of list thumbnails so the
+// dashboard payload stays small; the card shows a placeholder instead.
+const THUMB_MAX_IMAGE_CHARS = 200_000;
+
+function personOf(ref) {
+  if (!ref || !ref._id) return null;
+  return { id: ref._id.toString(), name: ref.name, email: ref.email };
+}
+
+function idOf(ref) {
+  return (ref?._id ?? ref).toString();
+}
+
+// The first slide, trimmed for use as a dashboard thumbnail.
+export function thumbnailSlide(slides) {
+  if (!slides?.length) return null;
+  const plain = slides.map((s) => (typeof s.toObject === 'function' ? s.toObject() : s));
+  const first = [...plain].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0];
+  const trimImage = (url) => (url && url.length > THUMB_MAX_IMAGE_CHARS ? undefined : url);
+  return {
+    id: first.id,
+    backgroundColor: first.backgroundColor,
+    backgroundImageUrl: trimImage(first.backgroundImageUrl),
+    blocks: (first.blocks || []).map((b) => {
+      if (b.type !== 'image') return b;
+      const imageUrl = trimImage(b.imageUrl);
+      return imageUrl ? b : { ...b, imageUrl: undefined, imageOmitted: true };
+    })
+  };
+}
+
 export async function listDecks(req, res) {
   const decks = await Deck.find({
     $or: [{ ownerId: req.userId }, { collaboratorIds: req.userId }]
   })
-    .select('title updatedAt slides ownerId')
-    .sort({ updatedAt: -1 });
+    .select('title createdAt updatedAt slides ownerId collaboratorIds')
+    .sort({ updatedAt: -1 })
+    .populate([
+      { path: 'ownerId', select: 'email name' },
+      { path: 'collaboratorIds', select: 'email name' }
+    ]);
 
   res.json(
     decks.map((d) => ({
       id: d._id,
       title: d.title,
+      createdAt: d.createdAt,
       updatedAt: d.updatedAt,
       slideCount: d.slides.length,
-      isOwner: d.ownerId.toString() === req.userId
+      isOwner: idOf(d.ownerId) === req.userId,
+      owner: personOf(d.ownerId),
+      collaborators: (d.collaboratorIds || []).map(personOf).filter(Boolean),
+      thumbnail: thumbnailSlide(d.slides)
     }))
   );
+}
+
+const COPY_SUFFIX = ' (copy)';
+
+// Any editor can duplicate a deck; the copy belongs to whoever made it
+// and starts with no collaborators. Live edits are flushed first so the
+// copy matches what editors currently see.
+export async function duplicateDeck(req, res) {
+  let deck = await Deck.findById(req.params.deckId);
+  if (!deck) return res.status(404).json({ error: 'Deck not found' });
+  if (!isEditorOf(deck, req.userId)) return res.status(403).json({ error: 'Not a collaborator on this deck' });
+
+  const flushed = await flushDoc(req.params.deckId);
+  if (flushed) deck = (await Deck.findById(req.params.deckId)) || deck;
+
+  const slides = deck.slides.map((s) => (typeof s.toObject === 'function' ? s.toObject() : s));
+  const title = `${deck.title.slice(0, MAX_TITLE_LENGTH - COPY_SUFFIX.length)}${COPY_SUFFIX}`;
+  const copy = await Deck.create({ title, ownerId: req.userId, slides });
+
+  res.status(201).json({
+    id: copy._id,
+    title: copy.title,
+    slideCount: copy.slides.length
+  });
 }
 
 export async function createDeck(req, res) {
@@ -84,8 +149,6 @@ export async function updateDeckSlides(req, res) {
   await deck.save();
   res.json(deck);
 }
-
-const MAX_TITLE_LENGTH = 200;
 
 // Any editor can rename a deck.
 export async function updateDeckMeta(req, res) {

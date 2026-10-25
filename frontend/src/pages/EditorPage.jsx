@@ -31,7 +31,15 @@ import {
   legacyFitScale
 } from '../data/slideFormat.js';
 import { goLive } from '../data/roomsApi.js';
-import { getDeck, addCollaborator, removeCollaborator, renameDeck, saveDeck } from '../data/decksApi.js';
+import {
+  getDeck,
+  addCollaborator,
+  removeCollaborator,
+  renameDeck,
+  saveDeck,
+  downloadDeckExport,
+  EXPORT_FORMATS
+} from '../data/decksApi.js';
 import { getCurrentUser } from '../data/apiConfig.js';
 import './EditorPage.css';
 
@@ -117,6 +125,8 @@ function EditorPage() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
   const [saveError, setSaveError] = useState('');
+  const [showExport, setShowExport] = useState(false);
+  const [exporting, setExporting] = useState(null); // format being exported
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
 
   // Toolbar state: ids of the selected blocks on the active slide. Their
@@ -526,6 +536,19 @@ function EditorPage() {
     updateSlide(doc, activeSlideIdx, { notes: e.target.value });
   }
 
+  async function handleExport(format) {
+    setShowExport(false);
+    setExporting(format);
+    setSaveError('');
+    try {
+      await downloadDeckExport(deckId, format);
+    } catch (err) {
+      setSaveError(err.message || 'Could not export the deck');
+    } finally {
+      setExporting(null);
+    }
+  }
+
   async function commitTitle() {
     const title = titleDraft?.trim();
     setTitleDraft(null);
@@ -663,6 +686,26 @@ function EditorPage() {
         <button className="btn btn-ghost" onClick={handleSave} disabled={saving} title="Save now (Ctrl+S)">
           {saving ? 'Saving…' : 'Save'}
         </button>
+        <div className="export-menu">
+          <button
+            className="btn btn-ghost"
+            onClick={() => setShowExport((v) => !v)}
+            disabled={!!exporting}
+            aria-haspopup="menu"
+            aria-expanded={showExport}
+          >
+            {exporting ? 'Exporting…' : 'Export ▾'}
+          </button>
+          {showExport && (
+            <div className="export-menu-list" role="menu">
+              {Object.entries(EXPORT_FORMATS).map(([format, { label }]) => (
+                <button key={format} role="menuitem" className="export-menu-item" onClick={() => handleExport(format)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button className="btn btn-ghost" onClick={() => setShowCollaborators((v) => !v)}>Collaborators</button>
         <button className="btn btn-amber" onClick={handleGoLive} disabled={goingLive}>
           {goingLive ? 'Starting…' : 'Go Live'}

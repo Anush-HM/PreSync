@@ -8,7 +8,8 @@ import {
   endRoom,
   getViewerNotes,
   saveViewerNote,
-  getSessionHistory
+  getSessionHistory,
+  listMySessions
 } from '../controllers/roomController.js';
 
 const router = Router();
@@ -17,6 +18,7 @@ const router = Router();
 router.post('/go-live', requireAuth, asyncHandler(goLive));
 router.post('/:roomId/end', requireAuth, asyncHandler(endRoom));
 router.get('/history/:deckId', requireAuth, asyncHandler(getSessionHistory));
+router.get('/mine', requireAuth, asyncHandler(listMySessions));
 
 // Deliberately unauthenticated — this is the viewer join-by-code path.
 // No JWT is ever checked here, which is what makes the access boundary
