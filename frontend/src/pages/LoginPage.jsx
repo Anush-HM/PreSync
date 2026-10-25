@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { ArrowRight } from 'lucide-react';
+import Logo from '../components/ui/Logo.jsx';
 import { login, register } from '../data/authApi.js';
-import './LoginPage.css';
+import '../styles/auth.css';
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -10,7 +12,7 @@ function LoginPage() {
   const searchParams = new URLSearchParams(location.search);
   const redirectTo = location.state?.from || searchParams.get('next') || '/decks';
 
-  const [mode, setMode] = useState('login'); // 'login' | 'register'
+  const [mode, setMode] = useState(searchParams.get('mode') === 'register' ? 'register' : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -40,53 +42,63 @@ function LoginPage() {
   }
 
   return (
-    <div className="login-page">
-      <form className="login-card" onSubmit={handleSubmit}>
-        <div className="eyebrow"><span className="dot"></span>{mode === 'login' ? 'SIGN IN' : 'CREATE ACCOUNT'}</div>
+    <div className="auth-page login-page">
+      <Logo />
+      <form className="auth-card card" onSubmit={handleSubmit} noValidate>
         <h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
-        <p className="login-sub">
+        <p className="auth-sub">
           {mode === 'login'
-            ? 'Sign in to edit decks and go live.'
-            : 'Editors get full access to co-edit and present decks.'}
+            ? 'Sign in to edit presentations and go live.'
+            : 'Your account lets you create, co-edit and present.'}
         </p>
 
         {mode === 'register' && (
-          <>
-            <label className="login-label mono">NAME</label>
+          <div className="field">
+            <label className="field-label" htmlFor="auth-name">Name</label>
             <input
-              className="login-input"
+              id="auth-name"
+              className="input"
               placeholder="e.g. Priya Shah"
+              autoComplete="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-          </>
+          </div>
         )}
 
-        <label className="login-label mono">EMAIL</label>
-        <input
-          className="login-input"
-          type="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+        <div className="field">
+          <label className="field-label" htmlFor="auth-email">Email</label>
+          <input
+            id="auth-email"
+            className="input"
+            type="email"
+            placeholder="you@example.com"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
 
-        <label className="login-label mono">PASSWORD</label>
-        <input
-          className="login-input"
-          type="password"
-          placeholder="••••••••"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
+        <div className="field">
+          <label className="field-label" htmlFor="auth-password">Password</label>
+          <input
+            id="auth-password"
+            className="input"
+            type="password"
+            placeholder="••••••••"
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
 
-        {error && <p className="login-error">{error}</p>}
+        {error && <p className="alert alert-error" role="alert">{error}</p>}
 
-        <button className="btn btn-amber login-submit" type="submit" disabled={busy}>
+        <button className="btn btn-primary btn-lg auth-submit" type="submit" disabled={busy}>
           {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
         </button>
 
-        <p className="login-switch">
+        <p className="auth-switch">
           {mode === 'login' ? (
             <>No account? <button type="button" className="link-btn" onClick={() => setMode('register')}>Create one</button></>
           ) : (
@@ -94,7 +106,10 @@ function LoginPage() {
           )}
         </p>
 
-        <Link to="/join" className="login-join-link mono">Joining as an audience member? Use a room code →</Link>
+        <div className="auth-foot">
+          <Link to="/join">Joining as an audience member? Enter a session code</Link>
+          <ArrowRight aria-hidden="true" />
+        </div>
       </form>
     </div>
   );

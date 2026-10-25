@@ -1,6 +1,7 @@
 import { Suspense, lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import RequireAuth from './components/RequireAuth.jsx';
+import { ToastProvider } from './components/ui/Toast.jsx';
 
 // LandingPage and NotFound are kept in the main bundle — they're the
 // first and last things a user might see, and are tiny.
@@ -13,6 +14,7 @@ import NotFound from './pages/NotFound.jsx';
 const LoginPage = lazy(() => import('./pages/LoginPage.jsx'));
 const DecksPage = lazy(() => import('./pages/DecksPage.jsx'));
 const EditorPage = lazy(() => import('./pages/EditorPage.jsx'));
+const LiveSessionsPage = lazy(() => import('./pages/LiveSessionsPage.jsx'));
 const PresenterPage = lazy(() => import('./pages/PresenterPage.jsx'));
 const ViewerJoinPage = lazy(() => import('./pages/ViewerJoinPage.jsx'));
 const ViewerLivePage = lazy(() => import('./pages/ViewerLivePage.jsx'));
@@ -23,19 +25,24 @@ function RouteFallback() {
 
 function App() {
   return (
-    <Suspense fallback={<RouteFallback />}>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/decks" element={<RequireAuth><DecksPage /></RequireAuth>} />
-        <Route path="/editor/:deckId" element={<RequireAuth><EditorPage /></RequireAuth>} />
-        <Route path="/presenter/:roomCode" element={<RequireAuth><PresenterPage /></RequireAuth>} />
-        <Route path="/join" element={<ViewerJoinPage />} />
-        <Route path="/view/:roomCode" element={<ViewerLivePage />} />
-        {/* Catch-all — must be last */}
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </Suspense>
+    <ToastProvider>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/decks" element={<RequireAuth><DecksPage key="home" view="home" /></RequireAuth>} />
+          <Route path="/decks/mine" element={<RequireAuth><DecksPage key="mine" view="mine" /></RequireAuth>} />
+          <Route path="/decks/shared" element={<RequireAuth><DecksPage key="shared" view="shared" /></RequireAuth>} />
+          <Route path="/sessions" element={<RequireAuth><LiveSessionsPage /></RequireAuth>} />
+          <Route path="/editor/:deckId" element={<RequireAuth><EditorPage /></RequireAuth>} />
+          <Route path="/presenter/:roomCode" element={<RequireAuth><PresenterPage /></RequireAuth>} />
+          <Route path="/join" element={<ViewerJoinPage />} />
+          <Route path="/view/:roomCode" element={<ViewerLivePage />} />
+          {/* Catch-all — must be last */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </ToastProvider>
   );
 }
 

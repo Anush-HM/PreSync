@@ -85,12 +85,17 @@ describe('auth on deck routes', () => {
 });
 
 describe('GET /api/decks', () => {
+  function mockFind(decks) {
+    const populate = vi.fn().mockResolvedValue(decks);
+    Deck.find.mockReturnValue({ select: () => ({ sort: () => ({ populate }) }) });
+    return populate;
+  }
+
   it('lists only decks the user owns or co-edits', async () => {
-    const sort = vi.fn().mockResolvedValue([
-      { _id: 'd1', title: 'Mine', updatedAt: '2026-01-01', slides: [{}, {}], ownerId: OWNER_ID },
-      { _id: 'd2', title: 'Shared', updatedAt: '2026-01-02', slides: [], ownerId: COLLAB_ID }
+    mockFind([
+      { _id: 'd1', title: 'Mine', updatedAt: '2026-01-01', slides: [{}, {}], ownerId: users[OWNER_ID], collaboratorIds: [] },
+      { _id: 'd2', title: 'Shared', updatedAt: '2026-01-02', slides: [], ownerId: users[COLLAB_ID], collaboratorIds: [users[OWNER_ID]] }
     ]);
-    Deck.find.mockReturnValue({ select: () => ({ sort }) });
 
     const res = await server.request('GET', '/api/decks', { token: tokenFor(OWNER_ID) });
 
@@ -98,10 +103,90 @@ describe('GET /api/decks', () => {
     expect(Deck.find).toHaveBeenCalledWith({
       $or: [{ ownerId: OWNER_ID }, { collaboratorIds: OWNER_ID }]
     });
-    expect(res.body).toEqual([
-      { id: 'd1', title: 'Mine', updatedAt: '2026-01-01', slideCount: 2, isOwner: true },
-      { id: 'd2', title: 'Shared', updatedAt: '2026-01-02', slideCount: 0, isOwner: false }
+    expect(res.body).toMatchObject([
+      { id: 'd1', title: 'Mine', updatedAt: '2026-01-01', slideCount: 2, isOwner: true, collaborators: [] },
+      {
+        id: 'd2',
+        title: 'Shared',
+        updatedAt: '2026-01-02',
+        slideCount: 0,
+        isOwner: false,
+        owner: { id: COLLAB_ID, name: 'Collab', email: 'collab@example.com' },
+        collaborators: [{ id: OWNER_ID, name: 'Owner' }],
+        thumbnail: null
+      }
     ]);
+  });
+
+  it('returns the first slide as a thumbnail, leaving out oversized images', async () => {
+    const big = `data:image/png;base64,${'A'.repeat(250_000)}`;
+    mockFind([
+      {
+        _id: 'd1',
+        title: 'Pictures',
+        slides: [
+          { id: 's2', order: 1, blocks: [] },
+          {
+            id: 's1',
+            order: 0,
+            backgroundColor: '#101010',
+            blocks: [
+              { id: 'b1', type: 'textbox', text: 'Hello', x: 0, y: 0, width: 100 },
+              { id: 'b2', type: 'image', imageUrl: big, x: 0, y: 0, width: 100, height: 50 },
+              { id: 'b3', type: 'image', imageUrl: 'data:image/png;base64,AAAA', x: 0, y: 0, width: 10, height: 10 }
+            ]
+          }
+        ],
+        ownerId: users[OWNER_ID],
+        collaboratorIds: []
+      }
+    ]);
+
+    const res = await server.request('GET', '/api/decks', { token: tokenFor(OWNER_ID) });
+
+    const thumb = res.body[0].thumbnail;
+    expect(thumb.id).toBe('s1');
+    expect(thumb.backgroundColor).toBe('#101010');
+    expect(thumb.blocks[0].text).toBe('Hello');
+    expect(thumb.blocks[1]).toMatchObject({ id: 'b2', imageOmitted: true });
+    expect(thumb.blocks[1].imageUrl).toBeUndefined();
+    expect(thumb.blocks[2].imageUrl).toBe('data:image/png;base64,AAAA');
+  });
+});
+
+describe('POST /api/decks/:deckId/duplicate', () => {
+  it('403s for a user who is not on the deck', async () => {
+    Deck.findById.mockResolvedValue(makeDeck());
+    const res = await server.request('POST', `/api/decks/${DECK_ID}/duplicate`, { token: tokenFor(STRANGER_ID) });
+    expect(res.status).toBe(403);
+    expect(Deck.create).not.toHaveBeenCalled();
+  });
+
+  it('copies the slides into a new deck owned by the caller', async () => {
+    const slides = [{ id: 's1', order: 0, blocks: [{ id: 'b1', type: 'textbox', text: 'Hi', x: 0, y: 0, width: 10 }] }];
+    Deck.findById.mockResolvedValue(makeDeck({ slides }));
+    flushDoc.mockResolvedValue(false);
+    Deck.create.mockImplementation(async (doc) => ({ _id: 'copy-1', ...doc }));
+
+    const res = await server.request('POST', `/api/decks/${DECK_ID}/duplicate`, { token: tokenFor(COLLAB_ID) });
+
+    expect(res.status).toBe(201);
+    expect(flushDoc).toHaveBeenCalledWith(DECK_ID);
+    expect(Deck.create).toHaveBeenCalledWith({ title: 'Quarterly review (copy)', ownerId: COLLAB_ID, slides });
+    expect(res.body).toEqual({ id: 'copy-1', title: 'Quarterly review (copy)', slideCount: 1 });
+  });
+
+  it('re-reads the deck when live edits were flushed', async () => {
+    const stale = makeDeck({ slides: [] });
+    const fresh = makeDeck({ slides: [{ id: 's9', order: 0, blocks: [] }] });
+    Deck.findById.mockResolvedValueOnce(stale).mockResolvedValueOnce(fresh);
+    flushDoc.mockResolvedValue(true);
+    Deck.create.mockImplementation(async (doc) => ({ _id: 'copy-2', ...doc }));
+
+    const res = await server.request('POST', `/api/decks/${DECK_ID}/duplicate`, { token: tokenFor(OWNER_ID) });
+
+    expect(res.status).toBe(201);
+    expect(res.body.slideCount).toBe(1);
   });
 });
 

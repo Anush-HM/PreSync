@@ -208,3 +208,34 @@ export async function getSessionHistory(req, res) {
 
   res.json({ sessions });
 }
+const MY_SESSIONS_LIMIT = 30;
+
+// Editor-only: the caller's own live and recent sessions across all
+// decks, for the dashboard's Live Sessions view. Viewer counts are
+// people who joined (not who is connected right now).
+export async function listMySessions(req, res) {
+  const rooms = await Room.find({ presenterId: req.userId })
+    .sort({ createdAt: -1 })
+    .limit(MY_SESSIONS_LIMIT)
+    .lean();
+
+  const deckIds = [...new Set(rooms.map((r) => r.deckId.toString()))];
+  const [decks, counts] = await Promise.all([
+    Deck.find({ _id: { $in: deckIds } }).select('title').lean(),
+    Promise.all(rooms.map((r) => Viewer.countDocuments({ roomId: r._id })))
+  ]);
+  const titles = new Map(decks.map((d) => [d._id.toString(), d.title]));
+
+  res.json({
+    sessions: rooms.map((r, i) => ({
+      roomId: r._id,
+      code: r.code,
+      deckId: r.deckId,
+      deckTitle: titles.get(r.deckId.toString()) ?? null,
+      active: r.active,
+      createdAt: r.createdAt,
+      endedAt: r.endedAt ?? null,
+      viewerCount: counts[i]
+    }))
+  });
+}

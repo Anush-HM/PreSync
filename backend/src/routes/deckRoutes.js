@@ -10,6 +10,7 @@ import {
   updateDeckMeta,
   saveDeck,
   deleteDeck,
+  duplicateDeck,
   addCollaborator,
   removeCollaborator
 } from '../controllers/deckController.js';
@@ -57,6 +58,7 @@ router.get('/:deckId', asyncHandler(getDeck));
 router.patch('/:deckId', asyncHandler(updateDeckMeta));
 router.put('/:deckId/slides', asyncHandler(updateDeckSlides));
 router.post('/:deckId/save', asyncHandler(saveDeck));
+router.post('/:deckId/duplicate', asyncHandler(duplicateDeck));
 router.get('/:deckId/export', asyncHandler(exportDeck));
 router.post('/:deckId/collaborators', asyncHandler(addCollaborator));
 router.delete('/:deckId/collaborators/:userId', asyncHandler(removeCollaborator));
