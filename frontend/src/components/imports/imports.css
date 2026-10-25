@@ -1,0 +1,83 @@
+/* ── Dropzone ── */
+.dropzone {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+  padding: 32px 20px;
+  border: 1.5px dashed var(--border-strong); border-radius: var(--radius-lg);
+  background: var(--bg-input);
+  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+.dropzone.is-dragging { border-color: var(--color-forest-hover); background: var(--forest-tint); }
+.dropzone-icon { width: 34px; height: 34px; color: var(--color-forest-light); margin-bottom: 4px; }
+.dropzone-title { font-weight: 600; font-size: 15px; }
+.dropzone-or { font-size: 12.5px; color: var(--text-muted); }
+.format-chips { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 14px 0 4px; }
+.format-chips li {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 6px; font-size: 12.5px;
+  background: var(--bg-elevated); border: 1px solid var(--border-subtle); color: var(--text-secondary);
+}
+.format-chips li.is-hint { border-color: rgba(163, 212, 178, 0.35); color: var(--text-primary); }
+.format-chips svg { width: 14px; height: 14px; }
+
+/* ── Upload card ── */
+.upload-card { display: flex; flex-direction: column; gap: 14px; }
+.upload-file {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: var(--radius-md);
+  background: var(--bg-input); border: 1px solid var(--border-subtle);
+}
+.upload-card.is-error .upload-file { border-color: rgba(240, 161, 173, 0.3); }
+.upload-file-icon {
+  width: 38px; height: 38px; border-radius: 9px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--forest-tint); color: var(--color-forest-light);
+}
+.upload-file-icon svg { width: 19px; height: 19px; }
+.upload-file-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.upload-file-text strong { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.upload-file-text span { font-size: 12.5px; color: var(--text-muted); }
+.upload-state { width: 20px; height: 20px; flex-shrink: 0; }
+.upload-state.is-ok { color: var(--success); }
+.upload-state.is-error { color: var(--error); }
+.upload-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.progress-track {
+  position: relative; height: 6px; border-radius: 99px; overflow: hidden;
+  background: rgba(242, 244, 240, 0.08);
+}
+.progress-fill {
+  height: 100%; width: 0; border-radius: inherit;
+  background: var(--color-forest-hover);
+  transition: width var(--dur-base) ease;
+}
+.progress-track.is-indeterminate .progress-fill {
+  position: absolute; width: 35%;
+  animation: indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes indeterminate { from { left: -35%; } to { left: 100%; } }
+.upload-step { margin-top: 8px; font-size: 13px; color: var(--text-secondary); }
+
+/* ── Import list rows (Documents page, dashboard) ── */
+.import-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.import-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 14px; border-radius: var(--radius-md);
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  transition: border-color var(--dur-fast) ease;
+}
+.import-row:hover { border-color: var(--border-strong); }
+.import-row-icon {
+  width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--forest-tint); color: var(--color-forest-light);
+}
+.import-row-icon svg { width: 19px; height: 19px; }
+.import-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.import-row-title { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.import-row-title:hover { color: var(--color-forest-light); }
+.import-row-meta { font-size: 12.5px; color: var(--text-muted); }
+@media (max-width: 640px) {
+  .import-row { flex-wrap: wrap; }
+  .import-row-main { flex-basis: calc(100% - 60px); }
+  .import-row > .btn { flex: 1; }
+}
