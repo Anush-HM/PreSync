@@ -2,6 +2,7 @@ import PptxGenJS from 'pptxgenjs';
 import PDFDocument from 'pdfkit';
 import { existsSync, readdirSync } from 'fs';
 import path from 'path';
+import { CHART_COLORS, chartLayout, pointColor, seriesColor } from './chartLayout.js';
 
 // Turns a deck's slides (the Deck model shape) back into files people
 // can take elsewhere: a .pptx with real, editable text boxes, or a PDF.
@@ -211,6 +212,62 @@ function addPptxTable(slide, b) {
   });
 }
 
+// Charts go out as native PowerPoint charts, so their data stays editable.
+function addPptxChart(pptx, slide, b) {
+  const c = b.chart;
+  if (!c?.series?.length) return;
+  const kind = c.kind || 'column';
+  const type = {
+    column: pptx.ChartType.bar, bar: pptx.ChartType.bar, line: pptx.ChartType.line, area: pptx.ChartType.area,
+    pie: pptx.ChartType.pie, doughnut: pptx.ChartType.doughnut, scatter: pptx.ChartType.scatter
+  }[kind] || pptx.ChartType.bar;
+  const labels = (c.categories || []).map((l) => String(l ?? ''));
+  const clean = (vals) => (vals || []).map((v) => (Number.isFinite(v) ? v : null));
+  let data;
+  if (kind === 'scatter') {
+    const xs = c.series[0].xValues || c.series[0].values.map((_, i) => i + 1);
+    data = [{ name: 'X', values: clean(xs) }, ...c.series.map((s) => ({ name: s.name || 'Series', values: clean(s.values) }))];
+  } else {
+    data = c.series.map((s) => ({ name: s.name || 'Series', labels, values: clean(s.values) }));
+  }
+  const pie = kind === 'pie' || kind === 'doughnut';
+  const colors = pie
+    ? labels.map((_, i) => hex(pointColor(c, i)) || CHART_COLORS[i % CHART_COLORS.length].slice(1))
+    : c.series.map((_, i) => hex(seriesColor(c, i)) || '2E7D5B');
+  const textPt = pt(c.fontSize || 12);
+  const opts = {
+    ...geometry(b, b.height || 260),
+    chartColors: colors,
+    showLegend: (c.legend || (pie || c.series.length > 1 ? 'bottom' : 'none')) !== 'none',
+    legendPos: { bottom: 'b', right: 'r', top: 't' }[c.legend] || 'b',
+    legendFontSize: textPt,
+    showTitle: !!c.title,
+    title: c.title || undefined,
+    titleFontSize: Math.round(textPt * 1.3),
+    showValue: !!c.dataLabels && !pie,
+    showPercent: pie && c.dataLabels !== false,
+    catAxisLabelFontSize: textPt,
+    valAxisLabelFontSize: textPt,
+    dataLabelFontSize: textPt
+  };
+  if (kind === 'column' || kind === 'bar') {
+    opts.barDir = kind === 'bar' ? 'bar' : 'col';
+    opts.barGrouping = c.grouping || 'clustered';
+  } else if (kind === 'area' && c.grouping && c.grouping !== 'clustered') {
+    opts.barGrouping = c.grouping;
+  }
+  if (c.numberFormat === 'percent') opts.valAxisLabelFormatCode = '0%';
+  if (Number.isFinite(c.min)) opts.valAxisMinVal = c.min;
+  if (Number.isFinite(c.max)) opts.valAxisMaxVal = c.max;
+  if (hex(c.textColor)) {
+    opts.catAxisLabelColor = hex(c.textColor);
+    opts.valAxisLabelColor = hex(c.textColor);
+    opts.legendColor = hex(c.textColor);
+    opts.titleColor = hex(c.textColor);
+  }
+  slide.addChart(type, data, opts);
+}
+
 function pptxBackground(s) {
   const img = decodeDataUrl(s.backgroundImageUrl);
   if (img && OFFICE_IMAGE.test(img.mime) && !s.backgroundRepeat) return { data: `${img.mime};base64,${img.base64}` };
@@ -244,6 +301,10 @@ export async function exportDeckToPptx(deck) {
       }
       if (b.type === 'table') {
         addPptxTable(slide, b);
+        continue;
+      }
+      if (b.type === 'chart') {
+        addPptxChart(pptx, slide, b);
         continue;
       }
       if (!b.text) continue;
@@ -507,6 +568,40 @@ function drawPdfTable(doc, b) {
   });
 }
 
+// Draws a chart from the same primitives the editor uses.
+function drawPdfChart(doc, b) {
+  const x0 = b.x || 0;
+  const y0 = b.y || 0;
+  doc.save();
+  doc.rect(x0, y0, b.width || 400, b.height || 260).clip();
+  for (const it of chartLayout(b.chart, b.width || 400, b.height || 260)) {
+    doc.save();
+    if (it.type === 'rect' && it.w > 0 && it.h > 0) doc.rect(x0 + it.x, y0 + it.y, it.w, it.h).fill(pdfColor(it.fill, '#888888'));
+    else if (it.type === 'line') doc.moveTo(x0 + it.x1, y0 + it.y1).lineTo(x0 + it.x2, y0 + it.y2).lineWidth(it.width || 1).stroke(pdfColor(it.stroke, '#cccccc'));
+    else if (it.type === 'poly' && it.points.length) {
+      it.points.forEach(([px, py], i) => (i ? doc.lineTo(x0 + px, y0 + py) : doc.moveTo(x0 + px, y0 + py)));
+      if (it.closed) {
+        doc.closePath().fillOpacity(it.opacity ?? 1).fill(pdfColor(it.fill, '#888888'));
+      } else doc.lineWidth(it.width || 1).lineJoin('round').stroke(pdfColor(it.stroke, '#888888'));
+    } else if (it.type === 'path') {
+      doc.translate(x0, y0).path(it.d);
+      if (it.stroke) doc.lineWidth(it.width || 1).fillAndStroke(pdfColor(it.fill, '#888888'), pdfColor(it.stroke, '#ffffff'), 'even-odd');
+      else doc.fill(pdfColor(it.fill, '#888888'), 'even-odd');
+    } else if (it.type === 'circle') doc.circle(x0 + it.cx, y0 + it.cy, it.r).fill(pdfColor(it.fill, '#888888'));
+    else if (it.type === 'text' && it.text) {
+      const style = { fontFamily: 'Calibri, Carlito, Arial', fontWeight: it.bold ? 'bold' : 'normal' };
+      const embedded = useFont(doc, style);
+      const text = embedded ? it.text : pdfSafeText(it.text);
+      doc.fontSize(it.size).fillColor(pdfColor(it.color, DEFAULT_TEXT_COLOR));
+      const w = doc.widthOfString(text);
+      const tx = it.anchor === 'middle' ? it.x - w / 2 : it.anchor === 'end' ? it.x - w : it.x;
+      doc.text(text, x0 + tx, y0 + it.y - it.size * 0.58, { lineBreak: false });
+    }
+    doc.restore();
+  }
+  doc.restore();
+}
+
 export function exportDeckToPdf(deck) {
   const doc = new PDFDocument({
     size: [CANVAS_WIDTH, CANVAS_HEIGHT],
@@ -549,6 +644,10 @@ export function exportDeckToPdf(deck) {
       }
       if (b.type === 'table') {
         withTransform(doc, b, () => drawPdfTable(doc, b));
+        continue;
+      }
+      if (b.type === 'chart') {
+        withTransform(doc, b, () => drawPdfChart(doc, b));
         continue;
       }
       if (!b.text) continue;

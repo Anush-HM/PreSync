@@ -7,6 +7,7 @@ import {
   DEFAULT_TEXT_COLOR,
   LIST_PREFIX
 } from '../../data/slideFormat.js';
+import { CHART_FONT, chartLayout } from '../../data/chartLayout.js';
 
 // Slide blocks <-> Fabric.js objects for the editor canvas. Building an
 // object from a block, updating it in place, and reading its geometry
@@ -383,6 +384,90 @@ export function scaledTable(table, sx, sy) {
   };
 }
 
+// --- charts -----------------------------------------------------------------
+
+export function chartKey(block) {
+  return JSON.stringify([block.chart, block.width, block.height]);
+}
+
+// Draws a chart block as a Fabric group of its primitives, laid out at
+// the block's size (resizing rebuilds it, so text never stretches).
+export function createChart(block, scale) {
+  const w = (block.width || 400) * scale;
+  const h = (block.height || 260) * scale;
+  const fixed = { ...BASE_OBJECT_PROPS, selectable: false, evented: false, objectCaching: false };
+  // A transparent frame pins the group's bounds to the block's box.
+  const objects = [new fabric.Rect({ ...fixed, left: 0, top: 0, width: w, height: h, fill: 'rgba(0,0,0,0)' })];
+  for (const it of chartLayout(block.chart, block.width || 400, block.height || 260)) {
+    const S = (v) => v * scale;
+    if (it.type === 'rect') {
+      objects.push(new fabric.Rect({ ...fixed, left: S(it.x), top: S(it.y), width: Math.max(0, S(it.w)), height: Math.max(0, S(it.h)), fill: it.fill }));
+    } else if (it.type === 'line') {
+      objects.push(new fabric.Line([S(it.x1), S(it.y1), S(it.x2), S(it.y2)], { ...fixed, originX: 'center', originY: 'center', stroke: it.stroke, strokeWidth: it.width }));
+    } else if (it.type === 'poly') {
+      const pts = it.points.map(([x, y]) => ({ x: S(x), y: S(y) }));
+      const Poly = it.closed ? fabric.Polygon : fabric.Polyline;
+      const minX = Math.min(...pts.map((p) => p.x));
+      const minY = Math.min(...pts.map((p) => p.y));
+      objects.push(new Poly(pts, {
+        ...fixed,
+        left: minX - (it.closed ? 0 : it.width / 2),
+        top: minY - (it.closed ? 0 : it.width / 2),
+        fill: it.closed ? it.fill : null,
+        opacity: it.opacity ?? 1,
+        stroke: it.stroke || null,
+        strokeWidth: it.stroke ? it.width : 0,
+        strokeLineJoin: 'round'
+      }));
+    } else if (it.type === 'path') {
+      const path = new fabric.Path(it.d, { ...fixed, originX: 'center', originY: 'center', fill: it.fill, fillRule: 'evenodd', stroke: it.stroke || null, strokeWidth: it.width || 0 });
+      // Fabric centres a path on its own bounds; put that centre back
+      // where the path's coordinates say it is.
+      path.set({ scaleX: scale, scaleY: scale, left: path.pathOffset.x * scale, top: path.pathOffset.y * scale });
+      objects.push(path);
+    } else if (it.type === 'circle') {
+      objects.push(new fabric.Circle({ ...fixed, left: S(it.cx - it.r), top: S(it.cy - it.r), radius: S(it.r), fill: it.fill }));
+    } else if (it.type === 'text') {
+      objects.push(new fabric.FabricText(it.text, {
+        ...fixed,
+        left: S(it.x),
+        top: S(it.y),
+        originX: it.anchor === 'middle' ? 'center' : it.anchor === 'end' ? 'right' : 'left',
+        originY: 'center',
+        fontSize: S(it.size),
+        fontFamily: CHART_FONT,
+        fontWeight: it.bold ? 'bold' : 'normal',
+        fill: it.color
+      }));
+    }
+  }
+  const group = new fabric.Group(objects, { ...BASE_OBJECT_PROPS, subTargetCheck: false, interactive: false, objectCaching: true });
+  group.data = { blockId: block.id, kind: 'chart', key: chartKey(block), layoutWidth: block.width || 400, layoutHeight: block.height || 260 };
+  group.set({ angle: block.rotation || 0 });
+  placeGroup(group, block, scale);
+  return group;
+}
+
+// Puts a chart group's frame (its first object, which spans the block's
+// box) on the block's box. The group's own bounds can overhang the frame
+// where strokes or labels poke out, so the group is offset to match.
+export function placeGroup(group, block, scale) {
+  const w = group.data.layoutWidth * scale;
+  const h = group.data.layoutHeight * scale;
+  group.set({ scaleX: 1, scaleY: 1, angle: block.rotation || 0 });
+  const frame = group.getObjects()[0];
+  const off = frame ? frame.getRelativeCenterPoint() : new fabric.Point(0, 0);
+  const d = rotate(off.x, off.y, block.rotation || 0);
+  const target = { x: (block.x || 0) * scale + w / 2, y: (block.y || 0) * scale + h / 2 };
+  group.setPositionByOrigin(new fabric.Point(target.x - d.x, target.y - d.y), 'center', 'center');
+}
+
+// Centre of a chart group's frame, in canvas coordinates.
+function frameCentre(obj) {
+  const frame = obj.getObjects?.()[0];
+  return frame ? frame.getCenterPoint() : obj.getCenterPoint();
+}
+
 // --- writeback ---------------------------------------------------------------
 
 const round1 = (v) => Math.round(v * 10) / 10;
@@ -394,9 +479,9 @@ export function blockGeometry(obj, scale) {
   const sx = Math.abs(scaling.x);
   const sy = Math.abs(scaling.y);
   const angle = Math.round((((obj.getTotalAngle ? obj.getTotalAngle() : obj.angle) % 360) + 360) % 360 * 10) / 10;
-  const c = obj.getCenterPoint();
-  const geometry = { rotation: angle || null };
   const kind = obj.data?.kind;
+  const c = kind === 'chart' ? frameCentre(obj) : obj.getCenterPoint();
+  const geometry = { rotation: angle || null };
 
   if (obj.type === 'textbox' && kind !== 'table') {
     const w = obj.width * sx;
@@ -420,6 +505,9 @@ export function blockGeometry(obj, scale) {
     w = obj.data.layoutWidth * scale * sx;
     h = obj.data.layoutHeight * scale * sy;
     geometry.tableScale = { x: sx, y: sy };
+  } else if (kind === 'chart') {
+    w = obj.data.layoutWidth * scale * sx;
+    h = obj.data.layoutHeight * scale * sy;
   } else if (obj.type === 'ellipse') {
     w = obj.rx * 2 * sx;
     h = obj.ry * 2 * sy;
@@ -460,6 +548,7 @@ export function fontFamiliesOf(blocks) {
       .filter((f) => f && !['serif', 'sans-serif', 'monospace'].includes(f))
       .forEach((f) => families.add(f));
   for (const b of blocks || []) {
+    if (b.type === 'chart') add(CHART_FONT);
     add(b.fontFamily);
     (b.styles || []).forEach((r) => add(r.style?.fontFamily));
     (b.table?.rows || []).forEach((row) => row.cells.forEach((cell) => {

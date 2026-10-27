@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import path from 'path';
-import { attr, child, children, find, num, readRels, readXml, relOfType } from './ooxml.js';
+import { attr, child, children, find, num, parseXml, readRels, readXml, relOfType } from './ooxml.js';
 import {
   colorFrom,
   fillFrom,
@@ -16,6 +16,7 @@ import { buildRichText } from './richText.js';
 import { customPath, presetShape } from './presetGeometry.js';
 import { parseTableStyles, tableBlock } from './pptxTables.js';
 import { mimeForExt, processImage, toDataUrl, WEB_IMAGE_EXT } from './imageProcessing.js';
+import { readChart } from './pptxCharts.js';
 
 // Extracts editable content from a .pptx (Office Open XML) deck onto the
 // 960×540 editor canvas:
@@ -28,8 +29,11 @@ import { mimeForExt, processImage, toDataUrl, WEB_IMAGE_EXT } from './imageProce
 //  - pictures are cropped as in the source and downscaled to fit;
 //  - backgrounds keep solid colours, gradients and pictures, and the
 //    master/layout's decorative shapes carry over;
-//  - charts, SmartArt and media we can't redraw become a labelled
-//    placeholder rather than vanishing.
+//  - charts become chart blocks redrawn from their cached data;
+//  - SmartArt becomes ordinary shapes from its pre-drawn layout;
+//  - embedded objects (OLE) show their preview picture;
+//  - anything else we can't redraw becomes a labelled placeholder
+//    rather than vanishing.
 // Output matches extractSlidesFromPdf so every format feeds one model.
 
 const TARGET_WIDTH = 960;
@@ -485,22 +489,42 @@ async function backgroundOf(zip, part, theme, ctx) {
   return null;
 }
 
-async function chartTitle(zip, target) {
-  const root = target && (await readXml(zip, target));
-  const title = root && find(root, 'c:chart', 'c:title');
-  const text = [];
-  (function walk(n) {
-    for (const c of children(n)) {
-      if (c.nodeName === 'a:t') text.push(c.textContent);
-      else walk(c);
-    }
-  })(title);
-  const plot = root && find(root, 'c:chart', 'c:plotArea');
-  const kind = children(plot).find((c) => /Chart$/.test(c.nodeName))?.nodeName.replace(/^c:/, '').replace(/Chart$/, '');
-  return { title: text.join('').trim(), kind };
+// First descendant with a tag name, depth first.
+function descendant(node, tag) {
+  for (const c of children(node)) {
+    if (c.nodeName === tag) return c;
+    const found = descendant(c, tag);
+    if (found) return found;
+  }
+  return null;
 }
 
-const CHART_KIND = { bar: 'Bar', line: 'Line', pie: 'Pie', area: 'Area', scatter: 'Scatter', doughnut: 'Doughnut', radar: 'Radar' };
+// A SmartArt graphic's pre-drawn layout (the dsp:drawing part PowerPoint
+// caches next to the diagram data), parsed with its dsp: tags renamed to
+// p: so the slide shape reader can walk it.
+async function smartArtDrawing(zip, data, part) {
+  const relIds = child(data, 'dgm:relIds');
+  const dm = attr(relIds, 'r:dm');
+  const dataPath = dm && part.rels.get(dm)?.target;
+  const dataRoot = dataPath && (await readXml(zip, dataPath));
+  let drawingPath = null;
+  const ext = dataRoot && descendant(dataRoot, 'dsp:dataModelExt');
+  const relId = attr(ext, 'relId');
+  if (relId) drawingPath = part.rels.get(relId)?.target || null;
+  if (!drawingPath) {
+    // Older files: the slide's only diagram drawing, if unambiguous.
+    const drawings = [...part.rels.values()].filter((r) => r.type.endsWith('/diagramDrawing'));
+    if (drawings.length === 1) drawingPath = drawings[0].target;
+  }
+  const file = drawingPath && zip.file(drawingPath);
+  if (!file) return null;
+  const xml = (await file.async('string'))
+    .replace(/<(\/?)dsp:/g, '<$1p:')
+    .replace(/xmlns:dsp=/g, 'xmlns:p=');
+  const root = parseXml(xml);
+  const tree = root && child(root, 'p:spTree');
+  return tree ? { tree, rels: await readRels(zip, drawingPath) } : null;
+}
 
 async function extractSlide(zip, slidePath, slideIndex, ctx) {
   const slide = await loadPart(zip, slidePath, ctx);
@@ -638,6 +662,13 @@ async function extractSlide(zip, slidePath, slideIndex, ctx) {
     const body = child(sp, 'p:txBody');
     if (body) {
       const props = bodyProps(sp, chain);
+      // SmartArt shapes can place their text in a rectangle of its own.
+      const txXfrm = child(sp, 'p:txXfrm');
+      const txOff = child(txXfrm, 'a:off');
+      const txExt = child(txXfrm, 'a:ext');
+      const textBox = txOff && txExt
+        ? map.box(transform({ x: num(txOff, 'x'), y: num(txOff, 'y'), cx: num(txExt, 'cx'), cy: num(txExt, 'cy') }))
+        : box;
       const fields = textFields(body, {
         levelChain: levelChainFor(sp, chain, ph),
         fallbackColor: fontRefColor,
@@ -650,8 +681,8 @@ async function extractSlide(zip, slidePath, slideIndex, ctx) {
           r: map.emuToPx(props.insets.r),
           b: map.emuToPx(props.insets.b)
         };
-        let x = box.x + ins.l;
-        let width = Math.max(20, box.width - ins.l - ins.r);
+        let x = textBox.x + ins.l;
+        let width = Math.max(20, textBox.width - ins.l - ins.r);
         if (!props.wrap) {
           // No wrapping in the source: make sure the longest line fits.
           const longest = Math.max(...fields.text.split('\n').map((l) => l.length));
@@ -668,9 +699,9 @@ async function extractSlide(zip, slidePath, slideIndex, ctx) {
           id: nextId(),
           type: 'textbox',
           x: r1(x),
-          y: r1(box.y + ins.t),
+          y: r1(textBox.y + ins.t),
           width: r1(width),
-          height: r1(Math.max(1, box.height - ins.t - ins.b)),
+          height: r1(Math.max(1, textBox.height - ins.t - ins.b)),
           ...fields
         };
         if (props.anchor !== 'top') block.verticalAlign = props.anchor;
@@ -686,11 +717,11 @@ async function extractSlide(zip, slidePath, slideIndex, ctx) {
     return out;
   }
 
-  async function pictureBlock(pic, transform, part) {
+  async function pictureBlock(pic, transform, part, frameXf = null) {
     const blipFill = child(pic, 'p:blipFill');
     const rId = attr(child(blipFill, 'a:blip'), 'r:embed');
     const target = rId && part.rels.get(rId)?.target;
-    const xf = xfrmOf(pic);
+    const xf = frameXf || xfrmOf(pic);
     if (!target || !xf) return [];
     const box = map.box(transform(xf));
     const url = await embedImage(zip, target, ctx, {
@@ -756,14 +787,46 @@ async function extractSlide(zip, slidePath, slideIndex, ctx) {
     }
     if (uri.endsWith('/chart')) {
       const rId = attr(child(data, 'c:chart'), 'r:id');
-      const info = await chartTitle(zip, rId && part.rels.get(rId)?.target);
-      const kind = CHART_KIND[info.kind] || '';
-      ctx.warnings.add('chart');
-      return placeholderBlock(box, `${kind ? `${kind} chart` : 'Chart'}${info.title ? `: ${info.title}` : ''}\n(charts aren't editable here yet)`);
+      const target = rId && part.rels.get(rId)?.target;
+      const parsed = await readChart(zip, target, { theme, fontPx: map.fontPx }).catch(() => null);
+      if (!parsed?.chart) {
+        ctx.warnings.add('chart');
+        return placeholderBlock(box, 'Chart\n(its data could not be read)');
+      }
+      if (parsed.notes.size) ctx.warnings.add('chart-simplified');
+      ctx.charts += 1;
+      const block = { id: nextId(), type: 'chart', ...placed(box, xf), fontSize: 16, text: '', chart: parsed.chart };
+      return [block];
     }
     if (uri.endsWith('/diagram')) {
+      const drawing = await smartArtDrawing(zip, data, part).catch(() => null);
+      if (drawing) {
+        // Drawing coordinates are relative to the graphic frame.
+        const inFrame = (b) => transform({ ...b, x: xf.x + b.x, y: xf.y + b.y });
+        const drawingPart = { ...part, rels: drawing.rels };
+        const out = await walk(drawing.tree, inFrame, drawingPart);
+        if (out.length) {
+          ctx.smartArt += 1;
+          return out;
+        }
+      }
       ctx.warnings.add('smartart');
-      return placeholderBlock(box, 'SmartArt graphic\n(not editable here yet)');
+      return placeholderBlock(box, 'SmartArt graphic\n(no saved layout to redraw)');
+    }
+    if (uri.endsWith('/ole') || descendant(data, 'p:oleObj')) {
+      // Embedded documents (Excel sheets, Visio drawings…) carry a preview
+      // picture of themselves; show that in the object's frame.
+      const pic = descendant(data, 'p:pic');
+      if (pic) {
+        const preview = await pictureBlock(pic, transform, part, xf);
+        if (preview.length && preview[0].type === 'image') {
+          preview[0].role = 'object';
+          ctx.warnings.add('object-preview');
+          return preview;
+        }
+      }
+      ctx.warnings.add('object');
+      return placeholderBlock(box, 'Embedded object');
     }
     ctx.warnings.add('object');
     return placeholderBlock(box, 'Embedded object');
@@ -861,9 +924,11 @@ async function extractSlide(zip, slidePath, slideIndex, ctx) {
 // What the importer had to approximate or leave out, in words the
 // import summary can show.
 const WARNING_TEXT = {
-  chart: 'Charts are shown as labelled placeholders; their data is not editable yet.',
-  smartart: 'SmartArt is shown as a labelled placeholder.',
-  object: 'Embedded objects are shown as labelled placeholders.',
+  chart: 'Some charts could not be read and are shown as labelled placeholders.',
+  'chart-simplified': 'Some charts use 3-D, combined types, trendlines or more series than PreSync draws, and are shown simplified.',
+  smartart: 'Some SmartArt has no saved layout and is shown as a labelled placeholder.',
+  'object-preview': 'Embedded objects (such as spreadsheets) show their preview picture and cannot be edited here.',
+  object: 'Some embedded objects are shown as labelled placeholders.',
   'image-format': 'Some pictures use a format browsers cannot show (such as EMF or TIFF) and are shown as placeholders.',
   'image-crop': 'Some cropped pictures are shown uncropped.',
   'shape-approx': 'Some shapes with uncommon outlines are drawn as rectangles.',
@@ -905,6 +970,8 @@ export async function extractSlidesFromPptx(buffer, report = null) {
     skippedImages: 0,
     placeholders: 0,
     tables: 0,
+    charts: 0,
+    smartArt: 0,
     warnings: new Set()
   };
 
@@ -917,6 +984,8 @@ export async function extractSlidesFromPptx(buffer, report = null) {
     report.skippedImages = ctx.skippedImages;
     report.placeholders = ctx.placeholders;
     report.tables = ctx.tables;
+    report.charts = ctx.charts;
+    report.smartArt = ctx.smartArt;
     report.aspect = slideCx / slideCy;
   }
   return slides;

@@ -11,6 +11,7 @@ import {
   styledRuns,
   textFormatCss
 } from '../data/slideFormat.js';
+import { CHART_FONT, chartLayout, chartSummary } from '../data/chartLayout.js';
 import './SlideView.css';
 
 // Read-only render of one slide, shared by the presenter and viewer
@@ -104,6 +105,67 @@ function ShapeBlock({ b, s }) {
         </defs>
       ) : null}
       {shape}
+    </svg>
+  );
+}
+
+// A chart drawn from its data, from the same primitives the editor and
+// the PDF export use.
+export function ChartSvg({ chart, width, height }) {
+  const items = chartLayout(chart, width, height);
+  return items.map((it, i) => {
+    switch (it.type) {
+      case 'rect':
+        return <rect key={i} x={it.x} y={it.y} width={Math.max(0, it.w)} height={Math.max(0, it.h)} fill={it.fill} />;
+      case 'line':
+        return <line key={i} x1={it.x1} y1={it.y1} x2={it.x2} y2={it.y2} stroke={it.stroke} strokeWidth={it.width} />;
+      case 'poly': {
+        const points = it.points.map((p) => p.join(',')).join(' ');
+        return it.closed ? (
+          <polygon key={i} points={points} fill={it.fill || 'none'} fillOpacity={it.opacity ?? 1} stroke={it.stroke || 'none'} />
+        ) : (
+          <polyline key={i} points={points} fill="none" stroke={it.stroke} strokeWidth={it.width} strokeLinejoin="round" />
+        );
+      }
+      case 'path':
+        return <path key={i} d={it.d} fill={it.fill} fillRule="evenodd" stroke={it.stroke || 'none'} strokeWidth={it.width || 0} />;
+      case 'circle':
+        return <circle key={i} cx={it.cx} cy={it.cy} r={it.r} fill={it.fill} />;
+      case 'text':
+        return (
+          <text
+            key={i}
+            x={it.x}
+            y={it.y}
+            fontSize={it.size}
+            fill={it.color}
+            fontWeight={it.bold ? 700 : 400}
+            textAnchor={it.anchor}
+            dominantBaseline="central"
+          >
+            {it.text}
+          </text>
+        );
+      default:
+        return null;
+    }
+  });
+}
+
+function ChartBlock({ b, s }) {
+  const w = b.width || 400;
+  const h = b.height || 260;
+  return (
+    <svg
+      className="slide-chart"
+      role="img"
+      aria-label={chartSummary(b.chart)}
+      width={w * s}
+      height={h * s}
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ left: (b.x || 0) * s, top: (b.y || 0) * s, transform: blockTransform(b), fontFamily: CHART_FONT }}
+    >
+      <ChartSvg chart={b.chart} width={w} height={h} />
     </svg>
   );
 }
@@ -203,6 +265,7 @@ function SlideView({ slide }) {
         }
         if (b.type === 'shape') return <ShapeBlock key={b.id} b={b} s={s} />;
         if (b.type === 'table') return <TableBlock key={b.id} b={b} s={s} />;
+        if (b.type === 'chart') return <ChartBlock key={b.id} b={b} s={s} />;
         return (
           <div key={b.id} className="slide-text" style={blockTextStyle(b, s)}>
             <div>

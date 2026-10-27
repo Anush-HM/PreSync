@@ -95,6 +95,7 @@ function PropertiesPanel({
   else if (kind === 'image') heading = 'Image';
   else if (kind === 'shape') heading = 'Shape';
   else if (kind === 'table') heading = 'Table';
+  else if (kind === 'chart') heading = 'Chart';
   else if (hasText) heading = 'Text';
 
   const font = primary?.fontFamily || DEFAULT_FONT_FAMILY;

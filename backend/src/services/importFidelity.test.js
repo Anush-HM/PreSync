@@ -76,9 +76,12 @@ describe('PowerPoint import fidelity', () => {
     const pattern = slides[5];
     expect(pattern.backgroundImageUrl).toMatch(/^data:image\//);
     expect(pattern.backgroundColor).not.toBe('#ffffff');
-    // Charts are not dropped silently: they leave a labelled placeholder and a warning.
-    expect(find(pattern, 'Bar chart').role).toBe('placeholder');
-    expect(report.warnings.join(' ')).toMatch(/chart/i);
+    // Charts are redrawn from their data, not left as a placeholder.
+    const chart = pattern.blocks.find((b) => b.type === 'chart');
+    expect(chart.chart).toMatchObject({ kind: 'column', categories: ['Precision', 'Recall', 'F1'], title: 'Model' });
+    expect(chart.chart.series[0].values).toEqual([0.91, 0.88, 0.89]);
+    expect(pattern.blocks.some((b) => b.role === 'placeholder')).toBe(false);
+    expect(report.placeholders).toBe(0);
   });
 });
 

@@ -75,6 +75,7 @@ function blockPlainText(b) {
   if (b.type === 'list') return b.items.map((i) => `${'  '.repeat(i.level)}- ${i.text}`).join('\n');
   if (b.type === 'table') return b.rows.map((r) => r.join(' | ')).join('\n');
   if (b.type === 'image' || b.type === 'pageBreak') return '';
+  if (b.type === 'chart') return b.chart?.title ? `Chart: ${b.chart.title}` : '';
   return b.text || '';
 }
 
@@ -212,6 +213,10 @@ export function analyzeDocx(parsed, fileName) {
       case 'image':
         current.images.push(b.imageId);
         break;
+      case 'chart':
+        // Charts, like tables, get a slide of their own.
+        if (b.id) current.tables.push({ tableId: b.id, tableRows: null });
+        break;
       default:
         break;
     }
@@ -254,7 +259,8 @@ export function analyzeDocx(parsed, fileName) {
   if (splitLevel === null) warnings.push('No headings were found, so slides were split every few paragraphs. Review the outline before generating.');
   if (found.unsupportedImages) warnings.push(`${found.unsupportedImages} picture${found.unsupportedImages === 1 ? ' is' : 's are'} in a format PreSync cannot show (only PNG, JPEG and GIF are imported).`);
   if (found.skippedImages) warnings.push(`${found.skippedImages} picture${found.skippedImages === 1 ? ' was' : 's were'} skipped for size (1.5 MB each, 8 MB per document).`);
-  if (found.charts) warnings.push('Charts are not imported.');
+  if (found.charts) warnings.push('Some charts could not be read and are left out.');
+  if (found.simplifiedCharts) warnings.push('Some charts use 3-D, combined types or trendlines, and are shown simplified.');
   if (found.smartArt) warnings.push('SmartArt diagrams are not imported.');
   if (found.equations) warnings.push('Equations are not imported.');
   if (found.textBoxes) warnings.push('Text inside text boxes is not imported.');
@@ -347,8 +353,10 @@ export function analyzeSlides(slides, { kind, fileName, coreTitle = null, detail
       .filter(Boolean);
     const images = (slide.blocks || []).filter((b) => b.type === 'image').length;
     const notSupported = [];
-    if (d.charts) notSupported.push(`${d.charts} chart${d.charts === 1 ? '' : 's'}`);
-    if (d.smartArt) notSupported.push('SmartArt');
+    // Charts and SmartArt are redrawn; only those left as placeholders count.
+    const missingCharts = Math.max(0, (d.charts || 0) - (slide.blocks || []).filter((b) => b.type === 'chart').length);
+    if (missingCharts) notSupported.push(`${missingCharts} chart${missingCharts === 1 ? '' : 's'}`);
+    if (d.smartArt && (slide.blocks || []).some((b) => b.role === 'placeholder' && /^SmartArt/.test(b.text || ''))) notSupported.push('SmartArt');
     if (d.media) notSupported.push('audio/video');
     if (d.skippedPictures) notSupported.push(`${d.skippedPictures} picture${d.skippedPictures === 1 ? '' : 's'}`);
     return {
@@ -457,9 +465,10 @@ function sanitizeTableRef(item, tableIds) {
   return { tableId: item.tableId, tableRows: ok ? [r[0], r[1]] : null };
 }
 
-// Ids of the structured tables in a parsed Word document.
+// Ids of the structured tables and charts in a parsed Word document
+// (outline items refer to either through tableId).
 export function tableIdsOf(blocks = []) {
-  return new Set(blocks.filter((b) => b.type === 'table' && b.table && b.id).map((b) => b.id));
+  return new Set(blocks.filter((b) => ((b.type === 'table' && b.table) || (b.type === 'chart' && b.chart)) && b.id).map((b) => b.id));
 }
 
 const round1 = (v) => Math.round(v * 10) / 10;
@@ -539,7 +548,7 @@ function fitImage(image, box) {
 // id in `images` ([{ id, dataUrl, widthPx, heightPx }]).
 export function outlineToSlides(outline, images = [], docBlocks = []) {
   const imageById = new Map(images.map((img) => [img.id, img]));
-  const tableById = new Map(docBlocks.filter((d) => d.type === 'table' && d.table && d.id).map((d) => [d.id, d]));
+  const tableById = new Map(docBlocks.filter((d) => ((d.type === 'table' && d.table) || (d.type === 'chart' && d.chart)) && d.id).map((d) => [d.id, d]));
   return outline.map((item, i) => {
     const slideId = `slide-${i + 1}`;
     let b = 0;
@@ -572,7 +581,13 @@ export function outlineToSlides(outline, images = [], docBlocks = []) {
           text: item.bullets.map((p) => `${'\u00a0\u00a0\u00a0\u00a0'.repeat(p.level)}${p.level === 0 ? '•' : '–'}\u00a0${p.text}`).join('\n')
         });
       }
-      if (table) {
+      if (table?.type === 'chart') {
+        const box = item.bullets.length
+          ? { x: 380, y: 124, width: 540, height: CANVAS_H - 164 }
+          : { x: 60, y: 124, width: 840, height: CANVAS_H - 164 };
+        const fit = fitImage({ widthPx: table.widthPx, heightPx: table.heightPx }, box);
+        blocks.push({ id: id(), type: 'chart', fontSize: 16, text: '', chart: table.chart, ...fit });
+      } else if (table) {
         const box = item.bullets.length
           ? { x: 380, y: 124, width: 540, height: CANVAS_H - 164 }
           : { x: 60, y: 124, width: 840, height: CANVAS_H - 164 };
