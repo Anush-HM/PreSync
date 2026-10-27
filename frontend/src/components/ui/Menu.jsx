@@ -3,8 +3,9 @@ import './ui.css';
 
 // Small dropdown menu (button + role="menu"). Arrow keys move between
 // items, Escape closes and returns focus to the trigger.
+// `text` adds a visible label next to the trigger icon.
 // items: [{ label, icon: LucideIcon, onSelect, danger?, disabled? } | 'separator']
-function Menu({ label, icon: TriggerIcon, items, align = 'end', triggerClassName = 'icon-btn' }) {
+function Menu({ label, icon: TriggerIcon, text, items, align = 'end', triggerClassName = 'icon-btn' }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
   const triggerRef = useRef(null);
@@ -47,7 +48,8 @@ function Menu({ label, icon: TriggerIcon, items, align = 'end', triggerClassName
         aria-controls={open ? menuId : undefined}
         onClick={() => setOpen((o) => !o)}
       >
-        <TriggerIcon />
+        <TriggerIcon aria-hidden={text ? true : undefined} />
+        {text && <span className="menu-trigger-text">{text}</span>}
       </button>
       {open && (
         <div id={menuId} className={`menu menu-${align}`} role="menu" aria-label={label} onKeyDown={onMenuKey}>
