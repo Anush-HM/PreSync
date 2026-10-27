@@ -64,6 +64,16 @@ Signed-in pages use the sidebar layout in `frontend/src/components/layout/AppShe
 | `/imports/:id` | Review an import: analysis, outline editor, document or slide preview |
 | `/sessions` | Your live and recent sessions (`GET /api/rooms/mine`) |
 
+The editor (`/editor/:deckId`) has its own full-screen layout:
+
+- **Left:** slide thumbnails, with keyboard navigation and a per-slide menu for duplicate, move and delete.
+- **Centre:** the Fabric canvas, with zoom and *Fit*.
+- **Right:** a formatting panel that changes with what is selected.
+
+Below 1100px the formatting panel opens as an overlay. Below 768px the slide list does too.
+
+*Insert → Image* embeds PNG, JPEG or GIF files up to 1.5MB.
+
 ## Tests
 
 ```bash
