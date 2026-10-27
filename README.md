@@ -41,7 +41,11 @@ This starts the backend (`node --watch`, port 4000) and the frontend (Vite, port
 
 ## Importing, editing and exporting decks
 
-- **Import:** PDF (`.pdf`) and PowerPoint (`.pptx`), up to 25MB, from the Decks page. Text comes in as editable text boxes with position, size, font, bold/italic/underline, colour and alignment; PowerPoint pictures (PNG/JPEG/GIF up to 1.5MB each, 8MB per deck), slide background colours and speaker notes come along too. Legacy `.ppt` is refused with a prompt to re-save it as `.pptx`. Tables, charts and SmartArt are not extracted.
+- **Import:** Word (`.docx`), PowerPoint (`.pptx`) and PDF (`.pdf`), up to 25MB, from the dashboard. The file is analysed first (`POST /api/imports`) and the user reviews the result before anything is created:
+  - *Word:* headings, paragraphs, bullet and numbered lists (including style-based numbering), tables and PNG/JPEG/GIF pictures are read in order. The shallowest heading level used more than once marks slide boundaries; long sections continue onto extra slides, and the full section text goes into speaker notes. The suggested outline can be edited, reordered and saved before generating slides.
+  - *PowerPoint:* text boxes with position, size, font, bold/italic/underline, colour and alignment; pictures (up to 1.5MB each, 8MB per deck); background colours; and speaker notes. The review lists slide titles, plus tables, charts, SmartArt, media, animations and embedded fonts that are not imported. *Open in editor* keeps the slides as extracted; *Generate from outline* rebuilds them as a fresh, consistently laid-out deck.
+  - *PDF:* each page becomes a slide of editable text. Pictures and drawings are not extracted.
+  - Legacy `.doc` and `.ppt` are refused with a prompt to re-save them. Imports are kept on the **Documents** page, so the same file never has to be uploaded twice. Analysis is deterministic and uses no AI.
 - **Edit:** font, size, bold/italic/underline, colour, alignment, line spacing, layer order, slide background, speaker notes, slide reorder/duplicate, undo/redo (Ctrl+Z / Ctrl+Shift+Z). Edits autosave through the live co-editing session; **Save** (Ctrl+S) writes them to the database immediately.
 - **Export:** *Export* in the editor downloads the deck as `.pdf` or `.pptx` (`GET /api/decks/:id/export?format=pdf|pptx`). PPTX keeps text editable, with speaker notes. PDF uses the standard PDF fonts (closest match to the chosen family) and covers Latin-1 text only.
 
@@ -56,6 +60,8 @@ Signed-in pages use the sidebar layout in `frontend/src/components/layout/AppShe
 | `/decks` | Dashboard: recent and shared presentations, search, filter, sort |
 | `/decks/mine` | Presentations you own |
 | `/decks/shared` | Presentations shared with you |
+| `/documents` | Imported files (`GET /api/imports`) |
+| `/imports/:id` | Review an import: analysis, outline editor, document or slide preview |
 | `/sessions` | Your live and recent sessions (`GET /api/rooms/mine`) |
 
 ## Tests

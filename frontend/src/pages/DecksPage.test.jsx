@@ -19,6 +19,14 @@ vi.mock('../data/decksApi.js', () => ({
   IMPORT_ACCEPT: '.pdf,.pptx'
 }));
 
+vi.mock('../data/importsApi.js', () => ({
+  listImports: vi.fn().mockResolvedValue([]),
+  uploadImport: vi.fn(),
+  validateImportFile: vi.fn(),
+  IMPORT_ACCEPT_ALL: '.docx',
+  MAX_IMPORT_MB: 25
+}));
+
 const ME = { id: 'u1', name: 'Leo Grant', email: 'leo@example.com' };
 const OTHER = { id: 'u2', name: 'Maya Ross', email: 'maya@example.com' };
 
@@ -42,9 +50,18 @@ describe('DecksPage', () => {
     listDecks.mockResolvedValue([]);
     renderDecks();
     expect(await screen.findByRole('heading', { name: 'Create your first presentation' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Start from scratch/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create from scratch/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Import a Word document/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Import a PowerPoint/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Import a PDF/ })).toBeInTheDocument();
+  });
+
+  it('opens the import dialog for Word from the header', async () => {
+    listDecks.mockResolvedValue(DECKS);
+    const user = renderDecks();
+    await screen.findByText('Roadmap');
+    await user.click(screen.getByRole('button', { name: 'Import Word document' }));
+    expect(screen.getByRole('dialog', { name: 'Import a Word document' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Browse files' })).toBeInTheDocument();
   });
 
   it('greets the user and lists recent and shared presentations', async () => {

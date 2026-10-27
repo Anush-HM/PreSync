@@ -14,6 +14,8 @@ import NotFound from './pages/NotFound.jsx';
 const LoginPage = lazy(() => import('./pages/LoginPage.jsx'));
 const DecksPage = lazy(() => import('./pages/DecksPage.jsx'));
 const EditorPage = lazy(() => import('./pages/EditorPage.jsx'));
+const DocumentsPage = lazy(() => import('./pages/DocumentsPage.jsx'));
+const ImportReviewPage = lazy(() => import('./pages/ImportReviewPage.jsx'));
 const LiveSessionsPage = lazy(() => import('./pages/LiveSessionsPage.jsx'));
 const PresenterPage = lazy(() => import('./pages/PresenterPage.jsx'));
 const ViewerJoinPage = lazy(() => import('./pages/ViewerJoinPage.jsx'));
@@ -33,6 +35,8 @@ function App() {
           <Route path="/decks" element={<RequireAuth><DecksPage key="home" view="home" /></RequireAuth>} />
           <Route path="/decks/mine" element={<RequireAuth><DecksPage key="mine" view="mine" /></RequireAuth>} />
           <Route path="/decks/shared" element={<RequireAuth><DecksPage key="shared" view="shared" /></RequireAuth>} />
+          <Route path="/documents" element={<RequireAuth><DocumentsPage /></RequireAuth>} />
+          <Route path="/imports/:importId" element={<RequireAuth><ImportReviewPage /></RequireAuth>} />
           <Route path="/sessions" element={<RequireAuth><LiveSessionsPage /></RequireAuth>} />
           <Route path="/editor/:deckId" element={<RequireAuth><EditorPage /></RequireAuth>} />
           <Route path="/presenter/:roomCode" element={<RequireAuth><PresenterPage /></RequireAuth>} />
