@@ -96,6 +96,19 @@
 .menu-item-danger:hover:not(:disabled), .menu-item-danger:focus-visible { background: var(--crimson-tint); }
 .menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 4px; }
 
+/* ── Popover (panel of custom content under a trigger) ── */
+.popover-root { position: relative; display: inline-flex; }
+.popover {
+  position: absolute; top: calc(100% + 6px); z-index: 60;
+  min-width: 200px; max-width: min(360px, calc(100vw - 24px)); padding: 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-elevated);
+  animation: menuIn var(--dur-fast) var(--ease-out);
+}
+.popover-start { left: 0; }
+.popover-end { right: 0; }
+.popover-root [aria-expanded='true'][data-tip]::after { display: none; }
+
 /* ── Avatar ── */
 .avatar {
   display: inline-flex; align-items: center; justify-content: center;

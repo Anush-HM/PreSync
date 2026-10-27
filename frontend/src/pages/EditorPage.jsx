@@ -3,11 +3,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as fabric from 'fabric';
 import * as Y from 'yjs';
 import {
-  AlertCircle, ArrowLeft, Check, CloudOff, Download, ImagePlus, Maximize, Minus, PanelLeft, PanelRight,
-  Play, Plus, Redo2, Sparkles, StickyNote, Type, Undo2, Users, ChevronDown
+  AlertCircle, ArrowLeft, Check, CloudOff, Download, Image as ImageIcon, Maximize, Minus, PanelLeft, PanelRight,
+  Play, Plus, Redo2, Sparkles, StickyNote, Undo2, Users, ChevronDown
 } from 'lucide-react';
 import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from '../data/yjsClient.js';
 import {
+  applyInteraction,
   BASE_OBJECT_PROPS,
   blockGeometry,
   chartKey,
@@ -38,15 +39,27 @@ import {
   makeBlankSlide,
   moveSlide,
   newId,
+  patchBlocks,
+  replaceSlideContent,
   restackBlock,
   updateBlocks,
   updateSlide
 } from '../data/deckOps.js';
+import { alignBoxes, distributeBoxes, expandToGroups, nudgeBoxes } from '../data/arrange.js';
+import { applyLayout, layoutById, slideFromLayout } from '../data/layouts.js';
+import { applyTheme, themeById } from '../data/themes.js';
+import { CLEAR_FORMAT_PATCH, formatOf, indentLines, linesInSelection, paintPatch, toggleList } from '../data/textOps.js';
+import { cropPatch, keepsAspect, replaceImagePatch, resetAspectPatch } from '../data/imageOps.js';
+import { defaultChart, setChartField } from '../data/chartOps.js';
+import { makeTable, tableSize, tableText } from '../data/tableOps.js';
+import { shapeFields } from '../data/shapes.js';
+import { loadFont } from '../data/fonts.js';
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
   DEFAULT_SLIDE_BACKGROUND,
-  legacyFitScale
+  legacyFitScale,
+  LIST_PREFIX
 } from '../data/slideFormat.js';
 import { goLive } from '../data/roomsApi.js';
 import { getDeck, renameDeck, saveDeck, downloadDeckExport, EXPORT_FORMATS } from '../data/decksApi.js';
@@ -54,6 +67,8 @@ import { getCurrentUser } from '../data/apiConfig.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import SlideRail from '../components/editor/SlideRail.jsx';
 import PropertiesPanel from '../components/editor/PropertiesPanel.jsx';
+import ContextToolbar from '../components/editor/ContextToolbar.jsx';
+import InsertMenu from '../components/editor/InsertMenu.jsx';
 import CopilotPanel from '../components/copilot/CopilotPanel.jsx';
 import { createEditorBridge } from '../components/copilot/editorBridge.js';
 import ShareDeckDialog from '../components/decks/ShareDeckDialog.jsx';
@@ -62,6 +77,7 @@ import Menu from '../components/ui/Menu.jsx';
 import { AvatarStack } from '../components/ui/Avatar.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
 import '../components/editor/editor.css';
+import '../components/editor/toolbar.css';
 import './EditorPage.css';
 
 // Light, earthy tints that read on both the dark chrome and white slides.
@@ -72,7 +88,9 @@ const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif'];
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
 const MIN_ZOOM = 0.25;
 // Formatting Fabric can hold per character (the rest is per text box).
-const CHAR_STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'linethrough', 'fill'];
+const CHAR_STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'linethrough', 'fill', 'textBackgroundColor'];
+// Where new elements land: the middle of the slide.
+const centred = (w, h) => ({ x: Math.round((CANVAS_WIDTH - w) / 2), y: Math.round((CANVAS_HEIGHT - h) / 2) });
 // Font families this page has already asked the browser to load.
 const requestedFonts = new Set();
 const MAX_ZOOM = 2;
@@ -138,6 +156,11 @@ function EditorPage() {
   // Toolbar state: ids of the selected blocks on the active slide. Their
   // formatting is read from `slides`, so it always reflects Yjs.
   const [selectedIds, setSelectedIds] = useState([]);
+  // Character formatting at the caret or text selection while editing.
+  const [selection, setSelection] = useState({});
+  const [painter, setPainter] = useState(null); // formatting the format painter carries
+  const [focusSection, setFocusSection] = useState(null);
+  const [dropActive, setDropActive] = useState(false);
   const [zoom, setZoom] = useState(null); // null = fit the slide to the stage
   const [fitScale, setFitScale] = useState(1);
 
@@ -162,6 +185,9 @@ function EditorPage() {
   const undoRef = useRef(null);
   const stageRef = useRef(null);
   const imageInputRef = useRef(null);
+  const replaceInputRef = useRef(null);
+  const slidesRef = useRef([]);
+  const quietSelectionRef = useRef(false); // set while an object is swapped for a rebuilt one
   const applyingRemoteRef = useRef(false);
   const renderedSlideIdRef = useRef(null);
   const scaleRef = useRef(1);
@@ -235,7 +261,9 @@ function EditorPage() {
     syncPeers();
 
     function syncSlidesState() {
-      setSlides(slidesArr.toArray().map(slideMapToPlain));
+      const plain = slidesArr.toArray().map(slideMapToPlain);
+      slidesRef.current = plain;
+      setSlides(plain);
     }
 
     slidesArr.observeDeep(syncSlidesState);
@@ -354,11 +382,42 @@ function EditorPage() {
     canvas.on('text:editing:exited', (e) => writeText(e.target));
 
     const syncSelection = () => {
-      setSelectedIds(canvas.getActiveObjects().map((o) => o.data?.blockId).filter(Boolean));
+      if (quietSelectionRef.current) return;
+      const ids = canvas.getActiveObjects().map((o) => o.data?.blockId).filter(Boolean);
+      // Grouped elements select together.
+      const blocks = slidesRef.current[activeSlideIdxRef.current]?.blocks || [];
+      const all = expandToGroups(blocks, ids);
+      if (all.length > ids.length && !canvas.getActiveObject()?.isEditing) {
+        const objs = canvas.getObjects().filter((o) => all.includes(o.data?.blockId));
+        canvas.setActiveObject(new fabric.ActiveSelection(objs, { canvas }));
+        canvas.requestRenderAll();
+      }
+      setSelectedIds(all);
+      setSelection({});
     };
     canvas.on('selection:created', syncSelection);
     canvas.on('selection:updated', syncSelection);
     canvas.on('selection:cleared', syncSelection);
+
+    // The formatting under the caret, so the format bar shows what
+    // typing will produce.
+    const syncCharStyle = (e) => {
+      const t = e.target;
+      if (!t?.isEditing) return;
+      const start = t.selectionStart;
+      const end = Math.max(start + 1, t.selectionEnd);
+      const styles = t.getSelectionStyles(start === t.selectionEnd && start > 0 ? start - 1 : start, start === t.selectionEnd && start > 0 ? start : end);
+      const out = {};
+      if (styles.length) {
+        for (const k of [...CHAR_STYLE_KEYS, 'deltaY']) {
+          const v = styles[0][k];
+          if (v !== undefined && styles.every((st) => st[k] === v)) out[k] = k === 'fontSize' ? v / scaleRef.current : v;
+        }
+      }
+      setSelection(out);
+    };
+    canvas.on('text:selection:changed', syncCharStyle);
+    canvas.on('text:editing:entered', syncCharStyle);
 
     // Cursor broadcast
     let lastSent = 0;
@@ -434,10 +493,16 @@ function EditorPage() {
       const idx = slide.blocks.findIndex((b) => b.id === blockId);
       if (idx >= 0 && canvas.getObjects().indexOf(obj) !== idx) canvas.moveObjectTo(obj, idx);
     };
+    // A rebuilt object (a table or chart after an edit) stays selected,
+    // so the panel editing it doesn't close under the author.
     const replace = (oldObj, obj, blockId) => {
+      const wasActive = !!oldObj && canvas.getActiveObject() === oldObj;
+      quietSelectionRef.current = wasActive;
       if (oldObj) canvas.remove(oldObj);
       canvas.add(obj);
       placeAt(obj, blockId);
+      if (wasActive) canvas.setActiveObject(obj);
+      quietSelectionRef.current = false;
     };
 
     slide.blocks.forEach((block) => {
@@ -526,6 +591,12 @@ function EditorPage() {
       placeAt(obj, block.id);
     });
 
+    // Locks and keep-proportions settings, for every block on the slide.
+    canvas.getObjects().forEach((o) => {
+      const block = slide.blocks.find((b) => b.id === o.data?.blockId);
+      if (block) applyInteraction(o, block, keepsAspect(block));
+    });
+
     // Once web fonts land, text heights change: re-anchor text boxes.
     relayoutRef.current = () => {
       slide.blocks.forEach((block) => {
@@ -536,6 +607,11 @@ function EditorPage() {
         }
       });
     };
+    // Web fonts from the font menu are fetched on first use.
+    slide.blocks.forEach((b) => {
+      if (b.fontFamily) loadFont(b.fontFamily);
+      (b.styles || []).forEach((r) => r.style?.fontFamily && loadFont(r.style.fontFamily));
+    });
     const families = fontFamiliesOf(slide.blocks).filter((f) => !requestedFonts.has(f));
     if (families.length && document.fonts?.load) {
       families.forEach((f) => requestedFonts.add(f));
@@ -591,57 +667,387 @@ function EditorPage() {
     if (doc && ids.length) updateBlocks(doc, activeSlideIdx, ids, patch);
   }
 
-  // Edits one table cell's text. Mixed formatting that no longer fits
-  // the new text is trimmed rather than shifted.
-  function handleCellText(r, c, text) {
-    const doc = yjsRef.current?.doc;
-    const block = selectedBlocks.find((b) => b.type === 'table');
-    if (!doc || !block?.table) return;
-    const rows = block.table.rows.map((row, ri) => ({
-      ...row,
-      cells: row.cells.map((cell, ci) => {
-        if (ri !== r || ci !== c) return cell;
-        const len = Array.from(text.replace(/\n/g, '')).length;
-        const styles = (cell.styles || [])
-          .map((st) => ({ ...st, end: Math.min(st.end, len) }))
-          .filter((st) => st.start < st.end);
-        const next = { ...cell, text };
-        if (styles.length) next.styles = styles;
-        else delete next.styles;
-        return next;
-      })
-    }));
-    const plain = rows.map((row) => row.cells.filter((cell) => !cell.covered).map((cell) => cell.text).join('\t')).join('\n');
-    updateBlocks(doc, activeSlideIdx, [block.id], { table: { ...block.table, rows }, text: plain });
-  }
-
   function toggleFormat(key, onValue, offValue) {
     if (!primary) return;
-    const isOn = key === 'underline' ? !!primary.underline : primary[key] === onValue;
+    const current = selection[key] ?? primary[key];
+    const isOn = typeof onValue === 'boolean' ? !!current : current === onValue;
     formatSelected({ [key]: isOn ? offValue : onValue });
   }
 
-  function handleAddTextBlock() {
-    const doc = yjsRef.current?.doc;
-    if (!doc) return;
-    addBlock(doc, activeSlideIdx, {
-      id: newId('b'),
-      type: 'textbox',
-      x: Math.round(100 + Math.random() * 80),
-      y: Math.round(100 + Math.random() * 80),
-      width: 300,
-      fontSize: 18,
-      text: 'New text'
+  const doc = () => yjsRef.current?.doc;
+  const theme = themeById(activeSlide?.theme);
+
+  // Adds a block to the current slide and selects it once it is drawn.
+  function insertBlock(block) {
+    const d = doc();
+    if (!d || !activeSlide) return;
+    addBlock(d, activeSlideIdxRef.current, block);
+    selectIds([block.id]);
+  }
+
+  // Selects blocks' objects, waiting a little for ones still being drawn
+  // (pictures load asynchronously).
+  function selectIds(ids, tries = 40) {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const objs = canvas.getObjects().filter((o) => ids.includes(o.data?.blockId));
+    if (objs.length < ids.length && tries > 0) {
+      requestAnimationFrame(() => selectIds(ids, tries - 1));
+      return;
+    }
+    if (!objs.length) return;
+    canvas.discardActiveObject();
+    canvas.setActiveObject(objs.length === 1 ? objs[0] : new fabric.ActiveSelection(objs, { canvas }));
+    canvas.requestRenderAll();
+    setSelectedIds(ids);
+  }
+
+  function handleInsertText(preset) {
+    const width = preset.width || 400;
+    const pos = centred(width, preset.fontSize * 1.4);
+    const block = { id: newId('b'), type: 'textbox', ...pos, width, fontSize: preset.fontSize, text: preset.sample };
+    for (const k of ['fontWeight', 'fontStyle', 'textAlign', 'lineHeight', 'role']) if (preset[k]) block[k] = preset[k];
+    block.fill = preset.fill || (preset.role === 'title' ? theme?.title : theme?.text) || undefined;
+    const font = preset.role === 'title' ? theme?.titleFont : theme?.bodyFont;
+    if (font) block.fontFamily = font;
+    insertBlock(block);
+  }
+
+  function handleInsertShape(preset) {
+    const line = preset.shape === 'line';
+    const w = line ? 240 : preset.id.startsWith('arrow') || preset.id === 'thinArrow' ? 220 : 180;
+    const h = line ? 120 : preset.id.startsWith('arrow') || preset.id === 'thinArrow' ? 110 : 180;
+    const block = { id: newId('b'), type: 'shape', ...shapeFields(preset), ...centred(w, h), width: w, height: h, fontSize: 16, text: '' };
+    if (line) Object.assign(block, { stroke: theme?.accent || '#285c43', strokeWidth: 3 });
+    else block.background = theme?.accent || '#347653';
+    insertBlock(block);
+  }
+
+  function handleInsertTable(rows, cols) {
+    const width = Math.min(840, cols * 140);
+    const table = makeTable(rows, cols, { width });
+    const { height } = tableSize(table);
+    insertBlock({ id: newId('b'), type: 'table', ...centred(width, height), width, height, fontSize: 16, text: tableText(table), table });
+  }
+
+  function handleInsertChart(kind) {
+    const chart = defaultChart(kind);
+    if (theme) chart.textColor = theme.text;
+    insertBlock({ id: newId('b'), type: 'chart', ...centred(560, 320), width: 560, height: 320, fontSize: 16, text: '', chart });
+  }
+
+  function handleInsertDivider() {
+    insertBlock({ id: newId('b'), type: 'shape', shape: 'rect', ...centred(600, 3), width: 600, height: 3, background: theme?.accent || '#c9cec9', fontSize: 16, text: '' });
+  }
+
+  function handleSlideFromLayout(layoutId) {
+    const d = doc();
+    const layout = layoutById(layoutId);
+    if (!d || !layout) return;
+    const at = activeSlideIdx + 1;
+    insertSlide(d, at, slideFromLayout(layout, at, theme));
+    setActiveSlideIdx(at);
+  }
+
+  function handleApplyLayout(layoutId) {
+    const d = doc();
+    const layout = layoutById(layoutId);
+    if (!d || !layout || !activeSlide) return;
+    fabricRef.current?.discardActiveObject();
+    const { blocks, added, moved } = applyLayout(activeSlide, layout, theme);
+    replaceSlideContent(d, activeSlideIdx, blocks, { layout: layout.id });
+    toast.success?.(`${layout.name} layout applied${moved ? `: ${moved} element${moved === 1 ? '' : 's'} moved` : ''}${added ? `, ${added} placeholder${added === 1 ? '' : 's'} added` : ''}.`);
+  }
+
+  function handleApplyTheme(themeId, all) {
+    const d = doc();
+    const next = themeById(themeId);
+    if (!d || !next) return;
+    loadFont(next.titleFont);
+    loadFont(next.bodyFont);
+    fabricRef.current?.discardActiveObject();
+    d.transact(() => {
+      slides.forEach((sl, i) => {
+        if (!all && i !== activeSlideIdx) return;
+        const out = applyTheme(sl, next);
+        replaceSlideContent(d, i, out.blocks, { backgroundColor: out.backgroundColor, backgroundGradient: out.backgroundGradient, theme: out.theme });
+      });
     });
+  }
+
+  function handleSlidePatch(patch, idx = activeSlideIdx) {
+    const d = doc();
+    if (d) updateSlide(d, idx, patch);
+  }
+
+  // Patches every selected block (or the given ids).
+  function handleBlockPatch(patch, ids = selectedIds) {
+    const d = doc();
+    if (d && ids.length) updateBlocks(d, activeSlideIdx, ids, patch);
+  }
+
+  function handleGeometry(patch) {
+    if (selectedIds.length !== 1) return;
+    const block = selectedBlocks[0];
+    if (block?.locked) return;
+    fabricRef.current?.discardActiveObject();
+    handleBlockPatch(patch);
+    requestAnimationFrame(() => selectIds([block.id]));
+  }
+
+  // Selected elements' boxes on the slide, measured on the canvas (a text
+  // box's height comes from its text). Locked elements stay put.
+  function measuredBoxes(ids) {
+    const canvas = fabricRef.current;
+    const s = scaleRef.current;
+    const out = [];
+    canvas?.getObjects().forEach((o) => {
+      const id = o.data?.blockId;
+      const block = activeSlide?.blocks.find((b) => b.id === id);
+      if (!ids.includes(id) || !block || block.locked) return;
+      if (block.rotation) {
+        // A turned element aligns by the box around it as drawn.
+        const r = o.getBoundingRect();
+        out.push({ id, x: r.left / s, y: r.top / s, w: r.width / s, h: r.height / s, block });
+        return;
+      }
+      // Otherwise by its own box (chart labels and table borders that
+      // overhang it don't count); text boxes are as tall as their text.
+      const kind = o.data?.kind;
+      const h = kind === 'text' ? (block.verticalAlign && block.height ? block.height : (o.height * o.scaleY) / s)
+        : kind === 'table' || kind === 'chart' ? o.data.layoutHeight : block.height || (o.height * o.scaleY) / s;
+      const w = kind === 'table' ? o.data.layoutWidth : block.width;
+      out.push({ id, x: block.x || 0, y: block.y || 0, w, h, block });
+    });
+    return out;
+  }
+
+  function moveTo(moves, boxes) {
+    const d = doc();
+    if (!d) return;
+    const patches = {};
+    for (const b of boxes) {
+      const m = moves[b.id];
+      if (!m) continue;
+      patches[b.id] = { x: Math.round(((b.block.x || 0) + m.x - b.x) * 10) / 10, y: Math.round(((b.block.y || 0) + m.y - b.y) * 10) / 10 };
+    }
+    patchBlocks(d, activeSlideIdx, patches);
+  }
+
+  function withSelectionReleased(fn) {
+    const ids = selectedIds;
+    fabricRef.current?.discardActiveObject();
+    fn(ids);
+    requestAnimationFrame(() => selectIds(ids));
+  }
+
+  const handleAlign = (mode) => withSelectionReleased((ids) => {
+    const boxes = measuredBoxes(ids);
+    moveTo(alignBoxes(boxes, mode), boxes);
+  });
+  const handleDistribute = (axis) => withSelectionReleased((ids) => {
+    const boxes = measuredBoxes(ids);
+    moveTo(distributeBoxes(boxes, axis), boxes);
+  });
+  const handleNudge = useCallback((dx, dy) => {
+    const canvas = fabricRef.current;
+    if (!canvas || !selectedIds.length) return;
+    const ids = selectedIds;
+    canvas.discardActiveObject();
+    const boxes = measuredBoxes(ids);
+    moveTo(nudgeBoxes(boxes, dx, dy), boxes);
+    requestAnimationFrame(() => selectIds(ids));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds, activeSlideIdx, activeSlide]);
+
+  function handleGroup() {
+    if (selectedIds.length < 2) return;
+    handleBlockPatch({ groupId: newId('g') });
+  }
+  function handleUngroup() {
+    handleBlockPatch({ groupId: null });
+  }
+  function handleLock(locked) {
+    handleBlockPatch({ locked: locked ? true : null });
+  }
+
+  // Paragraph edits (lists, indents) on the text box being edited or the
+  // selected ones. Editing ends first so the text written is the latest.
+  function editParagraphs(fn) {
+    const d = doc();
+    const canvas = fabricRef.current;
+    if (!d || !selectedText.length) return;
+    const active = canvas?.getActiveObject();
+    let lines = null;
+    if (active?.type === 'textbox' && active.isEditing) {
+      lines = linesInSelection(active.text, active.selectionStart, active.selectionEnd);
+      active.exitEditing();
+    }
+    const patches = {};
+    for (const b of selectedText) {
+      const fresh = getSlidesArray(d).get(activeSlideIdx)?.get('blocks').toArray().find((m) => m.get('id') === b.id);
+      const text = fresh?.get('text') ?? b.text;
+      const styles = fresh?.get('styles') ?? b.styles;
+      const out = fn(text, styles, selectedText.length === 1 ? lines : null);
+      patches[b.id] = { text: out.text, styles: out.styles };
+    }
+    patchBlocks(d, activeSlideIdx, patches);
+  }
+  const handleList = (kind) => editParagraphs((text, styles, lines) => toggleList(text, styles, kind, lines));
+  const handleIndent = (delta) => editParagraphs((text, styles, lines) => indentLines(text, styles, delta, lines));
+
+  function handleScript(which) {
+    const canvas = fabricRef.current;
+    const active = canvas?.getActiveObject();
+    const targets = active?.type === 'textbox' && active.data?.kind === 'text' ? [active] : canvas?.getActiveObjects().filter((o) => o.type === 'textbox' && o.data?.kind === 'text') || [];
+    for (const o of targets) {
+      const ranged = o.isEditing && o.selectionStart !== o.selectionEnd;
+      const start = ranged ? o.selectionStart : 0;
+      const end = ranged ? o.selectionEnd : o.text.length;
+      const on = which === 'super' ? selection.deltaY < 0 : selection.deltaY > 0;
+      if (on) o.setSelectionStyles({ deltaY: 0, fontSize: o.fontSize }, start, end);
+      else if (which === 'super') o.setSuperscript(start, end);
+      else o.setSubscript(start, end);
+      o.initDimensions();
+      writeTextRef.current?.(o);
+    }
+    canvas?.requestRenderAll();
+    setSelection((sel) => ({ ...sel, deltaY: which === 'super' ? (sel.deltaY < 0 ? 0 : -1) : sel.deltaY > 0 ? 0 : 1 }));
+  }
+
+  function handleClearFormat() {
+    const active = fabricRef.current?.getActiveObject();
+    if (active?.isEditing) active.exitEditing();
+    const d = doc();
+    if (d && selectedText.length) formatBlocks(d, activeSlideIdx, selectedText.map((b) => b.id), CLEAR_FORMAT_PATCH);
+  }
+
+  function handleTogglePainter() {
+    if (painter) setPainter(null);
+    else if (primary) setPainter(formatOf(primary));
+  }
+
+  // The format painter paints the next text box selected.
+  useEffect(() => {
+    if (!painter) return;
+    const targets = selectedText.filter((b) => b.id !== painter.sourceId);
+    if (!targets.length || !selectedIds.length) return;
+    const d = yjsRef.current?.doc;
+    if (d) formatBlocks(d, activeSlideIdx, targets.map((b) => b.id), paintPatch(painter));
+    setPainter(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds]);
+
+  function handleShapeOrImageStyle(patch) {
+    const ids = selectedBlocks.filter((b) => b.type === 'shape' || b.type === 'image').map((b) => b.id);
+    handleBlockPatch(patch, ids);
+  }
+
+  function handleTableChange(table) {
+    const block = selectedBlocks.find((b) => b.type === 'table');
+    if (block) handleBlockPatch({ table, text: tableText(table) }, [block.id]);
+  }
+  function handleChartChange(chart) {
+    const block = selectedBlocks.find((b) => b.type === 'chart');
+    if (block) handleBlockPatch({ chart }, [block.id]);
+  }
+  function handleChartPatch(patch) {
+    const block = selectedBlocks.find((b) => b.type === 'chart');
+    if (block) handleChartChange(Object.entries(patch).reduce((c, [k, v]) => setChartField(c, k, v), block.chart));
+  }
+
+  function handleCrop(insets) {
+    const block = selectedBlocks.find((b) => b.type === 'image');
+    if (block) handleBlockPatch(cropPatch(block, insets), [block.id]);
+  }
+  function handleResetAspect() {
+    const block = selectedBlocks.find((b) => b.type === 'image');
+    const obj = fabricRef.current?.getObjects().find((o) => o.data?.blockId === block?.id);
+    const el = obj?.getElement?.();
+    if (block && el?.naturalWidth) handleBlockPatch(resetAspectPatch(block, { width: el.naturalWidth, height: el.naturalHeight }), [block.id]);
+  }
+
+  function openPanel(name) {
+    setPanelOpen(true);
+    setFocusSection({ name, at: Date.now() });
+  }
+
+  async function readCheckedImage(file) {
+    if (!IMAGE_TYPES.includes(file.type)) throw new Error('Choose a PNG, JPEG or GIF image.');
+    if (file.size > MAX_IMAGE_BYTES) throw new Error('Images can be up to 1.5 MB. Try a smaller or compressed version.');
+    return readImageFile(file);
+  }
+
+  async function handleReplaceImage(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const block = selectedBlocks.find((b) => b.type === 'image');
+    if (!file || !block) return;
+    try {
+      handleBlockPatch(replaceImagePatch(block, await readCheckedImage(file)), [block.id]);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  async function addImageFile(file, at) {
+    const d = doc();
+    if (!d) return;
+    try {
+      const { dataUrl, width, height } = await readCheckedImage(file);
+      const fit = Math.min(1, 640 / width, 360 / height);
+      const w = Math.max(1, Math.round(width * fit));
+      const h = Math.max(1, Math.round(height * fit));
+      const pos = at ? { x: Math.round(Math.max(0, Math.min(CANVAS_WIDTH - w, at.x - w / 2))), y: Math.round(Math.max(0, Math.min(CANVAS_HEIGHT - h, at.y - h / 2))) } : centred(w, h);
+      insertBlock({ id: newId('b'), type: 'image', ...pos, width: w, height: h, fontSize: 16, text: '', imageUrl: dataUrl });
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  function onStageDragOver(e) {
+    if (![...(e.dataTransfer?.items || [])].some((i) => i.kind === 'file')) return;
+    e.preventDefault();
+    setDropActive(true);
+  }
+  function onStageDrop(e) {
+    setDropActive(false);
+    const file = [...(e.dataTransfer?.files || [])].find((f) => f.type.startsWith('image/'));
+    if (!file) return;
+    e.preventDefault();
+    const rect = canvasElRef.current?.getBoundingClientRect();
+    const at = rect ? { x: ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH, y: ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT } : null;
+    addImageFile(file, at);
+  }
+
+  async function handleExportSlideImage(type) {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
+    try {
+      // Images from other sites can't be read back from the canvas.
+      const url = canvas.toDataURL({ format: type, quality: 0.92, multiplier: 2 });
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(deckMeta?.title || 'slide').replace(/[^\w\- ]+/g, '').trim() || 'slide'} - slide ${activeSlideIdx + 1}.${type === 'jpeg' ? 'jpg' : 'png'}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      toast.error('This slide has a picture from another website, so it can’t be saved as an image. Export as PDF instead.');
+    }
   }
 
   const handleDeleteSelected = useCallback(() => {
     const doc = yjsRef.current?.doc;
-    if (!doc || selectedIds.length === 0) return;
+    // Locked elements survive Delete until they're unlocked.
+    const ids = selectedIds.filter((id) => !activeSlide?.blocks.find((b) => b.id === id)?.locked);
+    if (!doc || ids.length === 0) return;
     fabricRef.current?.discardActiveObject();
-    deleteBlocks(doc, activeSlideIdx, selectedIds);
+    deleteBlocks(doc, activeSlideIdx, ids);
     setSelectedIds([]);
-  }, [selectedIds, activeSlideIdx]);
+  }, [selectedIds, activeSlideIdx, activeSlide]);
 
   const handleDuplicateSelected = useCallback(() => {
     const doc = yjsRef.current?.doc;
@@ -729,38 +1135,10 @@ function EditorPage() {
     updateSlide(doc, activeSlideIdx, { notes: e.target.value });
   }
 
-  async function handleInsertImage(e) {
+  function handleInsertImage(e) {
     const file = e.target.files?.[0];
     e.target.value = '';
-    const doc = yjsRef.current?.doc;
-    if (!file || !doc) return;
-    if (!IMAGE_TYPES.includes(file.type)) {
-      toast.error('Choose a PNG, JPEG or GIF image.');
-      return;
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      toast.error('Images can be up to 1.5 MB. Try a smaller or compressed version.');
-      return;
-    }
-    try {
-      const { dataUrl, width, height } = await readImageFile(file);
-      const fit = Math.min(1, 640 / width, 360 / height);
-      const w = Math.max(1, Math.round(width * fit));
-      const h = Math.max(1, Math.round(height * fit));
-      addBlock(doc, activeSlideIdxRef.current, {
-        id: newId('b'),
-        type: 'image',
-        x: Math.round((CANVAS_WIDTH - w) / 2),
-        y: Math.round((CANVAS_HEIGHT - h) / 2),
-        width: w,
-        height: h,
-        fontSize: 16,
-        text: '',
-        imageUrl: dataUrl
-      });
-    } catch (err) {
-      toast.error(err.message);
-    }
+    if (file) addImageFile(file);
   }
 
   async function handleExport(format) {
@@ -785,17 +1163,46 @@ function EditorPage() {
     }
   }
 
-  // --- Keyboard shortcuts (skipped while typing in a text block/field)
+  // --- Keyboard shortcuts (skipped while typing in a panel field)
+  const keyRef = useRef(null);
+  keyRef.current = { formatToggle: toggleFormat, list: handleList, indent: handleIndent, group: handleGroup, ungroup: handleUngroup, painter, setPainter };
   useEffect(() => {
     function onKeyDown(e) {
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
+      const k = keyRef.current;
       if (mod && key === 's') {
         e.preventDefault();
         handleSave();
         return;
       }
+      const active = fabricRef.current?.getActiveObject();
+      const editingText = active?.type === 'textbox' && active.isEditing && document.activeElement === active.hiddenTextarea;
+      const textSelected = active?.type === 'textbox' && active.data?.kind === 'text';
+      // Text shortcuts work while typing in a text box and on a selected one.
+      if (mod && !e.shiftKey && !e.altKey && textSelected && (editingText || !isTypingInField()) && ['b', 'i', 'u'].includes(key)) {
+        e.preventDefault();
+        if (key === 'b') k.formatToggle('fontWeight', 'bold', 'normal');
+        if (key === 'i') k.formatToggle('fontStyle', 'italic', 'normal');
+        if (key === 'u') k.formatToggle('underline', true, false);
+        return;
+      }
+      if (editingText && e.key === 'Tab' && LIST_PREFIX.test(active.text.split('\n')[linesInSelection(active.text, active.selectionStart, active.selectionStart)[0]] || '')) {
+        // Tab in a list item indents it, as in a word processor.
+        e.preventDefault();
+        k.indent(e.shiftKey ? -1 : 1);
+        return;
+      }
+      if (mod && e.shiftKey && (key === '7' || key === '8') && textSelected) {
+        e.preventDefault();
+        k.list(key === '7' ? 'number' : 'bullet');
+        return;
+      }
       if (isTypingInField()) return;
+      if (e.key === 'Escape' && k.painter) {
+        k.setPainter(null);
+        return;
+      }
       if (mod && key === 'z') {
         e.preventDefault();
         if (e.shiftKey) handleRedo();
@@ -806,6 +1213,15 @@ function EditorPage() {
       } else if (mod && key === 'd') {
         e.preventDefault();
         handleDuplicateSelected();
+      } else if (mod && key === 'g') {
+        e.preventDefault();
+        if (e.shiftKey) k.ungroup();
+        else k.group();
+      } else if (!mod && e.key.startsWith('Arrow') && selectedIds.length > 0) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+        handleNudge(d[0], d[1]);
       } else if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) {
         if (selectedIds.length > 0) {
           e.preventDefault();
@@ -813,9 +1229,23 @@ function EditorPage() {
         }
       }
     }
+    // Pasting a picture from the clipboard adds it to the slide.
+    function onPaste(e) {
+      if (isTypingInField()) return;
+      const file = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith('image/'));
+      if (!file) return;
+      e.preventDefault();
+      addImageRef.current?.(file);
+    }
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleSave, handleUndo, handleRedo, handleDuplicateSelected, handleDeleteSelected, selectedIds.length]);
+    window.addEventListener('paste', onPaste);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('paste', onPaste);
+    };
+  }, [handleSave, handleUndo, handleRedo, handleDuplicateSelected, handleDeleteSelected, handleNudge, selectedIds.length]);
+  const addImageRef = useRef(null);
+  addImageRef.current = addImageFile;
 
   async function handleGoLive() {
     if (goingLive) return;
@@ -843,15 +1273,37 @@ function EditorPage() {
   else status = { tone: 'ok', icon: Check, label: 'Synced', detail: 'Edits sync live and are saved automatically' };
   const StatusIcon = status.icon;
 
-  const exportItems = Object.entries(EXPORT_FORMATS).map(([format, { label }]) => ({
-    label, icon: Download, onSelect: () => handleExport(format), disabled: !!exporting
-  }));
-  const insertItems = [
-    { label: 'Text box', icon: Type, onSelect: handleAddTextBlock, disabled: !activeSlide },
-    { label: 'Image…', icon: ImagePlus, onSelect: () => imageInputRef.current?.click(), disabled: !activeSlide },
+  const exportItems = [
+    ...Object.entries(EXPORT_FORMATS).map(([format, { label }]) => ({
+      label, icon: Download, onSelect: () => handleExport(format), disabled: !!exporting
+    })),
     'separator',
-    { label: 'New slide', icon: Plus, onSelect: handleAddSlide, disabled: syncStatus === 'connecting' && slides.length === 0 }
+    { label: 'This slide as PNG', icon: ImageIcon, onSelect: () => handleExportSlideImage('png'), disabled: !activeSlide },
+    { label: 'This slide as JPEG', icon: ImageIcon, onSelect: () => handleExportSlideImage('jpeg'), disabled: !activeSlide }
   ];
+  const toolbarActions = {
+    format: formatSelected,
+    toggle: toggleFormat,
+    list: handleList,
+    indent: handleIndent,
+    script: handleScript,
+    clearFormat: handleClearFormat,
+    togglePainter: handleTogglePainter,
+    shapeStyle: handleShapeOrImageStyle,
+    blockPatch: (patch) => handleBlockPatch(patch),
+    chartPatch: handleChartPatch,
+    replaceImage: () => replaceInputRef.current?.click(),
+    openPanel,
+    restack: handleRestack,
+    align: handleAlign,
+    distribute: handleDistribute,
+    group: handleGroup,
+    ungroup: handleUngroup,
+    lock: handleLock,
+    applyLayout: handleApplyLayout,
+    applyTheme: handleApplyTheme,
+    background: handleSlideBackground
+  };
   const loading = syncStatus === 'connecting' && slides.length === 0;
   const peerPeople = peers.map((p) => ({ id: p.clientId, name: p.name, color: p.color }));
 
@@ -916,8 +1368,18 @@ function EditorPage() {
             <Redo2 />
           </button>
           <span className="ed-sep" aria-hidden="true" />
-          <Menu label="Insert" icon={Plus} text="Insert" items={insertItems} align="start" triggerClassName="btn btn-ghost btn-sm" />
+          <InsertMenu
+            disabled={!activeSlide}
+            onText={handleInsertText}
+            onShape={handleInsertShape}
+            onTable={handleInsertTable}
+            onChart={handleInsertChart}
+            onImage={() => imageInputRef.current?.click()}
+            onDivider={handleInsertDivider}
+            onSlide={handleSlideFromLayout}
+          />
           <input ref={imageInputRef} type="file" accept={IMAGE_TYPES.join(',')} hidden onChange={handleInsertImage} />
+          <input ref={replaceInputRef} type="file" accept={IMAGE_TYPES.join(',')} hidden onChange={handleReplaceImage} aria-label="Replacement picture" />
 
           <span className="ed-tools-spacer" />
 
@@ -1000,11 +1462,29 @@ function EditorPage() {
             onDuplicate={handleDuplicateSlide}
             onMove={handleMoveSlide}
             onDelete={(i) => setConfirmDeleteIdx(i)}
+            onRename={(i, name) => handleSlidePatch({ name: name || null }, i)}
+            onToggleHidden={(i) => handleSlidePatch({ hidden: slides[i]?.hidden ? null : true }, i)}
           />
         </aside>
 
         <main className="ed-center" id="main">
-          <div className="ed-stage" ref={stageRef}>
+          <ContextToolbar
+            slide={activeSlide}
+            selectedBlocks={selectedBlocks}
+            primary={primary}
+            selection={selection}
+            actions={toolbarActions}
+            painting={!!painter}
+          />
+          <div
+            className={`ed-stage${dropActive ? ' is-drop' : ''}${painter ? ' is-painting' : ''}`}
+            ref={stageRef}
+            onDragOver={onStageDragOver}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) setDropActive(false);
+            }}
+            onDrop={onStageDrop}
+          >
             <div className="canvas-frame" style={{ width: CANVAS_WIDTH * scale, height: CANVAS_HEIGHT * scale }}>
               <div className="canvas-page" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, transform: `scale(${scale})` }}>
                 <canvas ref={canvasElRef} aria-label={`Slide ${activeSlideIdx + 1} canvas`} />
@@ -1093,8 +1573,19 @@ function EditorPage() {
             onDelete={handleDeleteSelected}
             onBackground={handleSlideBackground}
             onShapeStyle={handleShapeStyle}
-            onCellText={handleCellText}
             onClose={panelOverlay ? () => setPanelOpen(false) : undefined}
+            onGeometry={handleGeometry}
+            onBlockPatch={(patch) => handleBlockPatch(patch)}
+            onTableChange={handleTableChange}
+            onChartChange={handleChartChange}
+            onCrop={handleCrop}
+            onReplaceImage={() => replaceInputRef.current?.click()}
+            onResetAspect={handleResetAspect}
+            onSlidePatch={(patch) => handleSlidePatch(patch)}
+            onApplyLayout={handleApplyLayout}
+            onApplyTheme={handleApplyTheme}
+            onLock={handleLock}
+            focusSection={focusSection}
           />
         </aside>
 
