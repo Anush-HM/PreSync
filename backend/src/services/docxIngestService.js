@@ -1,16 +1,22 @@
 import JSZip from 'jszip';
 import path from 'path';
-import { attr, child, children, find, readRels, readXml } from './ooxml.js';
+import { attr, child, children, find, num, readRels, readXml } from './ooxml.js';
+import { paragraphContext, paragraphLayout, readRuns, readTable, readWordStyles, twipsToPx } from './docxFormatting.js';
+import { processImage } from './imageProcessing.js';
 
 // Reads a Word (.docx) document into an ordered list of content blocks:
 // title, subtitle, headings (with level), paragraphs, lists (with
-// nesting and bullet/number type), tables (cell text) and pictures.
-// Pure parsing only; turning blocks into an outline lives in
-// documentAnalysis.js.
+// nesting, bullet/number type and the marker Word shows), tables and
+// pictures, plus page breaks. Every text block also carries `runs` (its
+// text with per-run formatting) and `layout` (alignment, spacing,
+// indents); tables carry their full grid with merges, shading and
+// borders; `meta.page` has the page size and margins, and `header` /
+// `footer` the default header and footer. Pure parsing only; turning
+// blocks into an outline lives in documentAnalysis.js.
 //
-// Not read: headers, footers, footnotes, comments, text boxes,
-// equations, charts and SmartArt. Their presence is reported in
-// `warnings` so the user knows what was left out.
+// Not read: footnotes, comments, text boxes, equations, charts and
+// SmartArt. Their presence is reported so the user knows what was left
+// out.
 
 export class DocxParseError extends Error {}
 
@@ -18,6 +24,7 @@ const EMU_PER_PX = 9525;
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
 const MAX_TOTAL_IMAGE_BYTES = 8 * 1024 * 1024;
 const IMAGE_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif' };
+const DECODABLE = new Set(['bmp', 'webp']);
 
 // --- styles ---------------------------------------------------------------
 
@@ -62,6 +69,55 @@ function readStyles(root) {
   }
   for (const id of raw.keys()) resolve(id);
   return resolved;
+}
+
+const SYMBOL_BULLETS = { '\uf0b7': '•', '\uf0a7': '▪', '\uf0d8': '➢', '\uf0fc': '✓', '\uf076': '❖', '\uf06f': '○', 'o': '○', '§': '▪', 'Ø': '➢', 'ü': '✓' };
+
+function formatNumber(fmt, n) {
+  const roman = (v) => {
+    const t = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']];
+    let out = '';
+    for (const [k, s2] of t) while (v >= k) { out += s2; v -= k; }
+    return out;
+  };
+  const letter = (v) => {
+    let out = '';
+    while (v > 0) { v -= 1; out = String.fromCharCode(97 + (v % 26)) + out; v = Math.floor(v / 26); }
+    return out;
+  };
+  switch (fmt) {
+    case 'lowerLetter': return letter(n);
+    case 'upperLetter': return letter(n).toUpperCase();
+    case 'lowerRoman': return roman(n);
+    case 'upperRoman': return roman(n).toUpperCase();
+    case 'decimalZero': return String(n).padStart(2, '0');
+    default: return String(n);
+  }
+}
+
+// Map numId -> Map(ilvl -> { fmt, text, start, indentLeft, indentFirst })
+// for drawing list markers the way Word does.
+function readNumberingInfo(root) {
+  const abstract = new Map();
+  for (const an of children(root, 'w:abstractNum')) {
+    const levels = new Map();
+    for (const lvl of children(an, 'w:lvl')) {
+      const ind = find(lvl, 'w:pPr', 'w:ind');
+      levels.set(Number(attr(lvl, 'w:ilvl') || 0), {
+        fmt: attr(child(lvl, 'w:numFmt'), 'w:val') || 'bullet',
+        text: attr(child(lvl, 'w:lvlText'), 'w:val') ?? '•',
+        start: num(child(lvl, 'w:start'), 'w:val') ?? 1,
+        indentLeft: twipsToPx(attr(ind, 'w:left') ?? attr(ind, 'w:start')),
+        indentFirst: attr(ind, 'w:hanging') !== null ? -twipsToPx(attr(ind, 'w:hanging')) : null
+      });
+    }
+    abstract.set(attr(an, 'w:abstractNumId'), levels);
+  }
+  const nums = new Map();
+  for (const n of children(root, 'w:num')) {
+    nums.set(attr(n, 'w:numId'), { abstractId: attr(child(n, 'w:abstractNumId'), 'w:val'), levels: abstract.get(attr(child(n, 'w:abstractNumId'), 'w:val')) || new Map() });
+  }
+  return nums;
 }
 
 // Map numId -> Map(ilvl -> ordered?) from numbering.xml.
@@ -203,9 +259,21 @@ export async function parseDocx(buffer) {
   const body = doc && child(doc, 'w:body');
   if (!body) throw new DocxParseError('Missing word/document.xml');
 
-  const styles = readStyles(await readXml(zip, 'word/styles.xml'));
-  const numbering = readNumbering(await readXml(zip, 'word/numbering.xml'));
+  const stylesRoot = await readXml(zip, 'word/styles.xml');
+  const styles = readStyles(stylesRoot);
+  const numberingRoot = await readXml(zip, 'word/numbering.xml');
+  const numbering = readNumbering(numberingRoot);
+  const numberingInfo = readNumberingInfo(numberingRoot);
   const rels = await readRels(zip, docPath);
+  const theme = await readXml(zip, 'word/theme/theme1.xml');
+  const fontScheme = theme && find(theme, 'a:themeElements', 'a:fontScheme');
+  const ctx = {
+    styles: readWordStyles(stylesRoot, {
+      major: attr(find(fontScheme, 'a:majorFont', 'a:latin'), 'typeface'),
+      minor: attr(find(fontScheme, 'a:minorFont', 'a:latin'), 'typeface')
+    })
+  };
+  const counters = new Map(); // abstract numbering id -> level counters
 
   const core = await readXml(zip, 'docProps/core.xml');
   const app = await readXml(zip, 'docProps/app.xml');
@@ -213,6 +281,17 @@ export async function parseDocx(buffer) {
     title: (core && child(core, 'dc:title')?.textContent?.trim()) || null,
     pages: Number(app && child(app, 'Pages')?.textContent) || null,
     words: Number(app && child(app, 'Words')?.textContent) || null
+  };
+
+  // Page size and margins of the (last) section, in px.
+  const sectPr = child(body, 'w:sectPr');
+  const pgSz = child(sectPr, 'w:pgSz');
+  const pgMar = child(sectPr, 'w:pgMar');
+  const m = (name, fallback) => twipsToPx(attr(pgMar, name) ?? fallback);
+  meta.page = {
+    width: twipsToPx(attr(pgSz, 'w:w') ?? 12240),
+    height: twipsToPx(attr(pgSz, 'w:h') ?? 15840),
+    margins: { top: m('w:top', 1440), right: m('w:right', 1440), bottom: m('w:bottom', 1440), left: m('w:left', 1440), header: m('w:header', 720), footer: m('w:footer', 720) }
   };
 
   const found = { skippedImages: 0, unsupportedImages: 0 };
@@ -228,13 +307,23 @@ export async function parseDocx(buffer) {
     if (!target) return null;
     if (imageByTarget.has(target)) return imageByTarget.get(target);
     const ext = path.posix.extname(target).slice(1).toLowerCase();
-    if (!IMAGE_MIME[ext]) {
+    if (!IMAGE_MIME[ext] && !DECODABLE.has(ext)) {
       found.unsupportedImages += 1;
       return null;
     }
     const file = zip.file(target);
     if (!file) return null;
-    const data = await file.async('nodebuffer');
+    let data = await file.async('nodebuffer');
+    let mime = IMAGE_MIME[ext];
+    // Large or non-web pictures are re-encoded at a sensible size.
+    const processed = await processImage(data, ext, { maxSide: 1600, maxBytes: MAX_IMAGE_BYTES });
+    if (processed) {
+      data = processed.buffer;
+      mime = processed.mime;
+    } else if (!mime) {
+      found.unsupportedImages += 1;
+      return null;
+    }
     if (data.length > MAX_IMAGE_BYTES || imageBytes + data.length > MAX_TOTAL_IMAGE_BYTES) {
       found.skippedImages += 1;
       return null;
@@ -242,8 +331,8 @@ export async function parseDocx(buffer) {
     imageBytes += data.length;
     const image = {
       id: `img-${images.length + 1}`,
-      mime: IMAGE_MIME[ext],
-      dataUrl: `data:${IMAGE_MIME[ext]};base64,${data.toString('base64')}`,
+      mime,
+      dataUrl: `data:${mime};base64,${data.toString('base64')}`,
       widthPx: pic.widthPx,
       heightPx: pic.heightPx
     };
@@ -252,18 +341,47 @@ export async function parseDocx(buffer) {
     return image.id;
   }
 
+  // The marker Word draws for a list item ("1.", "a)", "•"), counting
+  // per list and level the way Word does.
+  function listMarker(numId, level) {
+    const info = numberingInfo.get(numId);
+    const lvl = info?.levels.get(level);
+    if (!lvl) return { marker: '•' };
+    const key = info.abstractId;
+    const c = counters.get(key) || [];
+    c[level] = (c[level] ?? lvl.start - 1) + 1;
+    c.length = level + 1; // deeper levels restart
+    counters.set(key, c);
+    let marker;
+    if (lvl.fmt === 'bullet') marker = SYMBOL_BULLETS[lvl.text] || (lvl.text && lvl.text.length <= 2 ? lvl.text : '•');
+    else if (lvl.fmt === 'none') marker = '';
+    else {
+      marker = lvl.text.replace(/%(\d)/g, (_, d) => {
+        const li = Number(d) - 1;
+        const l = info.levels.get(li);
+        return formatNumber(l?.fmt || 'decimal', c[li] ?? l?.start ?? 1);
+      });
+    }
+    return { marker, indentLeft: lvl.indentLeft, indentFirst: lvl.indentFirst };
+  }
+
   async function readParagraph(p) {
     const styleId = attr(find(p, 'w:pPr', 'w:pStyle'), 'w:val');
     const style = (styleId && styles.get(styleId)) || { kind: null, level: null };
     const outline = attr(find(p, 'w:pPr', 'w:outlineLvl'), 'w:val');
     const numPr = find(p, 'w:pPr', 'w:numPr');
     const { text, pictures } = readParagraphContent(p, found);
+    const para = paragraphContext(p, ctx);
+    const layout = paragraphLayout(para);
+    const { runs, pageBreak } = readRuns(p, para, ctx);
+    const formatted = { runs, ...(Object.keys(layout).length ? { layout } : {}) };
+    if (layout.pageBreakBefore) blocks.push({ type: 'pageBreak' });
 
     if (text) {
-      if (style.kind === 'title') blocks.push({ type: 'title', text });
-      else if (style.kind === 'subtitle') blocks.push({ type: 'subtitle', text });
-      else if (style.kind === 'heading') blocks.push({ type: 'heading', level: Math.min(style.level, 6), text });
-      else if (outline !== null && Number(outline) < 9) blocks.push({ type: 'heading', level: Number(outline) + 1, text });
+      if (style.kind === 'title') blocks.push({ type: 'title', text, ...formatted });
+      else if (style.kind === 'subtitle') blocks.push({ type: 'subtitle', text, ...formatted });
+      else if (style.kind === 'heading') blocks.push({ type: 'heading', level: Math.min(style.level, 6), text, ...formatted });
+      else if (outline !== null && Number(outline) < 9) blocks.push({ type: 'heading', level: Number(outline) + 1, text, ...formatted });
       else if (numPr || style.kind === 'list') {
         // Numbering set on the paragraph wins over numbering from its style.
         const numId = attr(child(numPr, 'w:numId'), 'w:val') ?? style.numId;
@@ -272,7 +390,8 @@ export async function parseDocx(buffer) {
         if (numId !== '0') {
           const ordered = numbering.get(numId)?.get(level) ?? style.ordered ?? false;
           const prev = blocks[blocks.length - 1];
-          const item = { text, level, ordered };
+          const mark = numberingInfo.has(numId) ? listMarker(numId, level) : { marker: ordered ? null : '•' };
+          const item = { text, level, ordered, ...formatted, ...mark };
           // Consecutive items of the same list stay together; a deeper
           // item right after a list is nested in it.
           if (prev && prev === lastList && (lastListNumId === numId || level > 0)) prev.items.push(item);
@@ -282,40 +401,71 @@ export async function parseDocx(buffer) {
             blocks.push(lastList);
           }
         } else {
-          blocks.push({ type: 'paragraph', text });
+          blocks.push({ type: 'paragraph', text, ...formatted });
         }
       } else {
-        blocks.push({ type: 'paragraph', text });
+        blocks.push({ type: 'paragraph', text, ...formatted });
       }
     }
 
     for (const pic of pictures) {
       const imageId = await loadPicture(pic);
-      if (imageId) blocks.push({ type: 'image', imageId });
+      if (imageId) blocks.push({ type: 'image', imageId, ...(layout.align ? { layout: { align: layout.align } } : {}) });
     }
+    // An explicit page break, or the end of a section that starts a new page.
+    const sectionType = attr(find(p, 'w:pPr', 'w:sectPr', 'w:type'), 'w:val');
+    if (pageBreak || (find(p, 'w:pPr', 'w:sectPr') && sectionType !== 'continuous')) blocks.push({ type: 'pageBreak' });
   }
 
-  function readTable(tbl) {
+  const cellParagraphs = (tc, tableCtx) =>
+    children(tc, 'w:p').map((p) => {
+      const para = paragraphContext(p, tableCtx);
+      return { runs: readRuns(p, para, tableCtx).runs, layout: paragraphLayout(para) };
+    });
+
+  let tableCount = 0;
+  function readTableBlock(tbl) {
     const rows = [];
     for (const tr of children(tbl, 'w:tr')) {
       const cells = children(tr, 'w:tc').map((tc) => cellText(tc, found));
       if (cells.some(Boolean)) rows.push(cells);
     }
-    if (rows.length) blocks.push({ type: 'table', rows });
+    if (rows.length) {
+      tableCount += 1;
+      blocks.push({ type: 'table', id: `tbl-${tableCount}`, rows, table: readTable(tbl, ctx, cellParagraphs) });
+    }
   }
 
   async function readContainer(node) {
     for (const c of children(node)) {
       if (c.nodeName === 'w:p') await readParagraph(c);
-      else if (c.nodeName === 'w:tbl') readTable(c);
+      else if (c.nodeName === 'w:tbl') readTableBlock(c);
       else if (c.nodeName === 'w:sdt') await readContainer(child(c, 'w:sdtContent'));
       else if (c.nodeName === 'w:customXml') await readContainer(c);
     }
   }
 
   await readContainer(body);
+  // A break with nothing after it doesn't start a page.
+  while (blocks.length && blocks[blocks.length - 1].type === 'pageBreak') blocks.pop();
 
-  if (zip.file('word/header1.xml') || zip.file('word/footer1.xml')) found.headersFooters = true;
+  // Default header and footer of the last section, for the preview.
+  async function headerFooter(tag) {
+    const ref = children(sectPr, tag).find((r) => (attr(r, 'w:type') || 'default') === 'default');
+    const target = ref && rels.get(attr(ref, 'r:id'))?.target;
+    const root = target && (await readXml(zip, target));
+    if (!root) return null;
+    const paragraphs = children(root, 'w:p')
+      .map((p) => {
+        const para = paragraphContext(p, ctx);
+        return { runs: readRuns(p, para, ctx).runs, layout: paragraphLayout(para) };
+      })
+      .filter((p) => p.runs.some((r) => r.text.trim() || r.field));
+    return paragraphs.length ? paragraphs : null;
+  }
+  const header = await headerFooter('w:headerReference');
+  const footer = await headerFooter('w:footerReference');
+  if (header || footer) found.headersFooters = true;
 
-  return { blocks, images, meta, found };
+  return { blocks, images, meta, found, header, footer };
 }

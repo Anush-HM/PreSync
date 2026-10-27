@@ -4,7 +4,7 @@ import { attr, child, children, find, readRels, readXml } from './ooxml.js';
 import { extractSlidesFromPptx, paragraphText, placeholderOf } from './pptxIngestService.js';
 import { analyzeSlides } from './documentAnalysis.js';
 
-const IMPORTABLE_PICTURE = new Set(['png', 'jpg', 'jpeg', 'gif']);
+const IMPORTABLE_PICTURE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp']);
 
 function countDeep(node, test) {
   let n = 0;
@@ -70,7 +70,8 @@ async function slideDetails(zip, slidePath) {
 // Extracts a .pptx and analyses its structure. Returns
 // { slides, analysis, outline } where slides are ready for a Deck.
 export async function analyzePptx(buffer, fileName) {
-  const slides = await extractSlidesFromPptx(buffer);
+  const report = {};
+  const slides = await extractSlidesFromPptx(buffer, report);
 
   const zip = await JSZip.loadAsync(buffer);
   const presentationPath = 'ppt/presentation.xml';
@@ -99,7 +100,7 @@ export async function analyzePptx(buffer, fileName) {
   if (Object.keys(zip.files).some((f) => f.startsWith('ppt/fonts/'))) {
     packageWarnings.push('Embedded fonts are not imported; text uses the closest available font.');
   }
-  packageWarnings.push('Each text box keeps one style: the formatting of its first run is applied to the whole box.');
+  packageWarnings.push(...report.warnings.filter((w) => !/^Charts|^SmartArt/.test(w)));
 
   const { analysis, outline } = analyzeSlides(slides, {
     kind: 'pptx',

@@ -17,13 +17,31 @@ export const BLOCK_OPTIONAL_KEYS = [
   'fontWeight',
   'fontStyle',
   'underline',
+  'linethrough',
   'fill',
   'textAlign',
   'lineHeight',
+  'paragraphSpacing',
+  'styles',
   'height',
+  'verticalAlign',
+  'rotation',
+  'flipH',
+  'flipV',
+  'role',
+  'shape',
+  'path',
+  'radius',
+  'background',
+  'fillGradient',
+  'opacity',
+  'stroke',
+  'strokeWidth',
+  'dash',
+  'table',
   'imageUrl'
 ];
-export const SLIDE_OPTIONAL_KEYS = ['backgroundImageUrl', 'backgroundColor'];
+export const SLIDE_OPTIONAL_KEYS = ['backgroundImageUrl', 'backgroundColor', 'backgroundGradient', 'backgroundRepeat'];
 
 function copyOptional(keys, read, write) {
   for (const key of keys) {

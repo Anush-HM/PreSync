@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import Deck from '../models/Deck.js';
 import ImportedDocument from '../models/ImportedDocument.js';
 import { detectFormat, extractImport, ImportParseError, unsupportedFormatError } from '../services/importService.js';
-import { outlineToSlides, sanitizeOutline } from '../services/documentAnalysis.js';
+import { outlineToSlides, sanitizeOutline, tableIdsOf } from '../services/documentAnalysis.js';
 
 const MAX_TITLE_LENGTH = 200;
 const LIST_LIMIT = 50;
@@ -30,6 +30,9 @@ function full(doc) {
     analysis: doc.analysis,
     outline: doc.outline,
     blocks: doc.blocks,
+    page: doc.page || null,
+    header: doc.header || [],
+    footer: doc.footer || [],
     images: doc.images,
     slides: doc.slides
   };
@@ -79,6 +82,9 @@ export async function analyzeImport(req, res) {
     analysis: extracted.analysis,
     outline: extracted.outline,
     blocks: extracted.blocks,
+    page: extracted.page || null,
+    header: extracted.header || [],
+    footer: extracted.footer || [],
     images: extracted.images,
     slides: extracted.slides
   });
@@ -106,7 +112,7 @@ export async function saveImportOutline(req, res) {
   if (!doc) return;
   let outline;
   try {
-    outline = sanitizeOutline(req.body.outline, new Set(doc.images.map((i) => i.id)));
+    outline = sanitizeOutline(req.body.outline, new Set(doc.images.map((i) => i.id)), tableIdsOf(doc.blocks));
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -133,7 +139,7 @@ export async function createDeckFromImport(req, res) {
   } else {
     let outline;
     try {
-      outline = sanitizeOutline(req.body.outline ?? doc.outline, new Set(doc.images.map((i) => i.id)));
+      outline = sanitizeOutline(req.body.outline ?? doc.outline, new Set(doc.images.map((i) => i.id)), tableIdsOf(doc.blocks));
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -141,7 +147,7 @@ export async function createDeckFromImport(req, res) {
       doc.outline = outline;
       doc.markModified('outline');
     }
-    slides = outlineToSlides(outline, doc.images);
+    slides = outlineToSlides(outline, doc.images, doc.blocks);
   }
 
   const requested = typeof req.body.title === 'string' ? req.body.title.trim() : '';

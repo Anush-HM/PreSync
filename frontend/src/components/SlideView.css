@@ -16,3 +16,16 @@
   width: 960px; height: 540px; max-width: none;
   border: none; border-radius: 0; box-shadow: none;
 }
+
+/* Imported shapes and tables. Strokes are centred on the outline, as in
+   PowerPoint, so they may overhang the box slightly. */
+.slide-shape { position: absolute; overflow: visible; transform-origin: center; }
+.slide-text { transform-origin: center; }
+.slide-table {
+  position: absolute; border-collapse: collapse; table-layout: fixed; transform-origin: center;
+}
+.slide-table td { overflow-wrap: break-word; }
+.slide-table.is-flow { position: static; max-width: 100%; }
+.slide-para.is-list { display: flex; }
+.slide-marker { flex: none; white-space: pre; }
+.slide-para-text { flex: 1; min-width: 0; }
