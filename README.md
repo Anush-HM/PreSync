@@ -74,6 +74,17 @@ Below 1100px the formatting panel opens as an overlay. Below 768px the slide lis
 
 *Insert → Image* embeds PNG, JPEG or GIF files up to 1.5MB.
 
+**Live sessions**
+
+- *Present* in the editor saves the deck and opens the presenter view (`/presenter/:code`). It shows:
+  - The current slide, next-slide preview and speaker notes.
+  - Viewer count and connection state.
+  - The audience Q&A queue.
+  - *Invite*, with the code, a join link (`/join?code=…`) and a QR code.
+- *End session* asks for confirmation first.
+- The audience view (`/view/:code`) scales the slide to any screen and lets viewers catch up when the presenter moves on. It has private per-slide notes and Q&A.
+- Both views show connecting, reconnecting and ended states. socket.io reconnects automatically.
+
 ## Tests
 
 ```bash

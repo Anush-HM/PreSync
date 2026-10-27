@@ -10,9 +10,10 @@ export async function fetchNotes(roomCode, viewerId) {
 }
 
 export async function saveNote(roomCode, viewerId, slideId, text) {
-  await fetch(`${API_BASE}/api/rooms/${roomCode}/notes/${viewerId}`, {
+  const res = await fetch(`${API_BASE}/api/rooms/${roomCode}/notes/${viewerId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slideId, text })
   });
+  if (!res.ok) throw new Error('Could not save the note');
 }

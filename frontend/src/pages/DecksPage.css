@@ -29,20 +29,6 @@
 .dash-search-clear { position: absolute; right: 3px; top: 3px; width: 34px; height: 34px; }
 .dash-sort .select { min-width: 160px; padding-right: 10px; }
 
-.segmented {
-  display: inline-flex; padding: 3px; gap: 2px;
-  background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-}
-.segmented-item {
-  min-height: 32px; padding: 0 12px; border-radius: 6px;
-  background: transparent; border: none; cursor: pointer;
-  font-size: 13px; font-weight: 500; color: var(--text-secondary);
-  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
-}
-.segmented-item:hover { color: var(--text-primary); }
-.segmented-item[aria-pressed='true'] { background: var(--bg-elevated); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong); }
-.segmented-item:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-
 /* ── Sections & grid ── */
 .dash-section + .dash-section { margin-top: 40px; }
 .dash-section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
