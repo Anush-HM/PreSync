@@ -10,7 +10,7 @@ const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const blockSchema = new mongoose.Schema(
   {
     id: { type: String, required: true },
-    type: { type: String, enum: ['textbox', 'image', 'shape', 'table'], default: 'textbox' },
+    type: { type: String, enum: ['textbox', 'image', 'shape', 'table', 'chart'], default: 'textbox' },
     x: { type: Number, required: true },
     y: { type: Number, required: true },
     width: { type: Number, required: true },
@@ -41,8 +41,9 @@ const blockSchema = new mongoose.Schema(
     flipV: { type: Boolean },
     // What the block is on its slide: the slide title (names the slide in
     // lists), a subtitle, decoration from the source's master/layout, or
-    // a placeholder for content that couldn't be imported (charts…).
-    role: { type: String, enum: ['title', 'subtitle', 'decor', 'placeholder'] },
+    // a placeholder for content that couldn't be imported, or the preview
+    // picture of an embedded object (an Excel sheet…).
+    role: { type: String, enum: ['title', 'subtitle', 'decor', 'placeholder', 'object'] },
     // Shape blocks: outline geometry and paint. `path` is SVG path data
     // in a 0–1000 box stretched over the block.
     shape: { type: String, enum: ['rect', 'roundRect', 'ellipse', 'line', 'path'] },
@@ -57,6 +58,9 @@ const blockSchema = new mongoose.Schema(
     // Table blocks: { columns: [width], rows: [{ height, cells: [cell] }] },
     // each cell carrying its own text, formatting, fill, borders and merges.
     table: { type: mongoose.Schema.Types.Mixed },
+    // Chart blocks: { kind, grouping, title, categories, series: [{ name,
+    // values, color }], legend, dataLabels, … } (see services/chartLayout.js).
+    chart: { type: mongoose.Schema.Types.Mixed },
     // Only set when a slide/region falls back to a flattened image
     // because it didn't extract cleanly (tables, complex layouts).
     imageUrl: { type: String }

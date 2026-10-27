@@ -1,4 +1,6 @@
-import { ArrowUp, ArrowDown, Trash2, Plus, ImageOff, NotebookPen, TableProperties } from 'lucide-react';
+import { ArrowUp, ArrowDown, ChartColumn, Trash2, Plus, ImageOff, NotebookPen, TableProperties } from 'lucide-react';
+import { ChartSvg } from '../SlideView.jsx';
+import { CHART_FONT, chartSummary } from '../../data/chartLayout.js';
 import { bulletsToText, textToBullets } from '../../data/outline.js';
 import './review.css';
 
@@ -36,7 +38,7 @@ function TablePreview({ block, rows }) {
 
 function OutlineEditor({ outline, images, blocks, onChange }) {
   const imageById = new Map((images || []).map((i) => [i.id, i]));
-  const tableById = new Map((blocks || []).filter((b) => b.type === 'table' && b.id).map((b) => [b.id, b]));
+  const tableById = new Map((blocks || []).filter((b) => (b.type === 'table' || b.type === 'chart') && b.id).map((b) => [b.id, b]));
 
   function update(index, patch) {
     onChange(outline.map((item, i) => (i === index ? { ...item, ...patch } : item)));
@@ -123,7 +125,18 @@ function OutlineEditor({ outline, images, blocks, onChange }) {
                   </button>
                 </figure>
               )}
-              {table && (
+              {table?.type === 'chart' && (
+                <figure className="outline-image outline-table-fig">
+                  <figcaption className="field-label"><ChartColumn aria-hidden="true" /> Chart from the document</figcaption>
+                  <svg className="outline-chart" role="img" aria-label={chartSummary(table.chart)} viewBox="0 0 480 288" style={{ fontFamily: CHART_FONT }}>
+                    <ChartSvg chart={table.chart} width={480} height={288} />
+                  </svg>
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => update(i, { tableId: null, tableRows: null })}>
+                    <Trash2 /> Remove chart
+                  </button>
+                </figure>
+              )}
+              {table && table.type !== 'chart' && (
                 <figure className="outline-image outline-table-fig">
                   <figcaption className="field-label"><TableProperties aria-hidden="true" /> Table from the document</figcaption>
                   <TablePreview block={table} rows={item.tableRows} />

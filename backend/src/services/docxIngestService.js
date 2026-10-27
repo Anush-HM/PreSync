@@ -3,19 +3,19 @@ import path from 'path';
 import { attr, child, children, find, num, readRels, readXml } from './ooxml.js';
 import { paragraphContext, paragraphLayout, readRuns, readTable, readWordStyles, twipsToPx } from './docxFormatting.js';
 import { processImage } from './imageProcessing.js';
+import { readChart } from './pptxCharts.js';
 
 // Reads a Word (.docx) document into an ordered list of content blocks:
 // title, subtitle, headings (with level), paragraphs, lists (with
-// nesting, bullet/number type and the marker Word shows), tables and
-// pictures, plus page breaks. Every text block also carries `runs` (its
+// nesting, bullet/number type and the marker Word shows), tables,
+// pictures and charts (with their data), plus page breaks. Every text block also carries `runs` (its
 // text with per-run formatting) and `layout` (alignment, spacing,
 // indents); tables carry their full grid with merges, shading and
 // borders; `meta.page` has the page size and margins, and `header` /
 // `footer` the default header and footer. Pure parsing only; turning
 // blocks into an outline lives in documentAnalysis.js.
 //
-// Not read: footnotes, comments, text boxes, equations, charts and
-// SmartArt. Their presence is reported so the user knows what was left
+// Not read: footnotes, comments, text boxes, equations and SmartArt. Their presence is reported so the user knows what was left
 // out.
 
 export class DocxParseError extends Error {}
@@ -145,6 +145,7 @@ function readNumbering(root) {
 function readParagraphContent(p, found) {
   let text = '';
   const pictures = [];
+  const charts = [];
 
   function walk(node) {
     for (const c of children(node)) {
@@ -190,6 +191,15 @@ function readParagraphContent(p, found) {
         case 'wp:inline':
         case 'wp:anchor': {
           const extent = child(c, 'wp:extent');
+          const chartRef = findDeep(c, 'c:chart');
+          if (chartRef && attr(chartRef, 'r:id')) {
+            charts.push({
+              rId: attr(chartRef, 'r:id'),
+              widthPx: Math.round(Number(attr(extent, 'cx') || 0) / EMU_PER_PX) || null,
+              heightPx: Math.round(Number(attr(extent, 'cy') || 0) / EMU_PER_PX) || null
+            });
+            break;
+          }
           const blip = findDeep(c, 'a:blip');
           const rId = attr(blip, 'r:embed');
           if (rId) {
@@ -218,7 +228,7 @@ function readParagraphContent(p, found) {
     }
   }
   walk(p);
-  return { text: text.replace(/[ \t]+$/gm, '').trim(), pictures };
+  return { text: text.replace(/[ \t]+$/gm, '').trim(), pictures, charts };
 }
 
 function findDeep(node, tag) {
@@ -242,7 +252,7 @@ function cellText(tc, found) {
 // --- main entry -------------------------------------------------------------
 
 // Returns { blocks, images, meta, found } where
-//   blocks: [{ type: 'title'|'subtitle'|'heading'|'paragraph'|'list'|'table'|'image', ... }]
+//   blocks: [{ type: 'title'|'subtitle'|'heading'|'paragraph'|'list'|'table'|'image'|'chart', ... }]
 //   images: [{ id, mime, dataUrl, widthPx, heightPx }]
 //   meta:   { title, pages, words }
 //   found:  flags for content that was detected but not imported
@@ -274,6 +284,14 @@ export async function parseDocx(buffer) {
     })
   };
   const counters = new Map(); // abstract numbering id -> level counters
+  // Chart colours that name theme slots (accent1…) resolve against the
+  // document theme.
+  const chartTheme = { colors: {}, clrMap: { bg1: 'lt1', tx1: 'dk1', bg2: 'lt2', tx2: 'dk2' } };
+  for (const c of children(find(theme, 'a:themeElements', 'a:clrScheme'))) {
+    const val = attr(child(c, 'a:srgbClr'), 'val') || attr(child(c, 'a:sysClr'), 'lastClr');
+    if (val) chartTheme.colors[c.nodeName.replace(/^a:/, '')] = `#${val.toLowerCase()}`;
+  }
+  let chartCount = 0;
 
   const core = await readXml(zip, 'docProps/core.xml');
   const app = await readXml(zip, 'docProps/app.xml');
@@ -370,7 +388,7 @@ export async function parseDocx(buffer) {
     const style = (styleId && styles.get(styleId)) || { kind: null, level: null };
     const outline = attr(find(p, 'w:pPr', 'w:outlineLvl'), 'w:val');
     const numPr = find(p, 'w:pPr', 'w:numPr');
-    const { text, pictures } = readParagraphContent(p, found);
+    const { text, pictures, charts } = readParagraphContent(p, found);
     const para = paragraphContext(p, ctx);
     const layout = paragraphLayout(para);
     const { runs, pageBreak } = readRuns(p, para, ctx);
@@ -411,6 +429,17 @@ export async function parseDocx(buffer) {
     for (const pic of pictures) {
       const imageId = await loadPicture(pic);
       if (imageId) blocks.push({ type: 'image', imageId, ...(layout.align ? { layout: { align: layout.align } } : {}) });
+    }
+    for (const ref of charts) {
+      const target = rels.get(ref.rId)?.target;
+      const parsed = target && (await readChart(zip, target, { theme: chartTheme, fontPx: (pt) => pt * (96 / 72) }).catch(() => null));
+      if (!parsed?.chart) {
+        found.charts = true;
+        continue;
+      }
+      if (parsed.notes.size) found.simplifiedCharts = true;
+      chartCount += 1;
+      blocks.push({ type: 'chart', id: `chart-${chartCount}`, chart: parsed.chart, widthPx: ref.widthPx || 480, heightPx: ref.heightPx || 288 });
     }
     // An explicit page break, or the end of a section that starts a new page.
     const sectionType = attr(find(p, 'w:pPr', 'w:sectPr', 'w:type'), 'w:val');

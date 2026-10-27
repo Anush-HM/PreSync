@@ -88,4 +88,23 @@ describe('SlideView', () => {
     expect(head).toHaveStyle({ background: '#1f3864', color: '#ffffff' });
     expect(container.querySelectorAll('tr')[0].querySelectorAll('td')).toHaveLength(1);
   });
+
+  it('draws charts from their data with an accessible summary', () => {
+    const { container } = render(
+      <SlideView
+        slide={{
+          blocks: [{
+            id: 'c1', type: 'chart', x: 40, y: 30, width: 400, height: 240, fontSize: 16, text: '',
+            chart: { kind: 'column', title: 'Results', categories: ['Precision', 'Recall'], series: [{ name: 'Model', values: [0.91, 0.88], color: '#4f81bd' }] }
+          }]
+        }}
+      />
+    );
+    const svg = container.querySelector('svg.slide-chart');
+    expect(svg).toHaveStyle({ left: '40px', top: '30px' });
+    expect(svg.getAttribute('aria-label')).toMatch(/Column chart: Results\. Model: Precision 0\.91, Recall 0\.88/);
+    const bars = [...svg.querySelectorAll('rect')].filter((r) => r.getAttribute('fill') === '#4f81bd');
+    expect(bars).toHaveLength(2);
+    expect(screen.getByText('Precision')).toBeInTheDocument();
+  });
 });

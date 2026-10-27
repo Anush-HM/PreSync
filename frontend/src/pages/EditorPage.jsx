@@ -10,9 +10,12 @@ import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from 
 import {
   BASE_OBJECT_PROPS,
   blockGeometry,
+  chartKey,
+  createChart,
   createShape,
   createTable,
   fontFamiliesOf,
+  placeGroup,
   placeImage,
   placeText,
   scaledTable,
@@ -484,6 +487,17 @@ function EditorPage() {
         return;
       }
 
+      if (block.type === 'chart') {
+        if (obj && obj.data?.key === chartKey(block)) {
+          if (!inGroup) placeGroup(obj, block, scale);
+          obj.setCoords();
+          placeAt(obj, block.id);
+        } else if (!inGroup) {
+          replace(obj, createChart(block, scale), block.id);
+        }
+        return;
+      }
+
       const props = textboxProps(block, scale);
       if (obj) {
         // Don't fight the user's own typing: Fabric already holds the
@@ -523,9 +537,9 @@ function EditorPage() {
         if (renderedSlideIdRef.current !== slide.id) return;
         fabric.cache.clearFontCache();
         canvas.getObjects().forEach((o) => o.type === 'textbox' && o.initDimensions());
-        // Tables measured with fallback fonts are rebuilt.
+        // Tables and charts measured with fallback fonts are rebuilt.
         canvas.getObjects().forEach((o) => {
-          if (o.data?.kind === 'table') o.data.key = 'stale';
+          if (o.data?.kind === 'table' || o.data?.kind === 'chart') o.data.key = 'stale';
         });
         relayoutRef.current?.();
         canvas.requestRenderAll();

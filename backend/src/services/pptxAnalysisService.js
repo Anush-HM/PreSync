@@ -100,7 +100,7 @@ export async function analyzePptx(buffer, fileName) {
   if (Object.keys(zip.files).some((f) => f.startsWith('ppt/fonts/'))) {
     packageWarnings.push('Embedded fonts are not imported; text uses the closest available font.');
   }
-  packageWarnings.push(...report.warnings.filter((w) => !/^Charts|^SmartArt/.test(w)));
+  packageWarnings.push(...report.warnings.filter((w) => !/^Some (charts could not|SmartArt has no)/.test(w)));
 
   const { analysis, outline } = analyzeSlides(slides, {
     kind: 'pptx',
