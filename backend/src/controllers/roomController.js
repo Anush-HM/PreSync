@@ -39,7 +39,7 @@ export async function goLive(req, res) {
         code: generateCode(),
         deckId: deck._id,
         presenterId: req.userId,
-        currentSlideId: deck.slides[0]?.id
+        currentSlideId: (deck.slides.find((s) => !s.hidden) || deck.slides[0])?.id
       });
     } catch (err) {
       if (err?.code !== 11000) throw err;

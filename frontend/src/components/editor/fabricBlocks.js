@@ -5,7 +5,8 @@ import {
   DEFAULT_FONT_FAMILY,
   DEFAULT_LINE_HEIGHT,
   DEFAULT_TEXT_COLOR,
-  LIST_PREFIX
+  LIST_PREFIX,
+  shadowColor
 } from '../../data/slideFormat.js';
 import { CHART_FONT, chartLayout } from '../../data/chartLayout.js';
 
@@ -149,6 +150,7 @@ export function textboxProps(block, scale) {
     textAlign: block.textAlign || 'left',
     lineHeight: block.lineHeight || DEFAULT_LINE_HEIGHT,
     paragraphSpacing: (block.paragraphSpacing || 0) * scale,
+    textBackgroundColor: block.textBackgroundColor || '',
     styles: fabric.util.stylesFromArray(scaleStyles(block.styles, scale) || [], text)
   };
   return props;
@@ -156,7 +158,37 @@ export function textboxProps(block, scale) {
 
 function scaleStyles(styles, scale) {
   if (!Array.isArray(styles) || scale === 1) return styles;
-  return styles.map((r) => (r.style?.fontSize ? { ...r, style: { ...r.style, fontSize: r.style.fontSize * scale } } : r));
+  return styles.map((r) => {
+    if (!r.style?.fontSize && !r.style?.deltaY) return r;
+    const style = { ...r.style };
+    if (style.fontSize) style.fontSize *= scale;
+    if (style.deltaY) style.deltaY *= scale;
+    return { ...r, style };
+  });
+}
+
+// What a locked block can still do on the canvas: be selected (so it
+// can be unlocked), but not moved, resized, turned or edited.
+export function interactionProps(block) {
+  const locked = !!block.locked;
+  return {
+    lockMovementX: locked,
+    lockMovementY: locked,
+    lockScalingX: locked,
+    lockScalingY: locked,
+    lockRotation: locked,
+    hasControls: !locked,
+    hoverCursor: locked ? 'default' : null
+  };
+}
+
+// Applies lock and keep-proportions settings to a block's object.
+export function applyInteraction(obj, block, keepAspect) {
+  obj.set(interactionProps(block));
+  if (obj.type === 'textbox' && obj.data?.kind === 'text') obj.set({ editable: !block.locked });
+  const sides = !keepAspect;
+  obj.setControlsVisibility?.({ ml: sides, mr: sides, mt: sides, mb: sides });
+  if (obj.type === 'textbox' && obj.data?.kind === 'text') obj.setControlsVisibility?.({ ml: true, mr: true, mt: false, mb: false });
 }
 
 // Places a text object for its block once Fabric knows its height:
@@ -247,16 +279,37 @@ function centre(obj, block, scale) {
 
 // --- images ---------------------------------------------------------------
 
+// The part of the picture an image block shows, as fractions of its
+// natural size; the whole picture when it isn't cropped.
+export function cropOf(block) {
+  const c = block.crop;
+  if (!c || !(c.w > 0) || !(c.h > 0)) return { x: 0, y: 0, w: 1, h: 1 };
+  return c;
+}
+
 export function placeImage(img, block, scale) {
+  const el = img.getElement?.();
+  const nw = el?.naturalWidth || el?.width || img.width;
+  const nh = el?.naturalHeight || el?.height || img.height;
+  const c = cropOf(block);
+  img.set({ cropX: c.x * nw, cropY: c.y * nh, width: Math.max(1, c.w * nw), height: Math.max(1, c.h * nh) });
   const width = (block.width || img.width) * scale;
   const height = block.height ? block.height * scale : (img.height * width) / img.width;
+  const sh = block.shadow;
   img.set({
     ...BASE_OBJECT_PROPS,
     scaleX: width / img.width,
     scaleY: height / img.height,
     flipX: !!block.flipH,
     flipY: !!block.flipV,
-    angle: block.rotation || 0
+    angle: block.rotation || 0,
+    opacity: block.opacity ?? 1,
+    stroke: block.stroke && block.strokeWidth ? block.stroke : null,
+    strokeWidth: block.stroke && block.strokeWidth ? block.strokeWidth * scale : 0,
+    strokeUniform: true,
+    shadow: sh?.color
+      ? new fabric.Shadow({ color: shadowColor(sh), blur: (sh.blur ?? 8) * scale, offsetX: (sh.x ?? 0) * scale, offsetY: (sh.y ?? 4) * scale, nonScaling: true })
+      : null
   });
   img.setPositionByOrigin(
     new fabric.Point((block.x || 0) * scale + width / 2, (block.y || 0) * scale + height / 2),

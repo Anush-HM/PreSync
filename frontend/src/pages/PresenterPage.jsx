@@ -90,7 +90,10 @@ function PresenterPage() {
     getDeck(deckId)
       .then((deck) => {
         setDeckTitle(deck.title || '');
-        setSlides(deck.slides || []);
+        // Hidden slides stay in the deck but are skipped when presenting.
+        const all = deck.slides || [];
+        const shown = all.filter((s) => !s.hidden);
+        setSlides(shown.length ? shown : all);
       })
       .catch((err) => setLoadError(err.message || 'Could not load this presentation'));
   }, [deckId]);

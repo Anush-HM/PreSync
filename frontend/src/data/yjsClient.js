@@ -141,9 +141,17 @@ export const BLOCK_OPTIONAL_KEYS = [
   'dash',
   'table',
   'chart',
-  'imageUrl'
+  'imageUrl',
+  'textBackgroundColor',
+  'crop',
+  'shadow',
+  'alt',
+  'locked',
+  'groupId',
+  'layoutSlot',
+  'lockAspect'
 ];
-export const SLIDE_OPTIONAL_KEYS = ['backgroundImageUrl', 'backgroundColor', 'backgroundGradient', 'backgroundRepeat'];
+export const SLIDE_OPTIONAL_KEYS = ['backgroundImageUrl', 'backgroundColor', 'backgroundGradient', 'backgroundRepeat', 'name', 'hidden', 'layout', 'theme'];
 
 function copyOptional(keys, read, write) {
   for (const key of keys) {

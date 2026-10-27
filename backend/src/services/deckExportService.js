@@ -31,7 +31,7 @@ function decodeDataUrl(url) {
   return { mime: match[1].toLowerCase(), base64: match[3], buffer: Buffer.from(match[3], 'base64') };
 }
 
-const STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'linethrough', 'fill'];
+const STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'linethrough', 'fill', 'textBackgroundColor', 'deltaY'];
 
 // The block's text as lines of runs, each run carrying its full style
 // (block defaults overlaid with any per-character style ranges, which
@@ -114,7 +114,11 @@ function pptxRunOptions(style) {
     italic: style.fontStyle === 'italic',
     underline: style.underline ? { style: 'sng' } : undefined,
     strike: style.linethrough ? 'sngStrike' : undefined,
-    color: hex(style.fill) || DEFAULT_TEXT_COLOR.slice(1)
+    color: hex(style.fill) || DEFAULT_TEXT_COLOR.slice(1),
+    highlight: hex(style.textBackgroundColor) || undefined,
+    // The editor raises and lowers super/subscript text with deltaY.
+    superscript: style.deltaY < 0 || undefined,
+    subscript: style.deltaY > 0 || undefined
   };
 }
 
@@ -139,6 +143,37 @@ function geometry(b, fallbackH) {
   if (b.rotation) opts.rotate = b.rotation;
   if (b.flipH) opts.flipH = true;
   if (b.flipV) opts.flipV = true;
+  return opts;
+}
+
+// Image options: geometry (always with w/h, so pptxgenjs never sniffs
+// image sizes), crop, transparency, shadow and alt text.
+export function pptxImageOptions(b) {
+  const opts = geometry(b, b.width);
+  const c = b.crop;
+  if (c && c.w > 0 && c.h > 0 && (c.x > 0 || c.y > 0 || c.w < 1 || c.h < 1)) {
+    // pptxgenjs crops from a picture of size w×h to the visible box.
+    const fullW = opts.w / c.w;
+    const fullH = opts.h / c.h;
+    opts.sizing = { type: 'crop', x: c.x * fullW, y: c.y * fullH, w: opts.w, h: opts.h };
+    opts.w = fullW;
+    opts.h = fullH;
+  }
+  if (b.opacity !== undefined && b.opacity < 1) opts.transparency = Math.round((1 - b.opacity) * 100);
+  if (b.alt) opts.altText = String(b.alt).slice(0, 1000);
+  const sh = b.shadow;
+  if (sh && sh.color) {
+    const dx = sh.x ?? 0;
+    const dy = sh.y ?? 4;
+    opts.shadow = {
+      type: 'outer',
+      color: hex(sh.color) || '000000',
+      blur: pt(sh.blur ?? 8),
+      offset: pt(Math.hypot(dx, dy)),
+      angle: Math.round(((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360),
+      opacity: sh.opacity ?? 0.35
+    };
+  }
   return opts;
 }
 
@@ -283,6 +318,7 @@ export async function exportDeckToPptx(deck) {
 
   for (const s of sortedSlides(deck)) {
     const slide = pptx.addSlide();
+    if (s.hidden) slide.hidden = true;
     const background = pptxBackground(s);
     if (background) slide.background = background;
     if (s.notes) slide.addNotes(s.notes);
@@ -291,8 +327,7 @@ export async function exportDeckToPptx(deck) {
       if (b.type === 'image') {
         const img = decodeDataUrl(b.imageUrl);
         if (!img || !OFFICE_IMAGE.test(img.mime)) continue;
-        // Always pass w/h so pptxgenjs never has to sniff image sizes.
-        slide.addImage({ data: `${img.mime};base64,${img.base64}`, ...geometry(b, b.width) });
+        slide.addImage({ data: `${img.mime};base64,${img.base64}`, ...pptxImageOptions(b) });
         continue;
       }
       if (b.type === 'shape') {
@@ -602,6 +637,29 @@ function drawPdfChart(doc, b) {
   doc.restore();
 }
 
+// An image block: cropped to its visible part, with its opacity and
+// border. (Drop shadows are not drawn in PDF.)
+function drawPdfImage(doc, b, buffer) {
+  const x = b.x || 0;
+  const y = b.y || 0;
+  const w = b.width || 100;
+  const c = b.crop;
+  doc.save();
+  if (b.opacity !== undefined && b.opacity < 1) doc.opacity(b.opacity);
+  if (c && c.w > 0 && c.h > 0 && b.height) {
+    const fullW = w / c.w;
+    const fullH = b.height / c.h;
+    doc.rect(x, y, w, b.height).clip();
+    doc.image(buffer, x - c.x * fullW, y - c.y * fullH, { width: fullW, height: fullH });
+  } else {
+    doc.image(buffer, x, y, { width: w, height: b.height || undefined });
+  }
+  doc.restore();
+  if (b.stroke && b.strokeWidth && b.height) {
+    doc.save().lineWidth(b.strokeWidth).strokeColor(b.stroke).rect(x, y, w, b.height).stroke().restore();
+  }
+}
+
 export function exportDeckToPdf(deck) {
   const doc = new PDFDocument({
     size: [CANVAS_WIDTH, CANVAS_HEIGHT],
@@ -617,7 +675,8 @@ export function exportDeckToPdf(deck) {
     doc.on('error', reject);
   });
 
-  const slides = sortedSlides(deck);
+  // Hidden slides are left out of the PDF, as when presenting.
+  const slides = sortedSlides(deck).filter((s) => !s.hidden);
   if (slides.length === 0) doc.addPage();
 
   for (const s of slides) {
@@ -631,7 +690,7 @@ export function exportDeckToPdf(deck) {
         if (!img || !PDF_IMAGE.test(img.mime)) continue;
         withTransform(doc, b, () => {
           try {
-            doc.image(img.buffer, b.x || 0, b.y || 0, { width: b.width || 100, height: b.height || undefined });
+            drawPdfImage(doc, b, img.buffer);
           } catch {
             // A corrupt image shouldn't sink the whole export.
           }

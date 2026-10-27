@@ -94,7 +94,52 @@ export function runCss(style, scale = 1) {
   if (style.fontStyle) css.fontStyle = style.fontStyle;
   if (style.fill) css.color = style.fill;
   if (style.underline !== undefined || style.linethrough !== undefined) css.textDecoration = textDecoration(style);
+  if (style.textBackgroundColor) css.backgroundColor = style.textBackgroundColor;
+  // Superscript/subscript: Fabric shifts the run by deltaY px (negative is up).
+  if (style.deltaY) {
+    css.position = 'relative';
+    css.top = style.deltaY * scale;
+  }
   return css;
+}
+
+// CSS for an image block in the read-only renderers: its box, opacity,
+// border and shadow. Cropping is drawn by imageCropCss on the picture.
+export function imageBoxCss(b, s) {
+  const css = {
+    position: 'absolute',
+    left: (b.x || 0) * s,
+    top: (b.y || 0) * s,
+    width: (b.width || 300) * s,
+    height: b.height ? b.height * s : 'auto',
+    transform: blockTransform(b),
+    overflow: 'hidden'
+  };
+  if (b.opacity !== undefined && b.opacity < 1) css.opacity = b.opacity;
+  if (b.stroke && b.strokeWidth) {
+    css.outline = `${b.strokeWidth * s}px solid ${b.stroke}`;
+    css.outlineOffset = `${-b.strokeWidth * s}px`;
+  }
+  if (b.shadow?.color) css.filter = `drop-shadow(${(b.shadow.x ?? 0) * s}px ${(b.shadow.y ?? 4) * s}px ${(b.shadow.blur ?? 8) * s}px ${shadowColor(b.shadow)})`;
+  return css;
+}
+
+export function shadowColor(shadow) {
+  const c = shadow?.color || '#000000';
+  const a = shadow?.opacity ?? 0.35;
+  if (!/^#[0-9a-f]{6}$/i.test(c)) return c;
+  const n = parseInt(c.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+// The picture inside a cropped image block: drawn at its full size and
+// shifted so only the crop shows through the box.
+export function imageCropCss(b, s) {
+  const c = b.crop;
+  if (!c || !(c.w > 0) || !(c.h > 0) || !b.height) return { width: '100%', height: '100%', objectFit: 'fill', display: 'block' };
+  const fullW = ((b.width || 300) * s) / c.w;
+  const fullH = (b.height * s) / c.h;
+  return { position: 'absolute', left: -c.x * fullW, top: -c.y * fullH, width: fullW, height: fullH, maxWidth: 'none', display: 'block' };
 }
 
 // Splits text into runs by its `styles` ranges ([{ start, end, style }],
@@ -215,9 +260,10 @@ export function slideBackgroundStyle(slide) {
   return css;
 }
 
-// The name a slide goes by in lists: its title block's first line, or
-// "Slide N" when it has none.
+// The name a slide goes by in lists: the name given to it, else its
+// title block's first line, or "Slide N" when it has none.
 export function slideTitle(slide, index) {
+  if (typeof slide?.name === 'string' && slide.name.trim()) return slide.name.trim();
   const title = (slide?.blocks || []).find((b) => b.role === 'title' && b.text?.trim());
   const line = title?.text.split('\n').map((l) => l.replace(/\u00a0/g, ' ').trim()).find(Boolean);
   return line || `Slide ${index + 1}`;
