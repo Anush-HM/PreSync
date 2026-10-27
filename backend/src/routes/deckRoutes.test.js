@@ -4,6 +4,7 @@ vi.mock('../models/Deck.js', () => ({
   default: { find: vi.fn(), findById: vi.fn(), create: vi.fn() }
 }));
 vi.mock('../models/User.js', () => ({ default: { findOne: vi.fn() } }));
+vi.mock('../models/AiConversation.js', () => ({ default: { deleteMany: vi.fn().mockResolvedValue({}) } }));
 vi.mock('../services/pdfIngestService.js', () => ({ extractSlidesFromPdf: vi.fn() }));
 vi.mock('../services/pptxIngestService.js', () => ({ extractSlidesFromPptx: vi.fn() }));
 vi.mock('../services/deckExportService.js', () => ({
@@ -15,6 +16,7 @@ vi.mock('../yjs/docManager.js', () => ({ flushDoc: vi.fn() }));
 
 const { default: Deck } = await import('../models/Deck.js');
 const { default: User } = await import('../models/User.js');
+const { default: AiConversation } = await import('../models/AiConversation.js');
 const { extractSlidesFromPdf } = await import('../services/pdfIngestService.js');
 const { flushDoc } = await import('../yjs/docManager.js');
 const { extractSlidesFromPptx } = await import('../services/pptxIngestService.js');
@@ -409,6 +411,7 @@ describe('DELETE /api/decks/:deckId', () => {
     const res = await server.request('DELETE', `/api/decks/${DECK_ID}`, { token: tokenFor(OWNER_ID) });
     expect(res.status).toBe(204);
     expect(deck.deleteOne).toHaveBeenCalled();
+    expect(AiConversation.deleteMany).toHaveBeenCalledWith({ deckId: DECK_ID });
   });
 });
 
