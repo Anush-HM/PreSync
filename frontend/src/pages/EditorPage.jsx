@@ -1,18 +1,21 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as fabric from 'fabric';
 import * as Y from 'yjs';
 import {
   AlertCircle, ArrowLeft, Check, CloudOff, Download, ImagePlus, Maximize, Minus, PanelLeft, PanelRight,
-  Play, Plus, Redo2, StickyNote, Type, Undo2, Users, ChevronDown
+  Play, Plus, Redo2, Sparkles, StickyNote, Type, Undo2, Users, ChevronDown
 } from 'lucide-react';
 import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from '../data/yjsClient.js';
 import {
   BASE_OBJECT_PROPS,
   blockGeometry,
+  chartKey,
+  createChart,
   createShape,
   createTable,
   fontFamiliesOf,
+  placeGroup,
   placeImage,
   placeText,
   scaledTable,
@@ -51,6 +54,8 @@ import { getCurrentUser } from '../data/apiConfig.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import SlideRail from '../components/editor/SlideRail.jsx';
 import PropertiesPanel from '../components/editor/PropertiesPanel.jsx';
+import CopilotPanel from '../components/copilot/CopilotPanel.jsx';
+import { createEditorBridge } from '../components/copilot/editorBridge.js';
 import ShareDeckDialog from '../components/decks/ShareDeckDialog.jsx';
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
 import Menu from '../components/ui/Menu.jsx';
@@ -165,6 +170,11 @@ function EditorPage() {
   const [fontsReady, setFontsReady] = useState(0);
   const activeSlideIdxRef = useRef(0);
   activeSlideIdxRef.current = activeSlideIdx;
+
+  // AI Copilot sidebar: inline on wide screens, an overlay otherwise.
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const copilotOverlay = useMediaQuery('(max-width: 1399px)');
+  const copilotBridge = useMemo(() => createEditorBridge({ fabricRef, yjsRef, undoRef, scaleRef }), []);
 
   useEffect(() => {
     getDeck(deckId)
@@ -484,6 +494,17 @@ function EditorPage() {
         return;
       }
 
+      if (block.type === 'chart') {
+        if (obj && obj.data?.key === chartKey(block)) {
+          if (!inGroup) placeGroup(obj, block, scale);
+          obj.setCoords();
+          placeAt(obj, block.id);
+        } else if (!inGroup) {
+          replace(obj, createChart(block, scale), block.id);
+        }
+        return;
+      }
+
       const props = textboxProps(block, scale);
       if (obj) {
         // Don't fight the user's own typing: Fabric already holds the
@@ -523,9 +544,9 @@ function EditorPage() {
         if (renderedSlideIdRef.current !== slide.id) return;
         fabric.cache.clearFontCache();
         canvas.getObjects().forEach((o) => o.type === 'textbox' && o.initDimensions());
-        // Tables measured with fallback fonts are rebuilt.
+        // Tables and charts measured with fallback fonts are rebuilt.
         canvas.getObjects().forEach((o) => {
-          if (o.data?.kind === 'table') o.data.key = 'stale';
+          if (o.data?.kind === 'table' || o.data?.kind === 'chart') o.data.key = 'stale';
         });
         relayoutRef.current?.();
         canvas.requestRenderAll();
@@ -926,10 +947,25 @@ function EditorPage() {
             aria-label={panelOpen ? 'Hide formatting panel' : 'Show formatting panel'}
             aria-pressed={panelOpen}
             data-tip="Format"
-            onClick={() => setPanelOpen((o) => !o)}
+            onClick={() => {
+              setPanelOpen((o) => !o);
+              if (copilotOverlay) setCopilotOpen(false);
+            }}
           >
             <PanelRight />
             {!panelOpen && selectedIds.length > 0 && <span className="ed-dot" aria-hidden="true" />}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm ed-copilot-toggle"
+            aria-pressed={copilotOpen}
+            aria-controls="ai-copilot"
+            onClick={() => {
+              setCopilotOpen((o) => !o);
+              if (panelOverlay) setPanelOpen(false);
+            }}
+          >
+            <Sparkles aria-hidden="true" /><span className="ed-hide-sm">Copilot</span>
           </button>
         </div>
 
@@ -942,13 +978,14 @@ function EditorPage() {
       </header>
 
       <div className="ed-body">
-        {(railOverlay && railOpen) || (panelOverlay && panelOpen) ? (
+        {(railOverlay && railOpen) || (panelOverlay && panelOpen) || (copilotOverlay && copilotOpen) ? (
           <div
             className="ed-scrim"
             aria-hidden="true"
             onClick={() => {
               if (railOverlay) setRailOpen(false);
               if (panelOverlay) setPanelOpen(false);
+              if (copilotOverlay) setCopilotOpen(false);
             }}
           />
         ) : null}
@@ -1060,6 +1097,21 @@ function EditorPage() {
             onClose={panelOverlay ? () => setPanelOpen(false) : undefined}
           />
         </aside>
+
+        {copilotOpen && (
+          <aside id="ai-copilot" className={`ed-copilot${copilotOverlay ? ' is-overlay' : ''}`} aria-label="AI Copilot">
+            <CopilotPanel
+              deckId={deckId}
+              deckTitle={deckMeta?.title || ''}
+              slides={slides}
+              activeSlideIdx={activeSlideIdx}
+              selectedIds={selectedIds}
+              bridge={copilotBridge}
+              onSelectSlide={setActiveSlideIdx}
+              onClose={() => setCopilotOpen(false)}
+            />
+          </aside>
+        )}
       </div>
 
       {showShare && deckMeta && (

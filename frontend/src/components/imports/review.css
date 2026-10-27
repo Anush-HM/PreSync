@@ -109,3 +109,6 @@
 .analysis-tree li.starts-slide { color: var(--text-primary); background: var(--forest-tint); }
 .analysis-tree-level { font-size: 10.5px; color: var(--text-muted); min-width: 18px; }
 .analysis-points { padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+
+.doc-chart { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.outline-chart { display: block; width: 100%; height: auto; background: #ffffff; border-radius: 6px; }

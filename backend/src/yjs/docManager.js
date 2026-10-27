@@ -39,6 +39,7 @@ export const BLOCK_OPTIONAL_KEYS = [
   'strokeWidth',
   'dash',
   'table',
+  'chart',
   'imageUrl'
 ];
 export const SLIDE_OPTIONAL_KEYS = ['backgroundImageUrl', 'backgroundColor', 'backgroundGradient', 'backgroundRepeat'];

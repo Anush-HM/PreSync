@@ -113,7 +113,7 @@ describe('extractSlidesFromPptx', () => {
 });
 
 describe('analyzePptx', () => {
-  it('reports titles, imported tables and placeholder charts, and keeps slide order', async () => {
+  it('reports titles, imported tables and charts, and keeps slide order', async () => {
     const { analyzePptx } = await import('./pptxAnalysisService.js');
     const pptx = new PptxGenJS();
     pptx.layout = 'LAYOUT_16x9';
@@ -131,7 +131,9 @@ describe('analyzePptx', () => {
     expect(analysis.stats).toMatchObject({ slides: 2, tables: 1, charts: 1 });
     expect(analysis.headings.map((h) => h.text)).toEqual(['Overview', 'Numbers']);
     expect(outline.map((o) => o.title)).toEqual(['Overview', 'Numbers']);
-    expect(analysis.warnings.join(' ')).toMatch(/slide 2 \(1 chart\)/);
+    // The chart is redrawn, so nothing on slide 2 is reported as missing.
+    expect(slides[1].blocks.find((b) => b.type === 'chart').chart.series[0].values).toEqual([1]);
+    expect(analysis.warnings.join(' ')).not.toMatch(/slide 2/);
     expect(slides[1].blocks.find((b) => b.type === 'table').table.rows[0].cells.map((c) => c.text)).toEqual(['A', 'B']);
   });
 });

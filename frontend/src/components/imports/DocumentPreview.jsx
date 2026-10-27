@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { runCss } from '../../data/slideFormat.js';
-import { Runs, TableBlock } from '../SlideView.jsx';
+import { ChartSvg, Runs, TableBlock } from '../SlideView.jsx';
+import { CHART_FONT, chartSummary } from '../../data/chartLayout.js';
 import './review.css';
 
 // Read-only rendering of the Word document as PreSync parsed it: pages
@@ -108,6 +109,18 @@ function Block({ b, imageById, slideStart }) {
       ) : (
         <FlatTable rows={b.rows} />
       );
+    case 'chart': {
+      if (!b.chart) return null;
+      const w = b.widthPx || 480;
+      const h = b.heightPx || 288;
+      return (
+        <p className="doc-img-wrap">
+          <svg className="doc-chart" role="img" aria-label={chartSummary(b.chart)} viewBox={`0 0 ${w} ${h}`} style={{ width: w, fontFamily: CHART_FONT }}>
+            <ChartSvg chart={b.chart} width={w} height={h} />
+          </svg>
+        </p>
+      );
+    }
     case 'image': {
       const img = imageById.get(b.imageId);
       if (!img) return null;
