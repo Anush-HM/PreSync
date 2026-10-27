@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useParams, useLocation, useNavigate } from 'react-router-dom';
+import { ArrowRight, LogOut, MessageSquareText, NotebookPen, Send } from 'lucide-react';
 import { createSocket } from '../data/socket.js';
 import { fetchNotes, saveNote } from '../data/notesApi.js';
-import SlideView from '../components/SlideView.jsx';
+import ScaledSlide from '../components/ScaledSlide.jsx';
+import { LogoMark } from '../components/ui/Logo.jsx';
+import ConnectionPill from '../components/live/ConnectionPill.jsx';
+import '../components/live/live.css';
 import './ViewerLivePage.css';
 
 const NOTE_SAVE_DEBOUNCE_MS = 600;
+// Socket errors that mean there is nothing left to follow.
+const ENDED_ERRORS = ['No active session with that code'];
 
 function ViewerLivePage() {
   const { roomCode } = useParams();
@@ -38,30 +44,33 @@ function ViewerLivePage() {
   const socketRef = useRef(null);
 
   // The slide currently pinned on this viewer's screen — only moves when
-  // the viewer clicks "Done", per the spec's note-reconciliation rule.
+  // the viewer catches up, so notes being typed stay with their slide.
   // Both pinned/live are the full { slideId, blocks, backgroundImageUrl }
   // snapshot pushed over the broadcast channel, since a viewer never has
   // access to the deck's slide list (Yjs is editor-only).
   const [pinnedSlide, setPinnedSlide] = useState(null);
   const [liveSlide, setLiveSlide] = useState(null);
-  const [connected, setConnected] = useState(false);
+  // 'connecting' until the first connect, then 'live' / 'reconnecting'.
+  const [connState, setConnState] = useState('connecting');
   const [connectError, setConnectError] = useState('');
 
   const [notes, setNotes] = useState({}); // { slideId: text }
   const [notesLoaded, setNotesLoaded] = useState(false); // gate: prevent typing before server data arrives
+  const [noteState, setNoteState] = useState('idle'); // idle | saving | saved | error
   const [question, setQuestion] = useState('');
   const [justSubmitted, setJustSubmitted] = useState(false);
   const [answeredQuestions, setAnsweredQuestions] = useState([]); // public feed for the room
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [tab, setTab] = useState('notes');
 
   // No account/join info to work with (e.g. a bare page reload landed
   // here with no router state) — send them back through the join flow
   // rather than connecting a socket with nothing to identify them.
   useEffect(() => {
     if (!viewerId) {
-      navigate('/join', { replace: true });
+      navigate(`/join?code=${encodeURIComponent(roomCode)}`, { replace: true });
     }
-  }, [viewerId, navigate]);
+  }, [viewerId, roomCode, navigate]);
 
   useEffect(() => {
     if (!viewerId) return;
@@ -69,19 +78,15 @@ function ViewerLivePage() {
     const socket = createSocket();
     socketRef.current = socket;
 
+    // socket.io reconnects on its own; every (re)connect rejoins the room.
     socket.on('connect', () => {
-      setConnected(true);
+      setConnState('live');
       setConnectError('');
       socket.emit('viewer:join', { code: roomCode, viewerId });
     });
 
-    socket.on('viewer:joined', () => {
-      // currentSlideId alone isn't enough to render anything — the
-      // actual content snapshot follows right after as slide:sync.
-    });
-
     socket.on('slide:sync', ({ slideId, blocks, backgroundImageUrl, backgroundColor }) => {
-      const slide = { slideId, blocks: blocks || [], backgroundImageUrl, backgroundColor };
+      const slide = { id: slideId, slideId, blocks: blocks || [], backgroundImageUrl, backgroundColor };
       setLiveSlide(slide);
       setPinnedSlide((prev) => (prev ? prev : slide)); // first snapshot pins immediately
     });
@@ -108,8 +113,11 @@ function ViewerLivePage() {
       setSessionEnded(true);
     });
 
-    socket.on('disconnect', () => setConnected(false));
-    socket.on('error', ({ message }) => setConnectError(message || 'Connection error'));
+    socket.on('disconnect', () => setConnState((s) => (s === 'connecting' ? s : 'reconnecting')));
+    socket.on('error', ({ message } = {}) => {
+      if (ENDED_ERRORS.includes(message)) setSessionEnded(true);
+      else setConnectError(message || 'Connection error');
+    });
 
     socket.connect();
 
@@ -136,7 +144,7 @@ function ViewerLivePage() {
 
   const hasMoved = liveSlide && pinnedSlide && liveSlide.slideId !== pinnedSlide.slideId;
 
-  function handleDone() {
+  function handleCatchUp() {
     setPinnedSlide(liveSlide);
   }
 
@@ -148,8 +156,11 @@ function ViewerLivePage() {
 
     if (!viewerId) return;
     if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
+    setNoteState('saving');
     noteSaveTimer.current = setTimeout(() => {
-      saveNote(roomCode, viewerId, slideId, text);
+      saveNote(roomCode, viewerId, slideId, text)
+        .then(() => setNoteState('saved'))
+        .catch(() => setNoteState('error'));
     }, NOTE_SAVE_DEBOUNCE_MS);
   }
 
@@ -159,7 +170,7 @@ function ViewerLivePage() {
     socketRef.current.emit('question:submit', { text: question.trim() });
     setQuestion('');
     setJustSubmitted(true);
-    setTimeout(() => setJustSubmitted(false), 2500);
+    setTimeout(() => setJustSubmitted(false), 3000);
   }
 
   function handleLeave() {
@@ -168,87 +179,137 @@ function ViewerLivePage() {
     navigate('/');
   }
 
+  const connLabel = sessionEnded ? 'ended' : connState;
+  const live = connState === 'live' && !sessionEnded;
+
+  if (sessionEnded) {
+    return (
+      <div className="viewer viewer-ended">
+        <div className="card viewer-ended-card" role="status">
+          <LogoMark size={36} />
+          <h1>This session has ended</h1>
+          <p>The presenter closed session <span className="mono">{roomCode}</span>. Thanks for following along, {displayName}.</p>
+          <div className="viewer-ended-actions">
+            <Link to="/join" className="btn btn-secondary" onClick={() => sessionStorage.removeItem(storageKey)}>Join another session</Link>
+            <Link to="/" className="btn btn-primary" onClick={() => sessionStorage.removeItem(storageKey)}>Go to PreSync</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="viewer-page">
-      <header className="viewer-topbar">
-        <span className="room-code-badge mono">{roomCode}</span>
-        <span className="viewer-name mono">{displayName}</span>
-        <span className={`connection-dot ${connected ? 'connected' : 'disconnected'}`}
-              title={connected ? 'Connected' : connectError || 'Disconnected'} />
-        {!connected && !connectError && <span className="viewer-status mono">Connecting…</span>}
-        {connectError && <span className="viewer-status viewer-status-error mono">{connectError}</span>}
-        <button className="btn btn-ghost" onClick={handleLeave}>Leave</button>
+    <div className="viewer">
+      <header className="viewer-top">
+        <LogoMark size={24} />
+        <div className="viewer-id">
+          <span className="viewer-code mono" aria-label={`Session ${roomCode}`}>{roomCode}</span>
+          <span className="viewer-name">Watching as {displayName}</span>
+        </div>
+        <ConnectionPill state={connLabel} />
+        <button type="button" className="btn btn-ghost btn-sm viewer-leave" onClick={handleLeave} aria-label="Leave session">
+          <LogOut aria-hidden="true" /><span>Leave</span>
+        </button>
       </header>
 
+      {connState === 'reconnecting' && (
+        <div className="alert alert-warning viewer-alert" role="alert">Connection lost. Reconnecting…</div>
+      )}
+      {connectError && <div className="alert alert-error viewer-alert" role="alert">{connectError}</div>}
+
       <div className="viewer-body">
-        <main className="viewer-stage">
-          {sessionEnded && (
-            <div className="ended-banner">
-              <span>The presenter ended this session.</span>
-              <button className="btn btn-amber" onClick={() => navigate('/')}>Back home</button>
+        <main className="viewer-main" id="main">
+          {hasMoved && (
+            <div className="viewer-moved" role="status">
+              <span>The presenter has moved on.</span>
+              <button type="button" className="btn btn-primary btn-sm" onClick={handleCatchUp}>
+                Catch up<ArrowRight aria-hidden="true" />
+              </button>
             </div>
           )}
 
-          {hasMoved && !sessionEnded && (
-            <div className="moved-banner">
-              <span>Presenter moved to a new slide</span>
-              <button className="btn btn-amber" onClick={handleDone}>Done</button>
-            </div>
-          )}
-
-          {!pinnedSlide ? (
-            <p className="viewer-slide-label mono">Waiting for the presenter to share a slide…</p>
-          ) : (
-            <>
-              <SlideView slide={pinnedSlide} />
-              <p className="viewer-slide-label mono">Following the live presentation</p>
-            </>
-          )}
+          <div className="viewer-stage">
+            {pinnedSlide ? (
+              <ScaledSlide slide={pinnedSlide} className="viewer-slide" label="Current slide" />
+            ) : (
+              <div className="viewer-waiting" role="status">
+                {connState === 'connecting'
+                  ? <><span className="spinner" aria-hidden="true" /><p>Connecting to the session…</p></>
+                  : <><span className="live-dot" aria-hidden="true" /><p>Waiting for the presenter to show a slide…</p></>}
+              </div>
+            )}
+          </div>
+          <p className="viewer-follow">
+            {hasMoved
+              ? 'Showing the slide you were on, so your notes stay with it.'
+              : pinnedSlide ? 'Following the presenter live.' : ''}
+          </p>
         </main>
 
-        <aside className="viewer-sidebar">
-          <section className="notes-block">
-            <h3>Your notes — this slide</h3>
+        <aside className="viewer-side">
+          <div className="segmented viewer-tabs" role="tablist" aria-label="Viewer tools">
+            <button type="button" role="tab" id="tab-notes" aria-controls="panel-notes" className="segmented-item" aria-selected={tab === 'notes'} aria-pressed={tab === 'notes'} onClick={() => setTab('notes')}>
+              <NotebookPen aria-hidden="true" />My notes
+            </button>
+            <button type="button" role="tab" id="tab-qa" aria-controls="panel-qa" className="segmented-item" aria-selected={tab === 'qa'} aria-pressed={tab === 'qa'} onClick={() => setTab('qa')}>
+              <MessageSquareText aria-hidden="true" />Q&amp;A{answeredQuestions.length ? ` (${answeredQuestions.length})` : ''}
+            </button>
+          </div>
+
+          <section id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" className="viewer-panel" hidden={tab !== 'notes'}>
+            <label className="field-label" htmlFor="viewer-notes">Private notes for this slide</label>
             {!notesLoaded ? (
-              <p className="notes-loading mono">Loading notes…</p>
+              <div className="skeleton viewer-notes-skel" aria-label="Loading notes" />
             ) : (
               <textarea
-                className="notes-textarea"
-                placeholder="Private notes, tied to this slide..."
+                id="viewer-notes"
+                className="textarea viewer-notes"
+                placeholder={pinnedSlide ? 'Only you can see these. They are saved per slide.' : 'Notes open once the first slide arrives.'}
                 value={pinnedSlide ? notes[pinnedSlide.slideId] ?? '' : ''}
                 onChange={handleNoteChange}
-                disabled={!pinnedSlide || sessionEnded}
+                disabled={!pinnedSlide}
               />
             )}
+            <p className="field-hint viewer-note-state" aria-live="polite">
+              {noteState === 'saving' && 'Saving…'}
+              {noteState === 'saved' && 'Saved'}
+              {noteState === 'error' && <span className="is-error">Couldn&apos;t save. Keep this tab open and try typing again.</span>}
+            </p>
           </section>
 
-          <section className="qa-block">
-            <h3>Ask a question</h3>
-            <form onSubmit={handleSubmitQuestion}>
+          <section id="panel-qa" role="tabpanel" aria-labelledby="tab-qa" className="viewer-panel" hidden={tab !== 'qa'}>
+            <form onSubmit={handleSubmitQuestion} className="viewer-ask">
+              <label className="field-label" htmlFor="viewer-question">Ask the presenter</label>
               <textarea
-                className="qa-textarea"
-                placeholder="Answers are grounded in the deck only."
+                id="viewer-question"
+                className="textarea"
+                placeholder="Answers are based on this presentation's content."
                 value={question}
                 maxLength={500}
                 onChange={(e) => setQuestion(e.target.value)}
               />
-              <button className="btn btn-solid qa-submit" type="submit" disabled={!connected || sessionEnded}>Submit</button>
-            </form>
-            {justSubmitted && <p className="qa-sent-note">Sent to the presenter for review.</p>}
-
-            {answeredQuestions.length > 0 && (
-              <div className="qa-feed">
-                {answeredQuestions.map((a) => (
-                  <div key={a.id} className={`qa-feed-item${a.dismissed ? ' qa-feed-item--dismissed' : ''}`}>
-                    <p className="qa-feed-q mono">Q: {a.question}</p>
-                    {a.dismissed ? (
-                      <p className="qa-feed-dismissed">Reviewed but not answered by the presenter.</p>
-                    ) : (
-                      <p className="qa-feed-a">{a.answer}</p>
-                    )}
-                  </div>
-                ))}
+              <div className="viewer-ask-row">
+                <span className="field-hint mono">{question.length}/500</span>
+                <button className="btn btn-primary btn-sm" type="submit" disabled={!live || !question.trim()}>
+                  <Send aria-hidden="true" />Send question
+                </button>
               </div>
+              <p className="field-hint" aria-live="polite">{justSubmitted ? 'Sent. The presenter reviews every answer before it appears.' : ''}</p>
+            </form>
+
+            {answeredQuestions.length > 0 ? (
+              <ul className="viewer-feed">
+                {answeredQuestions.map((a) => (
+                  <li key={a.id} className={`viewer-feed-item${a.dismissed ? ' is-dismissed' : ''}`}>
+                    <p className="viewer-feed-q">{a.question}</p>
+                    {a.dismissed
+                      ? <p className="viewer-feed-a is-muted">The presenter saw your question but didn&apos;t answer it.</p>
+                      : <p className="viewer-feed-a">{a.answer}</p>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="field-hint">Answered questions from everyone appear here.</p>
             )}
           </section>
         </aside>
