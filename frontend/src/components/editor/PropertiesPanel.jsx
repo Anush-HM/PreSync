@@ -8,6 +8,8 @@ import {
   DEFAULT_SLIDE_BACKGROUND,
   DEFAULT_TEXT_COLOR,
   FONT_FAMILIES,
+  fontOption,
+  primaryFont,
   SLIDE_BACKGROUNDS,
   TEXT_ALIGNMENTS,
   TEXT_COLORS
@@ -16,6 +18,41 @@ import './editor.css';
 
 const ALIGN_ICONS = { left: AlignLeft, center: AlignCenter, right: AlignRight, justify: AlignJustify };
 const LINE_HEIGHTS = [1, 1.16, 1.5, 2];
+const SHAPE_FILLS = ['#ffffff', '#1a1a2e', '#1f3864', '#2e5e4e', '#c89b3c', '#e74c3c', '#f3f4f2'];
+
+function isText(b) {
+  return (b.type || 'textbox') === 'textbox';
+}
+
+// Keeps panel buttons from taking focus, so a text selection being
+// edited on the canvas stays selected while it is formatted.
+function keepCanvasFocus(e) {
+  if (e.target.closest('button')) e.preventDefault();
+}
+
+function TableCells({ block, onCellText }) {
+  const rows = block.table?.rows || [];
+  return (
+    <div className="props-cells">
+      {rows.map((row, r) => (
+        <div key={r} className="props-cells-row">
+          {row.cells.map((cell, c) =>
+            cell.covered ? null : (
+              <textarea
+                key={c}
+                className="input props-cell"
+                rows={1}
+                aria-label={`Row ${r + 1}, column ${c + 1}`}
+                value={cell.text || ''}
+                onChange={(e) => onCellText(r, c, e.target.value)}
+              />
+            )
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 const MIN_SIZE = 8;
 const MAX_SIZE = 200;
 
@@ -44,17 +81,25 @@ function Swatches({ colors, value, onPick, label, square }) {
 // slide's own settings when nothing is.
 function PropertiesPanel({
   slide, slideIndex, selectedBlocks, primary,
-  onFormat, onToggle, onRestack, onDuplicate, onDelete, onBackground, onClose
+  onFormat, onToggle, onRestack, onDuplicate, onDelete, onBackground, onShapeStyle, onCellText, onClose
 }) {
-  const textCount = selectedBlocks.filter((b) => b.type !== 'image').length;
-  const imageCount = selectedBlocks.length - textCount;
+  const textCount = selectedBlocks.filter(isText).length;
+  const shapes = selectedBlocks.filter((b) => b.type === 'shape');
+  const table = selectedBlocks.length === 1 && selectedBlocks[0].type === 'table' ? selectedBlocks[0] : null;
   const hasText = textCount > 0;
   const single = selectedBlocks.length === 1;
+  const kind = single ? selectedBlocks[0].type || 'textbox' : null;
 
   let heading = `Slide ${slideIndex + 1}`;
   if (selectedBlocks.length > 1) heading = `${selectedBlocks.length} elements`;
-  else if (imageCount === 1) heading = 'Image';
+  else if (kind === 'image') heading = 'Image';
+  else if (kind === 'shape') heading = 'Shape';
+  else if (kind === 'table') heading = 'Table';
   else if (hasText) heading = 'Text';
+
+  const font = primary?.fontFamily || DEFAULT_FONT_FAMILY;
+  const knownFont = fontOption(font);
+  const lineHeight = primary?.lineHeight || DEFAULT_LINE_HEIGHT;
 
   const size = primary ? Math.round(primary.fontSize) : '';
   const setSize = (n) => {
@@ -81,14 +126,15 @@ function PropertiesPanel({
         )}
 
         {hasText && (
-          <section className="props-section" aria-label="Text formatting">
+          <section className="props-section" aria-label="Text formatting" onMouseDown={keepCanvasFocus}>
             <h3 className="props-label">Typography</h3>
             <select
               className="select"
               aria-label="Font"
-              value={primary?.fontFamily || DEFAULT_FONT_FAMILY}
+              value={knownFont ? knownFont.value : font}
               onChange={(e) => onFormat({ fontFamily: e.target.value })}
             >
+              {!knownFont && <option value={font}>{primaryFont(font)}</option>}
               {FONT_FAMILIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
             </select>
 
@@ -113,9 +159,12 @@ function PropertiesPanel({
               <select
                 className="select props-lh"
                 aria-label="Line spacing"
-                value={primary?.lineHeight || DEFAULT_LINE_HEIGHT}
+                value={lineHeight}
                 onChange={(e) => onFormat({ lineHeight: Number(e.target.value) })}
               >
+                {!LINE_HEIGHTS.includes(lineHeight) && (
+                  <option value={lineHeight}>{(lineHeight * 1.13 / 1.2).toFixed(2)} spacing</option>
+                )}
                 {LINE_HEIGHTS.map((lh) => (
                   <option key={lh} value={lh}>{lh === DEFAULT_LINE_HEIGHT ? '1.15' : lh.toFixed(1)} spacing</option>
                 ))}
@@ -152,6 +201,40 @@ function PropertiesPanel({
           </section>
         )}
 
+        {shapes.length > 0 && (
+          <section className="props-section" aria-label="Shape style">
+            <h3 className="props-label">Fill</h3>
+            <Swatches
+              colors={SHAPE_FILLS}
+              value={shapes[0].background || '#ffffff'}
+              onPick={(c) => onShapeStyle({ background: c, fillGradient: null, opacity: null })}
+              label="Shape fill"
+              square
+            />
+            <h3 className="props-label">Outline</h3>
+            <Swatches
+              colors={SHAPE_FILLS}
+              value={shapes[0].stroke || '#1a1a2e'}
+              onPick={(c) => onShapeStyle({ stroke: c, strokeWidth: shapes[0].strokeWidth || 1 })}
+              label="Shape outline"
+              square
+            />
+            {shapes.some((b) => b.stroke) && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => onShapeStyle({ stroke: null, strokeWidth: null, dash: null })}>
+                Remove outline
+              </button>
+            )}
+          </section>
+        )}
+
+        {table && (
+          <section className="props-section" aria-label="Table cells">
+            <h3 className="props-label">Cells</h3>
+            <TableCells block={table} onCellText={onCellText} />
+            <p className="field-hint">Drag the table to move it; drag a corner to resize its columns and rows.</p>
+          </section>
+        )}
+
         {selectedBlocks.length > 0 && (
           <section className="props-section" aria-label="Arrange">
             <h3 className="props-label">Arrange</h3>
@@ -181,6 +264,9 @@ function PropertiesPanel({
             />
             {slide.backgroundImageUrl && (
               <p className="field-hint">This slide has a background image from its original file, which covers the colour.</p>
+            )}
+            {!slide.backgroundImageUrl && slide.backgroundGradient && (
+              <p className="field-hint">This slide has a gradient from its original file. Picking a colour replaces it.</p>
             )}
           </section>
         )}

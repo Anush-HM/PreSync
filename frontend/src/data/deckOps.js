@@ -14,7 +14,7 @@ export function makeBlankSlide(order) {
     needsImageFallback: false,
     notes: '',
     blocks: [
-      { id: newId('b'), type: 'textbox', x: 80, y: 60, width: 700, fontSize: 36, fontWeight: 'bold', text: 'New slide' },
+      { id: newId('b'), type: 'textbox', x: 80, y: 60, width: 700, fontSize: 36, fontWeight: 'bold', text: 'New slide', role: 'title' },
       { id: newId('b'), type: 'textbox', x: 80, y: 130, width: 700, fontSize: 18, text: 'Click to add text' }
     ]
   };
@@ -42,6 +42,43 @@ export function updateBlocks(doc, slideIdx, blockIds, patch) {
         if (value === undefined || value === null) blockMap.delete(key);
         else blockMap.set(key, value);
       });
+    });
+  });
+}
+
+// Drops `keys` from per-character style ranges, so a block-wide change
+// (say, bold) reaches every character. Returns null when nothing is left.
+export function pruneStyles(styles, keys) {
+  if (!Array.isArray(styles)) return null;
+  const out = styles
+    .map((r) => {
+      const style = { ...r.style };
+      keys.forEach((k) => delete style[k]);
+      return { ...r, style };
+    })
+    .filter((r) => Object.keys(r.style).length > 0);
+  return out.length ? out : null;
+}
+
+// Block-wide formatting from the editor: sets the fields and removes the
+// same properties from any mixed formatting inside the blocks.
+export function formatBlocks(doc, slideIdx, blockIds, patch) {
+  const blocksArr = getBlocksArray(doc, slideIdx);
+  if (!blocksArr) return;
+  const keys = Object.keys(patch);
+  doc.transact(() => {
+    blocksArr.forEach((blockMap) => {
+      if (!blockIds.includes(blockMap.get('id'))) return;
+      Object.entries(patch).forEach(([key, value]) => {
+        if (value === undefined || value === null) blockMap.delete(key);
+        else blockMap.set(key, value);
+      });
+      const styles = blockMap.get('styles');
+      if (styles) {
+        const pruned = pruneStyles(styles, keys);
+        if (pruned) blockMap.set('styles', pruned);
+        else blockMap.delete('styles');
+      }
     });
   });
 }

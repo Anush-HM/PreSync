@@ -100,7 +100,34 @@ describe('analyzeSlides', () => {
     expect(outline[2].title).toBe('Slide 3');
     const text = analysis.warnings.join(' ');
     expect(text).toMatch(/Slide 3 had nothing/);
-    expect(text).toMatch(/slide 2 \(1 table\); slide 3 \(2 charts\)/);
+    // Tables are imported now, so only the charts are called out.
+    expect(text).toMatch(/placeholder or left out: slide 3 \(2 charts\)\./);
+  });
+
+  it('names slides from their title block, ignoring decoration and placeholders', () => {
+    const slides = [
+      {
+        id: 's1',
+        blocks: [
+          { id: 'd', type: 'textbox', text: 'Company footer', fontSize: 60, y: 0, role: 'decor' },
+          { id: 't', type: 'textbox', text: 'Table of Contents', fontSize: 30, y: 200, role: 'title' },
+          { id: 'b', type: 'textbox', text: '1. Introduction\n2. Problem', fontSize: 20, y: 300 },
+          { id: 'p', type: 'textbox', text: 'Bar chart', fontSize: 18, y: 400, role: 'placeholder' }
+        ]
+      },
+      {
+        id: 's2',
+        blocks: [
+          { id: 'x', type: 'textbox', text: 'Body', fontSize: 14, y: 0, styles: [{ start: 0, end: 4, style: { fontSize: 12 } }] },
+          { id: 'y', type: 'textbox', text: 'Heading by size', fontSize: 14, y: 100, styles: [{ start: 0, end: 7, style: { fontSize: 36 } }] },
+          { id: 'z', type: 'table', text: '', table: { rows: [{ cells: [{ text: 'A' }, { text: 'B' }] }] } }
+        ]
+      }
+    ];
+    const { outline } = analyzeSlides(slides, { kind: 'pptx', fileName: 'deck.pptx' });
+    expect(outline[0].title).toBe('Table of Contents');
+    expect(outline[1].title).toBe('Heading by size');
+    expect(outline[1].bullets.map((b) => b.text)).toEqual(['Body', 'A · B']);
   });
 });
 
@@ -110,7 +137,7 @@ describe('sanitizeOutline / outlineToSlides', () => {
       [{ id: 'o1', layout: 'weird', title: '  Hi ', bullets: [{ text: 'x', level: 7 }, { text: '' }], imageId: 'nope' }],
       new Set(['img-1'])
     );
-    expect(clean).toEqual([{ id: 'o1', layout: 'content', title: 'Hi', subtitle: '', bullets: [{ text: 'x', level: 2 }], notes: '', imageId: null }]);
+    expect(clean).toEqual([{ id: 'o1', layout: 'content', title: 'Hi', subtitle: '', bullets: [{ text: 'x', level: 2 }], notes: '', imageId: null, tableId: null, tableRows: null }]);
     expect(() => sanitizeOutline([])).toThrow();
     expect(() => sanitizeOutline('x')).toThrow();
   });
@@ -126,7 +153,7 @@ describe('sanitizeOutline / outlineToSlides', () => {
     expect(slides[0].blocks.map((b) => b.text)).toEqual(['Deck', 'Sub']);
     const [title, body, image] = slides[1].blocks;
     expect(title).toMatchObject({ text: 'Points', fontWeight: 'bold' });
-    expect(body.text).toBe('• A\n    – B');
+    expect(body.text).toBe('•\u00a0A\n\u00a0\u00a0\u00a0\u00a0–\u00a0B');
     expect(body.width).toBe(500);
     expect(image).toMatchObject({ type: 'image', imageUrl: 'data:image/png;base64,AA', width: 320, height: 160 });
     expect(slides[1]).toMatchObject({ id: 'slide-2', order: 1, notes: 'n' });

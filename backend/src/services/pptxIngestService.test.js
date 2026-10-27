@@ -39,30 +39,34 @@ describe('extractSlidesFromPptx', () => {
     expect(s1.notes).toBe('Open with the headline number');
 
     const title = s1.blocks.find((b) => b.text === 'Quarterly review');
+    // Positions are the text area: the shape's box less PowerPoint's
+    // default 0.1in / 0.05in insets (9.6px / 4.8px on this canvas).
     expect(title).toMatchObject({
       type: 'textbox',
-      x: 96,
-      y: 48,
-      width: 768,
+      x: 105.6,
+      y: 52.8,
+      width: 748.8,
       fontSize: 48, // 36pt on a 720pt-wide slide drawn 960px wide
       fontWeight: 'bold',
       fontStyle: 'italic',
       fill: '#e74c3c',
       textAlign: 'center',
-      fontFamily: 'Georgia'
+      fontFamily: 'Georgia, Gelasio, serif'
     });
 
     const body = s1.blocks.find((b) => b.text.startsWith('Line one'));
     expect(body.text).toBe('Line one\nLine two');
-    expect(body).toMatchObject({ x: 96, y: 192, fontSize: 24, underline: true });
+    expect(body).toMatchObject({ x: 105.6, y: 196.8, fontSize: 24, underline: true });
     expect(body.fontWeight).toBeUndefined();
+    expect(body.styles).toBeUndefined(); // uniform formatting needs no per-character styles
 
     const image = s1.blocks.find((b) => b.type === 'image');
     expect(image).toMatchObject({ x: 768, y: 384, width: 96, height: 96 });
     expect(image.imageUrl).toMatch(/^data:image\/png;base64,/);
 
     expect(s2.blocks.map((b) => b.text)).toEqual(['Second slide']);
-    expect(s2.backgroundColor).toBeUndefined();
+    // The template's own (white) master background, read rather than assumed.
+    expect(s2.backgroundColor).toBe('#ffffff');
 
     expect(s3).toMatchObject({ blocks: [], needsImageFallback: true });
   });
@@ -81,12 +85,20 @@ describe('extractSlidesFromPptx', () => {
     const [titleSlide, contentSlide] = await extractSlidesFromPptx(file);
 
     expect(titleSlide.blocks).toEqual([
-      expect.objectContaining({ text: 'Placeholder title', x: 174, y: 168, width: 612, fontSize: 44, textAlign: 'center' }),
-      expect.objectContaining({ text: 'Subtitle from layout', x: 228, y: 306, fontSize: 32, textAlign: 'center' })
+      expect.objectContaining({
+        text: 'Placeholder title', x: 181.2, y: 171.4, width: 597.6, fontSize: 44, textAlign: 'center',
+        role: 'title', verticalAlign: 'middle'
+      }),
+      expect.objectContaining({ text: 'Subtitle from layout', x: 235.2, y: 309.6, fontSize: 32, textAlign: 'center', role: 'subtitle', fill: '#404040' })
     ]);
-    expect(contentSlide.blocks.map((b) => b.text)).toEqual(['Agenda', 'First point\nSecond point', 'Grouped text']);
+    // The body placeholder's bullets come from the master's body style.
+    expect(contentSlide.blocks.map((b) => b.text.replace(/\u00a0+/g, ' '))).toEqual([
+      'Agenda',
+      '• First point\n• Second point',
+      'Grouped text'
+    ]);
     // 4:3 slide: content is centred horizontally on the 16:9 canvas.
-    expect(contentSlide.blocks[2]).toMatchObject({ x: 220, y: 400, width: 200 });
+    expect(contentSlide.blocks[2]).toMatchObject({ x: 227.2, y: 403.6, width: 185.6 });
     expect(contentSlide.notes).toBe('Keep it short');
   });
 
@@ -101,7 +113,7 @@ describe('extractSlidesFromPptx', () => {
 });
 
 describe('analyzePptx', () => {
-  it('reports titles, tables and charts that are not imported, and keeps slide order', async () => {
+  it('reports titles, imported tables and placeholder charts, and keeps slide order', async () => {
     const { analyzePptx } = await import('./pptxAnalysisService.js');
     const pptx = new PptxGenJS();
     pptx.layout = 'LAYOUT_16x9';
@@ -119,6 +131,7 @@ describe('analyzePptx', () => {
     expect(analysis.stats).toMatchObject({ slides: 2, tables: 1, charts: 1 });
     expect(analysis.headings.map((h) => h.text)).toEqual(['Overview', 'Numbers']);
     expect(outline.map((o) => o.title)).toEqual(['Overview', 'Numbers']);
-    expect(analysis.warnings.join(' ')).toMatch(/slide 2 \(1 table, 1 chart\)/);
+    expect(analysis.warnings.join(' ')).toMatch(/slide 2 \(1 chart\)/);
+    expect(slides[1].blocks.find((b) => b.type === 'table').table.rows[0].cells.map((c) => c.text)).toEqual(['A', 'B']);
   });
 });

@@ -23,14 +23,14 @@ describe('parseDocx', () => {
     const { blocks, images, meta } = await parseDocx(buf);
 
     expect(blocks.map((b) => b.type)).toEqual(['title', 'subtitle', 'heading', 'paragraph', 'list', 'list', 'heading', 'table', 'image']);
-    expect(blocks[2]).toEqual({ type: 'heading', level: 1, text: 'Goals' });
-    expect(blocks[4].items).toEqual([
+    expect(blocks[2]).toMatchObject({ type: 'heading', level: 1, text: 'Goals' });
+    expect(blocks[4].items).toMatchObject([
       { text: 'Revenue', level: 0, ordered: false },
       { text: 'New markets', level: 1, ordered: false }
     ]);
-    expect(blocks[5].items).toEqual([{ text: 'Hire', level: 0, ordered: true }]);
+    expect(blocks[5].items).toMatchObject([{ text: 'Hire', level: 0, ordered: true }]);
     // "My Section" is based on Heading 1
-    expect(blocks[6]).toEqual({ type: 'heading', level: 1, text: 'Budget' });
+    expect(blocks[6]).toMatchObject({ type: 'heading', level: 1, text: 'Budget' });
     expect(blocks[7].rows).toEqual([['Item', 'Cost'], ['Laptops', '$10k']]);
     expect(blocks[8]).toEqual({ type: 'image', imageId: 'img-1' });
     expect(images[0]).toMatchObject({ id: 'img-1', mime: 'image/png', widthPx: 200, heightPx: 100 });
@@ -46,14 +46,14 @@ describe('parseDocx', () => {
       picture('rIdEmf')
     ].join('');
     const { blocks, found } = await parseDocx(await buildDocx(body));
-    expect(blocks).toEqual([{ type: 'paragraph', text: 'Keep added' }]);
+    expect(blocks).toMatchObject([{ type: 'paragraph', text: 'Keep added' }]);
     expect(found).toMatchObject({ trackedChanges: true, charts: true, textBoxes: true, unsupportedImages: 1 });
   });
 
   it('reads lists whose numbering comes from the paragraph style', async () => {
     const buf = await buildDocx([p('One', 'ListBullet'), p('Nested', 'ListBullet2'), p('Plain'), p('First', 'ListNumber')].join(''));
     const { blocks } = await parseDocx(buf);
-    expect(blocks).toEqual([
+    expect(blocks).toMatchObject([
       { type: 'list', items: [{ text: 'One', level: 0, ordered: false }, { text: 'Nested', level: 1, ordered: false }] },
       { type: 'paragraph', text: 'Plain' },
       { type: 'list', items: [{ text: 'First', level: 0, ordered: true }] }

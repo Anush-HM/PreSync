@@ -9,16 +9,36 @@ export const DEFAULT_TEXT_COLOR = '#1a1a2e';
 export const DEFAULT_SLIDE_BACKGROUND = '#ffffff';
 export const DEFAULT_FONT_FAMILY = 'Public Sans, sans-serif';
 export const DEFAULT_LINE_HEIGHT = 1.16; // Fabric's Textbox default
+// Fabric spaces lines at fontSize × 1.13 × lineHeight; CSS at fontSize ×
+// line-height. Renderers multiply by this so both wrap and stack alike.
+export const FABRIC_LINE_MULT = 1.13;
 
+// Office fonts list a metric-compatible open font (loaded in index.html)
+// second, so imported text wraps where it did in the source on machines
+// without the Microsoft font. Keep in step with backend drawingml.js.
 export const FONT_FAMILIES = [
   { label: 'Public Sans', value: DEFAULT_FONT_FAMILY },
-  { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },
-  { label: 'Georgia', value: 'Georgia, serif' },
-  { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },
-  { label: 'Courier New', value: '"Courier New", Courier, monospace' },
+  { label: 'Arial', value: 'Arial, Arimo, Helvetica, sans-serif' },
+  { label: 'Calibri', value: 'Calibri, Carlito, "Segoe UI", Arial, sans-serif' },
+  { label: 'Cambria', value: 'Cambria, Caladea, Georgia, serif' },
+  { label: 'Georgia', value: 'Georgia, Gelasio, serif' },
+  { label: 'Times New Roman', value: '"Times New Roman", Tinos, Times, serif' },
+  { label: 'Courier New', value: '"Courier New", Cousine, Courier, monospace' },
   { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
   { label: 'Trebuchet MS', value: '"Trebuchet MS", sans-serif' }
 ];
+
+// The first family of a CSS font stack, unquoted ("Times New Roman").
+export function primaryFont(stack) {
+  return (stack || '').split(',')[0].replace(/["']/g, '').trim();
+}
+
+// The FONT_FAMILIES entry a stack belongs to, matching on the first
+// family so older stacks ("Georgia, serif") still find theirs.
+export function fontOption(stack) {
+  const first = primaryFont(stack).toLowerCase();
+  return FONT_FAMILIES.find((f) => primaryFont(f.value).toLowerCase() === first) || null;
+}
 
 export const TEXT_ALIGNMENTS = ['left', 'center', 'right', 'justify'];
 
@@ -42,30 +62,163 @@ export function legacyFitScale(blocks) {
   return Math.min(sx, sy);
 }
 
-// CSS for a text block in the read-only renderers.
-export function blockTextStyle(block, scale = 1) {
+function textDecoration(style) {
+  const parts = [];
+  if (style.underline) parts.push('underline');
+  if (style.linethrough) parts.push('line-through');
+  return parts.length ? parts.join(' ') : 'none';
+}
+
+// CSS for a block's (or table cell's) own text formatting.
+export function textFormatCss(block, scale = 1) {
   return {
-    position: 'absolute',
-    left: (block.x || 0) * scale,
-    top: (block.y || 0) * scale,
-    width: (block.width || 300) * scale,
-    fontSize: Math.round((block.fontSize || 16) * scale),
+    fontSize: (block.fontSize || 16) * scale,
     whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
     color: block.fill || DEFAULT_TEXT_COLOR,
     fontFamily: block.fontFamily || DEFAULT_FONT_FAMILY,
     fontWeight: block.fontWeight || 'normal',
     fontStyle: block.fontStyle || 'normal',
-    textDecoration: block.underline ? 'underline' : 'none',
+    textDecoration: textDecoration(block),
     textAlign: block.textAlign || 'left',
-    lineHeight: block.lineHeight || DEFAULT_LINE_HEIGHT
+    lineHeight: (block.lineHeight || DEFAULT_LINE_HEIGHT) * FABRIC_LINE_MULT
   };
 }
 
-// CSS for a slide's background (flattened image fallback wins over colour).
-export function slideBackgroundStyle(slide) {
-  if (slide?.backgroundImageUrl) {
-    return { backgroundImage: `url(${slide.backgroundImageUrl})`, backgroundSize: 'cover' };
+// CSS for one styled run inside a block (only the keys it overrides).
+export function runCss(style, scale = 1) {
+  const css = {};
+  if (style.fontSize) css.fontSize = style.fontSize * scale;
+  if (style.fontFamily) css.fontFamily = style.fontFamily;
+  if (style.fontWeight) css.fontWeight = style.fontWeight;
+  if (style.fontStyle) css.fontStyle = style.fontStyle;
+  if (style.fill) css.color = style.fill;
+  if (style.underline !== undefined || style.linethrough !== undefined) css.textDecoration = textDecoration(style);
+  return css;
+}
+
+// Splits text into runs by its `styles` ranges ([{ start, end, style }],
+// indices counting characters but not line breaks — Fabric's format).
+// Returns [{ text, style }] where style is null for unstyled text and
+// line breaks stay inside the run text.
+export function styledRuns(text, styles) {
+  const chars = Array.from(text || '');
+  if (!Array.isArray(styles) || styles.length === 0) return [{ text: text || '', style: null }];
+  const sorted = [...styles].filter((r) => r && r.end > r.start).sort((a, b) => a.start - b.start);
+  const runs = [];
+  let index = 0; // character index, not counting line breaks
+  let r = 0;
+  let current = null;
+  for (const ch of chars) {
+    let style = null;
+    if (ch !== '\n') {
+      while (r < sorted.length && sorted[r].end <= index) r += 1;
+      if (sorted[r] && sorted[r].start <= index && index < sorted[r].end) style = sorted[r].style;
+      index += 1;
+    } else {
+      style = current ? current.style : null; // keep line breaks with the run they end
+    }
+    if (current && current.style === style) current.text += ch;
+    else {
+      current = { text: ch, style };
+      runs.push(current);
+    }
   }
-  if (slide?.backgroundColor) return { background: slide.backgroundColor };
-  return undefined;
+  return runs;
+}
+
+// A list marker at the start of a paragraph, as imported: optional
+// indent, a bullet or number, then non-breaking spaces up to the text.
+// Wrapped lines of such a paragraph hang under the text, not the marker.
+export const LIST_PREFIX = /^\u00a0*(?:[•▪▫➢➤➔➜➝✓■□●○◦◆◇❖❑♦◻–\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)])\u00a0+/u;
+
+// Runs split into hard lines (paragraphs), each [{ text, style }].
+export function paragraphRuns(text, styles) {
+  const lines = [[]];
+  for (const run of styledRuns(text, styles)) {
+    run.text.split('\n').forEach((part, i) => {
+      if (i > 0) lines.push([]);
+      if (part) lines[lines.length - 1].push({ text: part, style: run.style });
+    });
+  }
+  return lines;
+}
+
+// Splits a line's runs after its first `n` characters.
+export function splitRuns(runs, n) {
+  const head = [];
+  const tail = [];
+  let left = n;
+  for (const run of runs) {
+    const chars = Array.from(run.text);
+    if (left >= chars.length) {
+      head.push(run);
+      left -= chars.length;
+    } else if (left > 0) {
+      head.push({ text: chars.slice(0, left).join(''), style: run.style });
+      tail.push({ text: chars.slice(left).join(''), style: run.style });
+      left = 0;
+    } else tail.push(run);
+  }
+  return [head, tail];
+}
+
+// CSS rotate/flip for a block, about its centre (the editor's convention).
+export function blockTransform(block) {
+  const parts = [];
+  if (block.rotation) parts.push(`rotate(${block.rotation}deg)`);
+  if (block.flipH) parts.push('scaleX(-1)');
+  if (block.flipV) parts.push('scaleY(-1)');
+  return parts.length ? parts.join(' ') : undefined;
+}
+
+// CSS for a text block in the read-only renderers.
+export function blockTextStyle(block, scale = 1) {
+  const css = {
+    position: 'absolute',
+    left: (block.x || 0) * scale,
+    top: (block.y || 0) * scale,
+    width: (block.width || 300) * scale,
+    ...textFormatCss(block, scale),
+    transform: blockTransform({ rotation: block.rotation })
+  };
+  if (block.verticalAlign && block.verticalAlign !== 'top' && block.height) {
+    css.height = block.height * scale;
+    css.display = 'flex';
+    css.flexDirection = 'column';
+    css.justifyContent = block.verticalAlign === 'middle' ? 'center' : 'flex-end';
+  }
+  return css;
+}
+
+export function gradientCss(gradient) {
+  if (!gradient?.stops?.length) return null;
+  const stops = gradient.stops.map((s) => `${s.color} ${Math.round((s.pos || 0) * 1000) / 10}%`).join(', ');
+  return `linear-gradient(${gradient.angle ?? 180}deg, ${stops})`;
+}
+
+// CSS for a slide's background: a picture (stretched over the slide, as
+// in PowerPoint, or tiled), else a gradient, else a colour.
+export function slideBackgroundStyle(slide) {
+  // Longhand properties only, so switching between kinds never leaves a
+  // stale shorthand behind.
+  const css = { backgroundColor: slide?.backgroundColor || undefined, backgroundImage: 'none' };
+  if (slide?.backgroundImageUrl) {
+    css.backgroundImage = `url(${slide.backgroundImageUrl})`;
+    css.backgroundSize = slide.backgroundRepeat ? 'auto' : '100% 100%';
+    css.backgroundRepeat = slide.backgroundRepeat ? 'repeat' : 'no-repeat';
+    return css;
+  }
+  const gradient = gradientCss(slide?.backgroundGradient);
+  if (gradient) css.backgroundImage = gradient;
+  if (!css.backgroundColor && !gradient) return undefined;
+  return css;
+}
+
+// The name a slide goes by in lists: its title block's first line, or
+// "Slide N" when it has none.
+export function slideTitle(slide, index) {
+  const title = (slide?.blocks || []).find((b) => b.role === 'title' && b.text?.trim());
+  const line = title?.text.split('\n').map((l) => l.replace(/\u00a0/g, ' ').trim()).find(Boolean);
+  return line || `Slide ${index + 1}`;
 }

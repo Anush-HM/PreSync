@@ -8,11 +8,29 @@ import {
 } from 'lucide-react';
 import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from '../data/yjsClient.js';
 import {
+  BASE_OBJECT_PROPS,
+  blockGeometry,
+  createShape,
+  createTable,
+  fontFamiliesOf,
+  placeImage,
+  placeText,
+  scaledTable,
+  SlideTextbox,
+  shapeKey,
+  slideBackgroundFill,
+  stylesOf,
+  tableKey,
+  textboxProps,
+  updateShape
+} from '../components/editor/fabricBlocks.js';
+import {
   addBlock,
   deleteBlocks,
   deleteSlide,
   duplicateBlocks,
   duplicateSlide,
+  formatBlocks,
   insertSlide,
   makeBlankSlide,
   moveSlide,
@@ -24,10 +42,7 @@ import {
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
-  DEFAULT_FONT_FAMILY,
-  DEFAULT_LINE_HEIGHT,
   DEFAULT_SLIDE_BACKGROUND,
-  DEFAULT_TEXT_COLOR,
   legacyFitScale
 } from '../data/slideFormat.js';
 import { goLive } from '../data/roomsApi.js';
@@ -51,6 +66,10 @@ const SEED_ORIGIN = 'seed';
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif'];
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
 const MIN_ZOOM = 0.25;
+// Formatting Fabric can hold per character (the rest is per text box).
+const CHAR_STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'linethrough', 'fill'];
+// Font families this page has already asked the browser to load.
+const requestedFonts = new Set();
 const MAX_ZOOM = 2;
 
 function colorForUser(id) {
@@ -58,42 +77,6 @@ function colorForUser(id) {
   const s = String(id);
   for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
   return CURSOR_COLORS[hash % CURSOR_COLORS.length];
-}
-
-// Fabric 7 positions objects by their centre by default; blocks are
-// stored by their top-left corner, so every object is pinned to that.
-const BASE_OBJECT_PROPS = { originX: 'left', originY: 'top', strokeWidth: 0 };
-
-function textboxProps(block, scale) {
-  return {
-    ...BASE_OBJECT_PROPS,
-    left: (block.x || 0) * scale,
-    top: (block.y || 0) * scale,
-    width: (block.width || 300) * scale,
-    scaleX: 1,
-    scaleY: 1,
-    fontSize: (block.fontSize || 16) * scale,
-    text: block.text || '',
-    fill: block.fill || DEFAULT_TEXT_COLOR,
-    fontFamily: block.fontFamily || DEFAULT_FONT_FAMILY,
-    fontWeight: block.fontWeight || 'normal',
-    fontStyle: block.fontStyle || 'normal',
-    underline: !!block.underline,
-    textAlign: block.textAlign || 'left',
-    lineHeight: block.lineHeight || DEFAULT_LINE_HEIGHT
-  };
-}
-
-function imageProps(block, img, scale) {
-  const width = (block.width || img.width) * scale;
-  const height = block.height ? block.height * scale : (img.height * width) / img.width;
-  return {
-    ...BASE_OBJECT_PROPS,
-    left: (block.x || 0) * scale,
-    top: (block.y || 0) * scale,
-    scaleX: width / img.width,
-    scaleY: height / img.height
-  };
 }
 
 function formatTime(iso) {
@@ -177,6 +160,9 @@ function EditorPage() {
   const applyingRemoteRef = useRef(false);
   const renderedSlideIdRef = useRef(null);
   const scaleRef = useRef(1);
+  const relayoutRef = useRef(null); // re-places anchored text after fonts load
+  const writeTextRef = useRef(null); // writes a text object's text and styles to the doc
+  const [fontsReady, setFontsReady] = useState(0);
   const activeSlideIdxRef = useRef(0);
   activeSlideIdxRef.current = activeSlideIdx;
 
@@ -287,24 +273,6 @@ function EditorPage() {
     fabricRef.current = canvas;
     renderedSlideIdRef.current = null;
 
-    // Reads an object's geometry back into slide coordinates. Works for
-    // objects inside a multi-selection too, whose own left/top are
-    // relative to the selection group.
-    function blockGeometry(obj) {
-      const s = scaleRef.current;
-      const rect = obj.getBoundingRect();
-      const scaling = obj.getObjectScaling();
-      const geometry = { x: Math.round(rect.left / s), y: Math.round(rect.top / s) };
-      if (obj.type === 'image') {
-        geometry.width = Math.round(rect.width / s);
-        geometry.height = Math.round(rect.height / s);
-      } else {
-        geometry.width = Math.round((obj.width * scaling.x) / s);
-        geometry.fontSize = Math.max(4, Math.round((obj.fontSize * scaling.y) / s));
-      }
-      return geometry;
-    }
-
     function writeObjects(objects) {
       const doc = yjsRef.current?.doc;
       if (applyingRemoteRef.current || !doc) return;
@@ -315,10 +283,31 @@ function EditorPage() {
         objects.forEach((obj) => {
           const blockMap = byId.get(obj.data?.blockId);
           if (!blockMap) return;
-          Object.entries(blockGeometry(obj)).forEach(([k, v]) => blockMap.set(k, v));
-          if (typeof obj.text === 'string') blockMap.set('text', obj.text);
+          const { tableScale, ...geometry } = blockGeometry(obj, scaleRef.current);
+          if (tableScale && (Math.abs(tableScale.x - 1) > 0.001 || Math.abs(tableScale.y - 1) > 0.001)) {
+            const table = scaledTable(blockMap.get('table'), tableScale.x, tableScale.y);
+            blockMap.set('table', table);
+            geometry.width = Math.round(table.columns.reduce((a, w) => a + w, 0) * 10) / 10;
+          }
+          Object.entries(geometry).forEach(([k, v]) => {
+            if (v === null || v === undefined) blockMap.delete(k);
+            else blockMap.set(k, v);
+          });
+          if (obj.type === 'textbox' && obj.data?.kind !== 'table') writeTextInto(blockMap, obj);
         });
       });
+    }
+
+    // Text and its mixed formatting travel together, so typing into a
+    // bold word keeps it bold for collaborators too.
+    function writeTextInto(blockMap, obj) {
+      if (blockMap.get('text') !== obj.text) blockMap.set('text', obj.text);
+      const styles = stylesOf(obj, scaleRef.current);
+      const before = blockMap.get('styles');
+      if (JSON.stringify(styles) !== JSON.stringify(before ?? null)) {
+        if (styles) blockMap.set('styles', styles);
+        else blockMap.delete('styles');
+      }
     }
 
     function writeText(obj) {
@@ -326,10 +315,25 @@ function EditorPage() {
       if (applyingRemoteRef.current || !doc || !obj?.data?.blockId) return;
       const blocksArr = getSlidesArray(doc).get(activeSlideIdxRef.current)?.get('blocks');
       const blockMap = blocksArr?.toArray().find((m) => m.get('id') === obj.data.blockId);
-      if (blockMap && blockMap.get('text') !== obj.text) {
-        doc.transact(() => blockMap.set('text', obj.text));
-      }
+      if (blockMap) doc.transact(() => writeTextInto(blockMap, obj));
     }
+
+    writeTextRef.current = writeText;
+
+    // Web fonts arrive after first paint; re-measure text once they do so
+    // line breaks match the font actually drawn.
+    const relayout = () => {
+      fabric.cache.clearFontCache();
+      canvas.getObjects().forEach((o) => {
+        if (o.type === 'textbox') {
+          o.initDimensions();
+          o.setCoords();
+        }
+      });
+      relayoutRef.current?.();
+      canvas.requestRenderAll();
+    };
+    document.fonts?.addEventListener?.('loadingdone', relayout);
 
     canvas.on('object:modified', (e) => {
       const target = e.target;
@@ -359,7 +363,10 @@ function EditorPage() {
       yjsRef.current?.awareness.setLocalStateField('cursor', null);
     });
 
-    return () => canvas.dispose();
+    return () => {
+      document.fonts?.removeEventListener?.('loadingdone', relayout);
+      canvas.dispose();
+    };
   }, [deckId]);
 
   // --- Reconcile the active slide's blocks onto the Fabric canvas.
@@ -380,15 +387,20 @@ function EditorPage() {
       setSelectedIds([]);
     }
 
-    canvas.backgroundColor = slide.backgroundColor || DEFAULT_SLIDE_BACKGROUND;
+    canvas.backgroundColor = slideBackgroundFill(slide, DEFAULT_SLIDE_BACKGROUND);
     if (slide.backgroundImageUrl) {
       if (canvas.backgroundImage?.data?.src !== slide.backgroundImageUrl) {
         const slideId = slide.id;
         fabric.FabricImage.fromURL(slide.backgroundImageUrl).then((img) => {
           if (renderedSlideIdRef.current !== slideId) return;
-          img.set({ ...BASE_OBJECT_PROPS, scaleX: CANVAS_WIDTH / img.width, scaleY: CANVAS_HEIGHT / img.height });
-          img.data = { src: slide.backgroundImageUrl };
-          canvas.backgroundImage = img;
+          if (slide.backgroundRepeat) {
+            canvas.backgroundImage = undefined;
+            canvas.backgroundColor = new fabric.Pattern({ source: img.getElement(), repeat: 'repeat' });
+          } else {
+            img.set({ ...BASE_OBJECT_PROPS, scaleX: CANVAS_WIDTH / img.width, scaleY: CANVAS_HEIGHT / img.height });
+            img.data = { src: slide.backgroundImageUrl };
+            canvas.backgroundImage = img;
+          }
           canvas.requestRenderAll();
         }).catch(() => {});
       }
@@ -412,14 +424,22 @@ function EditorPage() {
       const idx = slide.blocks.findIndex((b) => b.id === blockId);
       if (idx >= 0 && canvas.getObjects().indexOf(obj) !== idx) canvas.moveObjectTo(obj, idx);
     };
+    const replace = (oldObj, obj, blockId) => {
+      if (oldObj) canvas.remove(oldObj);
+      canvas.add(obj);
+      placeAt(obj, blockId);
+    };
 
     slide.blocks.forEach((block) => {
       let obj = existing.get(block.id);
+      // Inside a multi-selection, positions are relative to the group;
+      // leave geometry alone until the selection is released.
+      const inGroup = !!obj?.group;
 
       if (block.type === 'image') {
         if (!block.imageUrl) return;
-        if (obj) {
-          if (!obj.group) obj.set(imageProps(block, { width: obj.width, height: obj.height }, scale));
+        if (obj && obj.data?.src === block.imageUrl) {
+          if (!inGroup) placeImage(obj, block, scale);
           obj.setCoords();
           placeAt(obj, block.id);
           return;
@@ -427,51 +447,152 @@ function EditorPage() {
         const slideId = slide.id;
         fabric.FabricImage.fromURL(block.imageUrl, { crossOrigin: 'anonymous' }).then((img) => {
           if (renderedSlideIdRef.current !== slideId) return;
-          img.set(imageProps(block, img, scale));
-          img.data = { blockId: block.id };
+          placeImage(img, block, scale);
+          img.data = { blockId: block.id, src: block.imageUrl };
           applyingRemoteRef.current = true;
-          canvas.add(img);
-          placeAt(img, block.id);
+          replace(canvas.getObjects().find((o) => o.data?.blockId === block.id), img, block.id);
           applyingRemoteRef.current = false;
           canvas.requestRenderAll();
         }).catch(() => {});
         return;
       }
 
+      if (block.type === 'shape') {
+        if (obj && obj.data?.key === shapeKey(block)) {
+          if (!inGroup) updateShape(obj, block, scale);
+          obj.setCoords();
+          placeAt(obj, block.id);
+        } else if (!inGroup) {
+          replace(obj, createShape(block, scale), block.id);
+        }
+        return;
+      }
+
+      if (block.type === 'table') {
+        if (obj && obj.data?.key === tableKey(block)) {
+          if (!inGroup) {
+            obj.set({ scaleX: 1, scaleY: 1, angle: block.rotation || 0 });
+            const w = obj.data.layoutWidth * scale;
+            const h = obj.data.layoutHeight * scale;
+            obj.setPositionByOrigin(new fabric.Point(block.x * scale + w / 2, block.y * scale + h / 2), 'center', 'center');
+          }
+          obj.setCoords();
+          placeAt(obj, block.id);
+        } else if (!inGroup) {
+          replace(obj, createTable(block, scale), block.id);
+        }
+        return;
+      }
+
       const props = textboxProps(block, scale);
       if (obj) {
         // Don't fight the user's own typing: Fabric already holds the
-        // newest text for a block that is being edited right now.
-        if (obj.isEditing) delete props.text;
-        // Inside a multi-selection, left/top are relative to the group;
-        // leave geometry alone until the selection is released.
-        if (obj.group) ['left', 'top', 'width', 'scaleX', 'scaleY'].forEach((k) => delete props[k]);
+        // newest text (and its styles) for a block being edited right now.
+        if (obj.isEditing) {
+          delete props.text;
+          delete props.styles;
+        }
+        if (inGroup) ['left', 'top', 'width', 'scaleX', 'scaleY', 'angle'].forEach((k) => delete props[k]);
         obj.set(props);
+        if (!inGroup) placeText(obj, block, scale);
         obj.setCoords();
       } else {
-        obj = new fabric.Textbox(props.text, { ...props, editable: true, splitByGrapheme: false });
-        obj.data = { blockId: block.id };
+        obj = new SlideTextbox(props.text, { ...props, editable: true, splitByGrapheme: false });
+        obj.data = { blockId: block.id, kind: 'text' };
+        placeText(obj, block, scale);
         canvas.add(obj);
       }
       placeAt(obj, block.id);
     });
 
+    // Once web fonts land, text heights change: re-anchor text boxes.
+    relayoutRef.current = () => {
+      slide.blocks.forEach((block) => {
+        const o = canvas.getObjects().find((x) => x.data?.blockId === block.id);
+        if (o && o.type === 'textbox' && o.data?.kind === 'text' && !o.group) {
+          placeText(o, block, scale);
+          o.setCoords();
+        }
+      });
+    };
+    const families = fontFamiliesOf(slide.blocks).filter((f) => !requestedFonts.has(f));
+    if (families.length && document.fonts?.load) {
+      families.forEach((f) => requestedFonts.add(f));
+      const variants = ['400 16px', '700 16px', 'italic 400 16px', 'italic 700 16px'];
+      Promise.all(families.flatMap((f) => variants.map((v) => document.fonts.load(`${v} "${f}"`).catch(() => null)))).then(() => {
+        if (renderedSlideIdRef.current !== slide.id) return;
+        fabric.cache.clearFontCache();
+        canvas.getObjects().forEach((o) => o.type === 'textbox' && o.initDimensions());
+        // Tables measured with fallback fonts are rebuilt.
+        canvas.getObjects().forEach((o) => {
+          if (o.data?.kind === 'table') o.data.key = 'stale';
+        });
+        relayoutRef.current?.();
+        canvas.requestRenderAll();
+        setFontsReady((n) => n + 1);
+      });
+    }
+
     canvas.requestRenderAll();
     applyingRemoteRef.current = false;
-  }, [slides, activeSlideIdx]);
+  }, [slides, activeSlideIdx, fontsReady]);
 
   const activeSlide = slides[activeSlideIdx];
   const selectedBlocks = (activeSlide?.blocks || []).filter((b) => selectedIds.includes(b.id));
-  const selectedText = selectedBlocks.filter((b) => b.type !== 'image');
+  const selectedText = selectedBlocks.filter((b) => (b.type || 'textbox') === 'textbox');
   const primary = selectedText[0];
 
   // --- Toolbar actions ---
 
+  // Text formatting: applies to the characters selected while editing a
+  // text box, otherwise to every selected text box as a whole.
   const formatSelected = useCallback((patch) => {
     const doc = yjsRef.current?.doc;
-    if (!doc || selectedIds.length === 0) return;
-    updateBlocks(doc, activeSlideIdx, selectedIds, patch);
-  }, [selectedIds, activeSlideIdx]);
+    if (!doc) return;
+    const canvas = fabricRef.current;
+    const active = canvas?.getActiveObject();
+    const charLevel = Object.keys(patch).every((k) => CHAR_STYLE_KEYS.includes(k));
+    if (active?.type === 'textbox' && active.isEditing && charLevel && active.selectionStart !== active.selectionEnd) {
+      const s = scaleRef.current;
+      active.setSelectionStyles(patch.fontSize ? { ...patch, fontSize: patch.fontSize * s } : patch);
+      active.initDimensions();
+      canvas.requestRenderAll();
+      writeTextRef.current?.(active);
+      return;
+    }
+    const ids = selectedText.map((b) => b.id);
+    if (ids.length) formatBlocks(doc, activeSlideIdx, ids, patch);
+  }, [selectedText, activeSlideIdx]);
+
+  function handleShapeStyle(patch) {
+    const doc = yjsRef.current?.doc;
+    const ids = selectedBlocks.filter((b) => b.type === 'shape').map((b) => b.id);
+    if (doc && ids.length) updateBlocks(doc, activeSlideIdx, ids, patch);
+  }
+
+  // Edits one table cell's text. Mixed formatting that no longer fits
+  // the new text is trimmed rather than shifted.
+  function handleCellText(r, c, text) {
+    const doc = yjsRef.current?.doc;
+    const block = selectedBlocks.find((b) => b.type === 'table');
+    if (!doc || !block?.table) return;
+    const rows = block.table.rows.map((row, ri) => ({
+      ...row,
+      cells: row.cells.map((cell, ci) => {
+        if (ri !== r || ci !== c) return cell;
+        const len = Array.from(text.replace(/\n/g, '')).length;
+        const styles = (cell.styles || [])
+          .map((st) => ({ ...st, end: Math.min(st.end, len) }))
+          .filter((st) => st.start < st.end);
+        const next = { ...cell, text };
+        if (styles.length) next.styles = styles;
+        else delete next.styles;
+        return next;
+      })
+    }));
+    const plain = rows.map((row) => row.cells.filter((cell) => !cell.covered).map((cell) => cell.text).join('\t')).join('\n');
+    updateBlocks(doc, activeSlideIdx, [block.id], { table: { ...block.table, rows }, text: plain });
+  }
 
   function toggleFormat(key, onValue, offValue) {
     if (!primary) return;
@@ -578,7 +699,7 @@ function EditorPage() {
   function handleSlideBackground(color) {
     const doc = yjsRef.current?.doc;
     if (!doc) return;
-    updateSlide(doc, activeSlideIdx, { backgroundColor: color });
+    updateSlide(doc, activeSlideIdx, { backgroundColor: color, backgroundGradient: null });
   }
 
   function handleNotesChange(e) {
@@ -934,6 +1055,8 @@ function EditorPage() {
             onDuplicate={handleDuplicateSelected}
             onDelete={handleDeleteSelected}
             onBackground={handleSlideBackground}
+            onShapeStyle={handleShapeStyle}
+            onCellText={handleCellText}
             onClose={panelOverlay ? () => setPanelOpen(false) : undefined}
           />
         </aside>

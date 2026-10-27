@@ -1,15 +1,42 @@
-import { ArrowUp, ArrowDown, Trash2, Plus, ImageOff, NotebookPen } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, Plus, ImageOff, NotebookPen, TableProperties } from 'lucide-react';
 import { bulletsToText, textToBullets } from '../../data/outline.js';
 import './review.css';
 
 let localId = 0;
 function newItem() {
   localId += 1;
-  return { id: `new-${Date.now()}-${localId}`, layout: 'content', title: 'New slide', subtitle: '', bullets: [], notes: '', imageId: null };
+  return { id: `new-${Date.now()}-${localId}`, layout: 'content', title: 'New slide', subtitle: '', bullets: [], notes: '', imageId: null, tableId: null, tableRows: null };
 }
 
-function OutlineEditor({ outline, images, onChange }) {
+// A small text-only preview of the table rows a slide will show.
+function TablePreview({ block, rows }) {
+  const all = block.table?.rows || [];
+  const [start, end] = rows || [0, all.length];
+  const shown = (start > 0 ? [all[0], ...all.slice(start, end)] : all.slice(start, end)).slice(0, 6);
+  const more = end - start - (shown.length - (start > 0 ? 1 : 0));
+  return (
+    <div className="outline-table-wrap">
+      <table className="outline-table">
+        <tbody>
+          {shown.map((row, r) => (
+            <tr key={r}>
+              {row.cells.map((c, ci) =>
+                c.covered ? null : (
+                  <td key={ci} colSpan={c.colspan || 1} rowSpan={c.rowspan || 1}>{c.text}</td>
+                )
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {more > 0 && <p className="field-hint">…and {more} more row{more === 1 ? '' : 's'}</p>}
+    </div>
+  );
+}
+
+function OutlineEditor({ outline, images, blocks, onChange }) {
   const imageById = new Map((images || []).map((i) => [i.id, i]));
+  const tableById = new Map((blocks || []).filter((b) => b.type === 'table' && b.id).map((b) => [b.id, b]));
 
   function update(index, patch) {
     onChange(outline.map((item, i) => (i === index ? { ...item, ...patch } : item)));
@@ -33,6 +60,7 @@ function OutlineEditor({ outline, images, onChange }) {
     <ol className="outline-list" aria-label="Slide outline">
       {outline.map((item, i) => {
         const image = item.imageId && imageById.get(item.imageId);
+        const table = item.layout !== 'title' && item.tableId && tableById.get(item.tableId);
         const titleId = `outline-title-${item.id}`;
         return (
           <li key={item.id} className="outline-item">
@@ -61,7 +89,7 @@ function OutlineEditor({ outline, images, onChange }) {
               </div>
             </div>
 
-            <div className={`outline-item-body${image ? ' has-image' : ''}`}>
+            <div className={`outline-item-body${image ? ' has-image' : ''}${table ? ' has-table' : ''}`}>
               {item.layout === 'title' ? (
                 <div className="field">
                   <label className="field-label" htmlFor={`outline-sub-${item.id}`}>Subtitle</label>
@@ -92,6 +120,15 @@ function OutlineEditor({ outline, images, onChange }) {
                   <img src={image.dataUrl} alt="Picture from the document" />
                   <button type="button" className="btn btn-sm btn-ghost" onClick={() => update(i, { imageId: null })}>
                     <ImageOff /> Remove picture
+                  </button>
+                </figure>
+              )}
+              {table && (
+                <figure className="outline-image outline-table-fig">
+                  <figcaption className="field-label"><TableProperties aria-hidden="true" /> Table from the document</figcaption>
+                  <TablePreview block={table} rows={item.tableRows} />
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => update(i, { tableId: null, tableRows: null })}>
+                    <Trash2 /> Remove table
                   </button>
                 </figure>
               )}
