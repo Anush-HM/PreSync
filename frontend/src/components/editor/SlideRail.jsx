@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { ArrowDown, ArrowUp, Copy, MoreHorizontal, Plus, StickyNote, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, MoreHorizontal, Pencil, Plus, StickyNote, Trash2 } from 'lucide-react';
 import ScaledSlide from '../ScaledSlide.jsx';
 import { slideTitle } from '../../data/slideFormat.js';
 import Menu from '../ui/Menu.jsx';
@@ -7,8 +7,15 @@ import './editor.css';
 
 // Left zone: real thumbnails of every slide, in order. Arrow keys move
 // between slides; each thumbnail has its own actions menu.
-function SlideRail({ slides, activeIdx, peers, onSelect, onAdd, onDuplicate, onMove, onDelete }) {
+function SlideRail({ slides, activeIdx, peers, onSelect, onAdd, onDuplicate, onMove, onDelete, onRename, onToggleHidden }) {
   const listRef = useRef(null);
+  const [renaming, setRenaming] = useState(null); // { idx, value }
+
+  function commitRename() {
+    if (!renaming) return;
+    onRename?.(renaming.idx, renaming.value.trim().slice(0, 200));
+    setRenaming(null);
+  }
 
   // Keep the active thumbnail in view when it changes from elsewhere
   // (undo, a peer deleting slides, keyboard navigation).
@@ -46,26 +53,44 @@ function SlideRail({ slides, activeIdx, peers, onSelect, onAdd, onDuplicate, onM
           const title = slideTitle(slide, i);
           const named = title !== `Slide ${i + 1}`;
           return (
-            <li key={slide.id} className={`rail-item${active ? ' is-active' : ''}`}>
+            <li key={slide.id} className={`rail-item${active ? ' is-active' : ''}${slide.hidden ? ' is-hidden' : ''}`}>
               <span className="rail-num mono" aria-hidden="true">{i + 1}</span>
               <button
                 type="button"
                 className="rail-thumb"
                 data-slide-idx={i}
                 aria-current={active ? 'true' : undefined}
-                aria-label={`Slide ${i + 1}${named ? `: ${title}` : ''}${here.length ? `, ${here.map((p) => p.name).join(', ')} here` : ''}`}
+                aria-label={`Slide ${i + 1}${named ? `: ${title}` : ''}${slide.hidden ? ', hidden' : ''}${here.length ? `, ${here.map((p) => p.name).join(', ')} here` : ''}`}
                 tabIndex={active ? 0 : -1}
                 onClick={() => onSelect(i)}
               >
                 <ScaledSlide slide={slide} />
-                <span className="rail-title" aria-hidden="true" title={title}>{title}</span>
+                {renaming?.idx !== i && <span className="rail-title" aria-hidden="true" title={title}>{title}</span>}
                 {slide.notes?.trim() && <StickyNote className="rail-notes" aria-hidden="true" />}
+                {slide.hidden && <span className="rail-hidden" aria-hidden="true"><EyeOff /></span>}
                 {here.length > 0 && (
                   <span className="rail-peers" aria-hidden="true">
                     {here.slice(0, 3).map((p) => <span key={p.clientId} style={{ background: p.color }} />)}
                   </span>
                 )}
               </button>
+              {renaming?.idx === i && (
+                <input
+                  className="input rail-rename"
+                  aria-label={`Name for slide ${i + 1}`}
+                  placeholder={`Slide ${i + 1}`}
+                  value={renaming.value}
+                  maxLength={200}
+                  autoFocus
+                  onChange={(e) => setRenaming({ idx: i, value: e.target.value })}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') e.currentTarget.blur();
+                    if (e.key === 'Escape') setRenaming(null);
+                  }}
+                />
+              )}
               <div className="rail-item-menu">
                 <Menu
                   label={`Slide ${i + 1} actions`}
@@ -73,7 +98,9 @@ function SlideRail({ slides, activeIdx, peers, onSelect, onAdd, onDuplicate, onM
                   triggerClassName="icon-btn icon-btn-sm"
                   align="start"
                   items={[
+                    { label: 'Rename…', icon: Pencil, onSelect: () => setRenaming({ idx: i, value: slide.name || '' }) },
                     { label: 'Duplicate', icon: Copy, onSelect: () => onDuplicate(i) },
+                    { label: slide.hidden ? 'Show slide' : 'Hide slide', icon: slide.hidden ? Eye : EyeOff, onSelect: () => onToggleHidden?.(i) },
                     { label: 'Move up', icon: ArrowUp, onSelect: () => onMove(i, -1), disabled: i === 0 },
                     { label: 'Move down', icon: ArrowDown, onSelect: () => onMove(i, 1), disabled: i >= slides.length - 1 },
                     'separator',

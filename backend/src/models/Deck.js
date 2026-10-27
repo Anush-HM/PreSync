@@ -63,7 +63,19 @@ const blockSchema = new mongoose.Schema(
     chart: { type: mongoose.Schema.Types.Mixed },
     // Only set when a slide/region falls back to a flattened image
     // because it didn't extract cleanly (tables, complex layouts).
-    imageUrl: { type: String }
+    imageUrl: { type: String },
+    // Highlight behind a text box's text (per-character highlights ride in `styles`).
+    textBackgroundColor: { type: String, match: HEX_COLOR },
+    // Image blocks: the part of the picture shown, as fractions of its
+    // natural size ({ x, y, w, h }), a drop shadow ({ color, blur, x, y,
+    // opacity }) and alternative text for screen readers and exports.
+    crop: { type: mongoose.Schema.Types.Mixed },
+    shadow: { type: mongoose.Schema.Types.Mixed },
+    alt: { type: String, maxlength: 1000 },
+    locked: { type: Boolean }, // can't be moved, resized or deleted until unlocked
+    groupId: { type: String }, // blocks sharing one select and move together
+    lockAspect: { type: Boolean }, // keep proportions while resizing (images do unless false)
+    layoutSlot: { type: String } // the layout slot a block was made for (title, body, image…)
   },
   { _id: false }
 );
@@ -78,7 +90,11 @@ const slideSchema = new mongoose.Schema(
     backgroundRepeat: { type: Boolean }, // tile backgroundImageUrl instead of stretching it
     notes: { type: String, default: '' }, // speaker notes, never shown to viewers
     needsImageFallback: { type: Boolean, default: false }, // true until a fallback image is rendered
-    blocks: { type: [blockSchema], default: [] }
+    blocks: { type: [blockSchema], default: [] },
+    name: { type: String, maxlength: 200 }, // shown in the slide list instead of the title
+    hidden: { type: Boolean }, // skipped when presenting and in exports
+    layout: { type: String }, // id of the layout last applied (frontend/src/data/layouts.js)
+    theme: { type: String } // id of the theme last applied (frontend/src/data/themes.js)
   },
   { _id: false }
 );

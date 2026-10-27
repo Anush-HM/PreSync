@@ -182,3 +182,54 @@ export function deleteSlide(doc, slideIdx) {
   if (slidesArr.length <= 1 || !slidesArr.get(slideIdx)) return;
   doc.transact(() => slidesArr.delete(slideIdx, 1));
 }
+
+// Sets different fields on several blocks of a slide in one step:
+// patches is { blockId: patch }.
+export function patchBlocks(doc, slideIdx, patches) {
+  const blocksArr = getBlocksArray(doc, slideIdx);
+  if (!blocksArr) return;
+  doc.transact(() => {
+    blocksArr.forEach((blockMap) => {
+      const patch = patches[blockMap.get('id')];
+      if (!patch) return;
+      Object.entries(patch).forEach(([key, value]) => {
+        if (value === undefined || value === null) blockMap.delete(key);
+        else blockMap.set(key, value);
+      });
+    });
+  });
+}
+
+// Replaces a slide's blocks (and sets slide fields) in one undo step,
+// keeping the Y.Maps of blocks whose id survives so collaborators'
+// concurrent edits to other fields still merge.
+export function replaceSlideContent(doc, slideIdx, blocks, slidePatch = {}) {
+  const slideMap = getSlidesArray(doc).get(slideIdx);
+  const blocksArr = slideMap?.get('blocks');
+  if (!blocksArr) return;
+  doc.transact(() => {
+    Object.entries(slidePatch).forEach(([key, value]) => {
+      if (value === undefined || value === null) slideMap.delete(key);
+      else slideMap.set(key, value);
+    });
+    const current = blocksArr.toArray().map((m) => m.get('id'));
+    const sameOrder = current.length === blocks.length && current.every((id, i) => id === blocks[i].id);
+    if (sameOrder) {
+      blocks.forEach((block, i) => {
+        const m = blocksArr.get(i);
+        const before = blockMapToPlain(m);
+        const keys = new Set([...Object.keys(before), ...Object.keys(block)]);
+        keys.forEach((k) => {
+          if (k === 'id') return;
+          const v = block[k];
+          if (v === undefined || v === null || v === '') {
+            if (m.has(k) && k !== 'text') m.delete(k);
+          } else if (JSON.stringify(m.get(k)) !== JSON.stringify(v)) m.set(k, v);
+        });
+      });
+      return;
+    }
+    blocksArr.delete(0, blocksArr.length);
+    blocksArr.push(blocks.map(plainToBlockMap));
+  });
+}

@@ -2,6 +2,8 @@ import { useId } from 'react';
 import {
   blockTextStyle,
   blockTransform,
+  imageBoxCss,
+  imageCropCss,
   legacyFitScale,
   LIST_PREFIX,
   paragraphRuns,
@@ -38,6 +40,8 @@ function RichText({ text, styles, scale }) {
 // apart by the block's paragraphSpacing.
 function Paragraphs({ block, scale }) {
   const hang = !block.textAlign || block.textAlign === 'left';
+  // A text box's own highlight colour sits behind its text only.
+  const mark = (node) => (block.textBackgroundColor ? <span style={{ backgroundColor: block.textBackgroundColor }}>{node}</span> : node);
   return paragraphRuns(block.text, block.styles).map((runs, i) => {
     const style = i > 0 && block.paragraphSpacing ? { marginTop: block.paragraphSpacing * scale } : undefined;
     const plain = runs.map((r) => r.text).join('');
@@ -46,14 +50,14 @@ function Paragraphs({ block, scale }) {
       const [head, tail] = splitRuns(runs, Array.from(marker[0]).length);
       return (
         <div key={i} className="slide-para is-list" style={style}>
-          <span className="slide-marker"><Runs runs={head} scale={scale} /></span>
-          <span className="slide-para-text"><Runs runs={tail} scale={scale} /></span>
+          <span className="slide-marker">{mark(<Runs runs={head} scale={scale} />)}</span>
+          <span className="slide-para-text">{mark(<Runs runs={tail} scale={scale} />)}</span>
         </div>
       );
     }
     return (
       <div key={i} className="slide-para" style={style}>
-        {runs.length ? <Runs runs={runs} scale={scale} /> : '\u200b'}
+        {runs.length ? mark(<Runs runs={runs} scale={scale} />) : '\u200b'}
       </div>
     );
   });
@@ -229,22 +233,14 @@ function SlideView({ slide }) {
       {blocks.map((b) => {
         if (b.type === 'image' && b.imageUrl) {
           return (
-            <img
-              key={b.id}
-              src={b.imageUrl}
-              alt=""
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              style={{
-                position: 'absolute',
-                left: (b.x || 0) * s,
-                top: (b.y || 0) * s,
-                width: (b.width || 300) * s,
-                height: b.height ? b.height * s : 'auto',
-                objectFit: 'fill',
-                display: 'block',
-                transform: blockTransform(b)
-              }}
-            />
+            <div key={b.id} className="slide-image" style={imageBoxCss(b, s)}>
+              <img
+                src={b.imageUrl}
+                alt={b.alt || ''}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                style={imageCropCss(b, s)}
+              />
+            </div>
           );
         }
         if (b.type === 'image') {

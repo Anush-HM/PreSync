@@ -116,3 +116,12 @@
   .swatch, .rail-thumb, .rail-item-menu { transition: none; }
   .swatch:hover { transform: none; }
 }
+
+/* Slide list: hidden slides and renaming */
+.rail-item.is-hidden .rail-thumb .scaled-slide { opacity: 0.4; }
+.rail-hidden {
+  position: absolute; right: 6px; bottom: 26px; display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 6px; background: rgba(16, 19, 17, 0.82); color: var(--text-secondary);
+}
+.rail-hidden svg { width: 13px; height: 13px; }
+.rail-rename { position: absolute; left: 26px; right: 4px; bottom: 2px; height: 26px; font-size: 12px; padding: 0 8px; }
