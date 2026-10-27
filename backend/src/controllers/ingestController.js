@@ -1,30 +1,27 @@
 import Deck from '../models/Deck.js';
 import { extractSlidesFromPdf } from '../services/pdfIngestService.js';
 import { extractSlidesFromPptx } from '../services/pptxIngestService.js';
+import { parseDocx } from '../services/docxIngestService.js';
+import { analyzeDocx, outlineToSlides } from '../services/documentAnalysis.js';
+import { detectFormat, FORMAT_LABELS, unsupportedFormatError } from '../services/importService.js';
 
-const PDF_MIME = 'application/pdf';
-const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-const LEGACY_PPT_MIME = 'application/vnd.ms-powerpoint';
-
-// Browsers often send .pptx as application/octet-stream, so the
-// extension counts as much as the declared type.
-export function detectFormat(file) {
-  const ext = (file.originalname.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
-  if (ext === 'pdf' || file.mimetype === PDF_MIME) return 'pdf';
-  if (ext === 'pptx' || file.mimetype === PPTX_MIME) return 'pptx';
-  if (ext === 'ppt' || file.mimetype === LEGACY_PPT_MIME) return 'ppt';
-  return null;
+// Word documents go through the same outline step as the review flow,
+// using the suggested outline unchanged.
+async function extractSlidesFromDocx(buffer, fileName) {
+  const parsed = await parseDocx(buffer);
+  const { outline } = analyzeDocx(parsed, fileName);
+  return outlineToSlides(outline, parsed.images, parsed.blocks);
 }
 
 const EXTRACTORS = {
-  pdf: { extract: extractSlidesFromPdf, label: 'PDF' },
-  pptx: { extract: extractSlidesFromPptx, label: 'PowerPoint file' }
+  pdf: (file) => extractSlidesFromPdf(file.buffer),
+  pptx: (file) => extractSlidesFromPptx(file.buffer),
+  docx: (file) => extractSlidesFromDocx(file.buffer, file.originalname)
 };
 
-// Editor-only: uploads a PDF or .pptx, extracts real editable content,
-// and creates a new Deck owned by the uploading user. This is the only
-// way a Deck's slides get their initial content — everything after this
-// point is live editing via Yjs.
+// Editor-only: uploads a file and straight away creates a new Deck owned
+// by the uploading user, with no review step. The dashboard uses the
+// /api/imports flow instead, which lets the user review first.
 export async function importDeck(req, res) {
   const file = req.file;
   if (!file) {
@@ -32,24 +29,17 @@ export async function importDeck(req, res) {
   }
 
   const format = detectFormat(file);
-  if (format === 'ppt') {
-    return res.status(415).json({
-      error: 'Legacy .ppt files are not supported. Open it in PowerPoint, Keynote or Google Slides and save it as .pptx, then import that.'
-    });
-  }
-  if (!format) {
-    return res.status(400).json({ error: 'Only PDF (.pdf) and PowerPoint (.pptx) files can be imported' });
-  }
+  const unsupported = unsupportedFormatError(format);
+  if (unsupported) return res.status(unsupported.status).json({ error: unsupported.error });
 
-  const { extract, label } = EXTRACTORS[format];
   let slides;
   try {
-    slides = await extract(file.buffer);
+    slides = await EXTRACTORS[format](file);
   } catch (err) {
-    return res.status(422).json({ error: `Could not parse ${label}: ${err.message}` });
+    return res.status(422).json({ error: `Could not parse ${FORMAT_LABELS[format]}: ${err.message}` });
   }
 
-  const title = req.body.title?.trim() || file.originalname.replace(/\.(pdf|pptx)$/i, '');
+  const title = req.body.title?.trim() || file.originalname.replace(/\.(pdf|pptx|docx)$/i, '');
 
   const deck = await Deck.create({
     title,

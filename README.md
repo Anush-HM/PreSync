@@ -41,9 +41,13 @@ This starts the backend (`node --watch`, port 4000) and the frontend (Vite, port
 
 ## Importing, editing and exporting decks
 
-- **Import:** PDF (`.pdf`) and PowerPoint (`.pptx`), up to 25MB, from the Decks page. Text comes in as editable text boxes with position, size, font, bold/italic/underline, colour and alignment; PowerPoint pictures (PNG/JPEG/GIF up to 1.5MB each, 8MB per deck), slide background colours and speaker notes come along too. Legacy `.ppt` is refused with a prompt to re-save it as `.pptx`. Tables, charts and SmartArt are not extracted.
+- **Import:** Word (`.docx`), PowerPoint (`.pptx`) and PDF (`.pdf`), up to 25MB, from the dashboard. The file is analysed first (`POST /api/imports`) and the user reviews the result before anything is created:
+  - *Word:* headings, paragraphs, bullet and numbered lists (with their own markers and indents), run formatting (font, size, bold/italic/underline/strike, colour), paragraph alignment and spacing, tables (merged cells, shading, borders), pictures, page breaks, page size and margins, and the default header and footer. The *Document preview* shows it as pages. The shallowest heading level used more than once marks slide boundaries; long sections continue onto extra slides, each table gets a slide of its own (long tables are split, repeating the header row), and the full section text goes into speaker notes. The suggested outline can be edited, reordered and saved before generating slides.
+  - *PowerPoint:* text boxes with position, size, rotation, insets and vertical anchoring; fonts, sizes and formatting per run, following the slide → layout → master inheritance; bullets and automatic numbering; tables (merged cells, fills, borders, built-in table styles); shapes (preset and custom geometry, fills, gradients, outlines); cropped pictures; colour, gradient and picture backgrounds; and speaker notes. Charts, SmartArt and other embedded objects become a labelled placeholder and are listed in the review. *Open in editor* keeps the slides as extracted; *Generate from outline* rebuilds them as a fresh, consistently laid-out deck.
+  - *PDF:* each page's drawing (pictures, shapes, charts) is rendered with PDF.js as the slide background, with the page's text on top as editable, aligned text boxes (fonts, sizes, bold/italic, colours, lists and the page title). Scanned pages without real text keep their full render. Rendering needs the optional `@napi-rs/canvas` package; without it PDFs import as text only.
+  - Legacy `.doc` and `.ppt` are refused with a prompt to re-save them. Imports are kept on the **Documents** page, so the same file never has to be uploaded twice. Analysis is deterministic and uses no AI.
 - **Edit:** font, size, bold/italic/underline, colour, alignment, line spacing, layer order, slide background, speaker notes, slide reorder/duplicate, undo/redo (Ctrl+Z / Ctrl+Shift+Z). Edits autosave through the live co-editing session; **Save** (Ctrl+S) writes them to the database immediately.
-- **Export:** *Export* in the editor downloads the deck as `.pdf` or `.pptx` (`GET /api/decks/:id/export?format=pdf|pptx`). PPTX keeps text editable, with speaker notes. PDF uses the standard PDF fonts (closest match to the chosen family) and covers Latin-1 text only.
+- **Export:** *Export* in the editor downloads the deck as `.pdf` or `.pptx` (`GET /api/decks/:id/export?format=pdf|pptx`). PPTX keeps text editable with its per-run formatting, plus tables, shapes, pictures, picture backgrounds and speaker notes (gradients export as their first colour). PDF draws the same content, including gradients. It embeds Carlito, Caladea and Liberation fonts when the server has them installed (`fonts-crosextra-carlito`, `fonts-crosextra-caladea`, `fonts-liberation`; other font folders via `PDF_FONT_DIRS`), so text keeps the widths of Calibri, Cambria, Arial, Times New Roman and Courier New; otherwise it falls back to the standard PDF fonts, which cover Latin-1 text only.
 
 ## Design system
 
@@ -56,7 +60,30 @@ Signed-in pages use the sidebar layout in `frontend/src/components/layout/AppShe
 | `/decks` | Dashboard: recent and shared presentations, search, filter, sort |
 | `/decks/mine` | Presentations you own |
 | `/decks/shared` | Presentations shared with you |
+| `/documents` | Imported files (`GET /api/imports`) |
+| `/imports/:id` | Review an import: analysis, outline editor, document or slide preview |
 | `/sessions` | Your live and recent sessions (`GET /api/rooms/mine`) |
+
+The editor (`/editor/:deckId`) has its own full-screen layout:
+
+- **Left:** slide thumbnails, with keyboard navigation and a per-slide menu for duplicate, move and delete.
+- **Centre:** the Fabric canvas, with zoom and *Fit*.
+- **Right:** a formatting panel that changes with what is selected.
+
+Below 1100px the formatting panel opens as an overlay. Below 768px the slide list does too.
+
+*Insert → Image* embeds PNG, JPEG or GIF files up to 1.5MB.
+
+**Live sessions**
+
+- *Present* in the editor saves the deck and opens the presenter view (`/presenter/:code`). It shows:
+  - The current slide, next-slide preview and speaker notes.
+  - Viewer count and connection state.
+  - The audience Q&A queue.
+  - *Invite*, with the code, a join link (`/join?code=…`) and a QR code.
+- *End session* asks for confirmation first.
+- The audience view (`/view/:code`) scales the slide to any screen and lets viewers catch up when the presenter moves on. It has private per-slide notes and Q&A.
+- Both views show connecting, reconnecting and ended states. socket.io reconnects automatically.
 
 ## Tests
 

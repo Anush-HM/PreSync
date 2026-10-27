@@ -1,14 +1,36 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as fabric from 'fabric';
 import * as Y from 'yjs';
+import {
+  AlertCircle, ArrowLeft, Check, CloudOff, Download, ImagePlus, Maximize, Minus, PanelLeft, PanelRight,
+  Play, Plus, Redo2, StickyNote, Type, Undo2, Users, ChevronDown
+} from 'lucide-react';
 import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from '../data/yjsClient.js';
+import {
+  BASE_OBJECT_PROPS,
+  blockGeometry,
+  createShape,
+  createTable,
+  fontFamiliesOf,
+  placeImage,
+  placeText,
+  scaledTable,
+  SlideTextbox,
+  shapeKey,
+  slideBackgroundFill,
+  stylesOf,
+  tableKey,
+  textboxProps,
+  updateShape
+} from '../components/editor/fabricBlocks.js';
 import {
   addBlock,
   deleteBlocks,
   deleteSlide,
   duplicateBlocks,
   duplicateSlide,
+  formatBlocks,
   insertSlide,
   makeBlankSlide,
   moveSlide,
@@ -20,76 +42,41 @@ import {
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
-  DEFAULT_FONT_FAMILY,
-  DEFAULT_LINE_HEIGHT,
   DEFAULT_SLIDE_BACKGROUND,
-  DEFAULT_TEXT_COLOR,
-  FONT_FAMILIES,
-  SLIDE_BACKGROUNDS,
-  TEXT_ALIGNMENTS,
-  TEXT_COLORS,
   legacyFitScale
 } from '../data/slideFormat.js';
 import { goLive } from '../data/roomsApi.js';
-import {
-  getDeck,
-  addCollaborator,
-  removeCollaborator,
-  renameDeck,
-  saveDeck,
-  downloadDeckExport,
-  EXPORT_FORMATS
-} from '../data/decksApi.js';
+import { getDeck, renameDeck, saveDeck, downloadDeckExport, EXPORT_FORMATS } from '../data/decksApi.js';
 import { getCurrentUser } from '../data/apiConfig.js';
+import { useMediaQuery } from '../hooks/useMediaQuery.js';
+import SlideRail from '../components/editor/SlideRail.jsx';
+import PropertiesPanel from '../components/editor/PropertiesPanel.jsx';
+import ShareDeckDialog from '../components/decks/ShareDeckDialog.jsx';
+import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
+import Menu from '../components/ui/Menu.jsx';
+import { AvatarStack } from '../components/ui/Avatar.jsx';
+import { useToast } from '../components/ui/Toast.jsx';
+import '../components/editor/editor.css';
 import './EditorPage.css';
 
-const CURSOR_COLORS = ['#4FA8FF', '#FFB454', '#6EE7B7', '#F472B6', '#A78BFA', '#F87171'];
-const ALIGN_ICONS = { left: '⇤', center: '↔', right: '⇥', justify: '☰' };
-const LINE_HEIGHTS = [1, 1.16, 1.5, 2];
+// Light, earthy tints that read on both the dark chrome and white slides.
+const CURSOR_COLORS = ['#A3D4B2', '#D6C48F', '#8FB8A8', '#C9B79C', '#B5C98A', '#D4A794'];
 // Origin for seeding a brand-new deck — kept out of the undo history.
 const SEED_ORIGIN = 'seed';
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif'];
+const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
+const MIN_ZOOM = 0.25;
+// Formatting Fabric can hold per character (the rest is per text box).
+const CHAR_STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'linethrough', 'fill'];
+// Font families this page has already asked the browser to load.
+const requestedFonts = new Set();
+const MAX_ZOOM = 2;
 
 function colorForUser(id) {
   let hash = 0;
   const s = String(id);
   for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
   return CURSOR_COLORS[hash % CURSOR_COLORS.length];
-}
-
-// Fabric 7 positions objects by their centre by default; blocks are
-// stored by their top-left corner, so every object is pinned to that.
-const BASE_OBJECT_PROPS = { originX: 'left', originY: 'top', strokeWidth: 0 };
-
-function textboxProps(block, scale) {
-  return {
-    ...BASE_OBJECT_PROPS,
-    left: (block.x || 0) * scale,
-    top: (block.y || 0) * scale,
-    width: (block.width || 300) * scale,
-    scaleX: 1,
-    scaleY: 1,
-    fontSize: (block.fontSize || 16) * scale,
-    text: block.text || '',
-    fill: block.fill || DEFAULT_TEXT_COLOR,
-    fontFamily: block.fontFamily || DEFAULT_FONT_FAMILY,
-    fontWeight: block.fontWeight || 'normal',
-    fontStyle: block.fontStyle || 'normal',
-    underline: !!block.underline,
-    textAlign: block.textAlign || 'left',
-    lineHeight: block.lineHeight || DEFAULT_LINE_HEIGHT
-  };
-}
-
-function imageProps(block, img, scale) {
-  const width = (block.width || img.width) * scale;
-  const height = block.height ? block.height * scale : (img.height * width) / img.width;
-  return {
-    ...BASE_OBJECT_PROPS,
-    left: (block.x || 0) * scale,
-    top: (block.y || 0) * scale,
-    scaleX: width / img.width,
-    scaleY: height / img.height
-  };
 }
 
 function formatTime(iso) {
@@ -102,22 +89,37 @@ function isTypingInField() {
   return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
 }
 
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read that image'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => resolve({ dataUrl: reader.result, width: img.naturalWidth, height: img.naturalHeight });
+      img.onerror = () => reject(new Error('That file is not a readable image'));
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function EditorPage() {
   const { deckId } = useParams();
   const navigate = useNavigate();
+  const toast = useToast();
+  const isCompact = useMediaQuery('(max-width: 1099px)');
+  const isMobile = useMediaQuery('(max-width: 767px)');
 
   const [slides, setSlides] = useState([]);
   const [activeSlideIdx, setActiveSlideIdx] = useState(0);
-  const [goLiveError, setGoLiveError] = useState('');
   const [goingLive, setGoingLive] = useState(false);
 
   const [deckMeta, setDeckMeta] = useState(null);
+  const [metaError, setMetaError] = useState('');
   const [titleDraft, setTitleDraft] = useState(null); // non-null while renaming
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteError, setInviteError] = useState('');
-  const [inviteBusy, setInviteBusy] = useState(false);
-  const [showCollaborators, setShowCollaborators] = useState(false);
-  const [showNotes, setShowNotes] = useState(true);
+  const [showShare, setShowShare] = useState(false);
+  const [confirmDeleteIdx, setConfirmDeleteIdx] = useState(null);
+  const [showNotes, setShowNotes] = useState(!isMobile);
   const [peers, setPeers] = useState([]);
 
   // Sync/save state
@@ -125,30 +127,66 @@ function EditorPage() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
   const [saveError, setSaveError] = useState('');
-  const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState(null); // format being exported
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false });
 
   // Toolbar state: ids of the selected blocks on the active slide. Their
   // formatting is read from `slides`, so it always reflects Yjs.
   const [selectedIds, setSelectedIds] = useState([]);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(null); // null = fit the slide to the stage
+  const [fitScale, setFitScale] = useState(1);
+
+  // Panels start open where there is room for them; on smaller screens
+  // they open as overlays on demand.
+  const layout = isMobile ? 'mobile' : isCompact ? 'compact' : 'wide';
+  const [railOpen, setRailOpen] = useState(layout !== 'mobile');
+  const [panelOpen, setPanelOpen] = useState(layout === 'wide');
+  const [lastLayout, setLastLayout] = useState(layout);
+  if (lastLayout !== layout) {
+    setLastLayout(layout);
+    setRailOpen(layout !== 'mobile');
+    setPanelOpen(layout === 'wide');
+    setShowNotes(layout !== 'mobile');
+  }
+  const railOverlay = layout === 'mobile';
+  const panelOverlay = layout !== 'wide';
 
   const canvasElRef = useRef(null);
   const fabricRef = useRef(null);
   const yjsRef = useRef(null);
   const undoRef = useRef(null);
+  const stageRef = useRef(null);
+  const imageInputRef = useRef(null);
   const applyingRemoteRef = useRef(false);
   const renderedSlideIdRef = useRef(null);
   const scaleRef = useRef(1);
+  const relayoutRef = useRef(null); // re-places anchored text after fonts load
+  const writeTextRef = useRef(null); // writes a text object's text and styles to the doc
+  const [fontsReady, setFontsReady] = useState(0);
   const activeSlideIdxRef = useRef(0);
   activeSlideIdxRef.current = activeSlideIdx;
 
   useEffect(() => {
     getDeck(deckId)
       .then(setDeckMeta)
-      .catch(() => {});
+      .catch((err) => setMetaError(err.message || 'This presentation could not be opened'));
   }, [deckId]);
+
+  // Largest zoom at which the whole slide fits the stage.
+  useLayoutEffect(() => {
+    const el = stageRef.current;
+    if (!el) return undefined;
+    const update = () => {
+      const pad = el.clientWidth < 600 ? 24 : 64;
+      const s = Math.min((el.clientWidth - pad) / CANVAS_WIDTH, (el.clientHeight - pad) / CANVAS_HEIGHT);
+      if (s > 0) setFitScale(Math.max(0.1, Math.min(MAX_ZOOM, Math.floor(s * 100) / 100)));
+    };
+    update();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // --- Connect Yjs, hydrate slides, observe remote changes
   useEffect(() => {
@@ -235,24 +273,6 @@ function EditorPage() {
     fabricRef.current = canvas;
     renderedSlideIdRef.current = null;
 
-    // Reads an object's geometry back into slide coordinates. Works for
-    // objects inside a multi-selection too, whose own left/top are
-    // relative to the selection group.
-    function blockGeometry(obj) {
-      const s = scaleRef.current;
-      const rect = obj.getBoundingRect();
-      const scaling = obj.getObjectScaling();
-      const geometry = { x: Math.round(rect.left / s), y: Math.round(rect.top / s) };
-      if (obj.type === 'image') {
-        geometry.width = Math.round(rect.width / s);
-        geometry.height = Math.round(rect.height / s);
-      } else {
-        geometry.width = Math.round((obj.width * scaling.x) / s);
-        geometry.fontSize = Math.max(4, Math.round((obj.fontSize * scaling.y) / s));
-      }
-      return geometry;
-    }
-
     function writeObjects(objects) {
       const doc = yjsRef.current?.doc;
       if (applyingRemoteRef.current || !doc) return;
@@ -263,10 +283,31 @@ function EditorPage() {
         objects.forEach((obj) => {
           const blockMap = byId.get(obj.data?.blockId);
           if (!blockMap) return;
-          Object.entries(blockGeometry(obj)).forEach(([k, v]) => blockMap.set(k, v));
-          if (typeof obj.text === 'string') blockMap.set('text', obj.text);
+          const { tableScale, ...geometry } = blockGeometry(obj, scaleRef.current);
+          if (tableScale && (Math.abs(tableScale.x - 1) > 0.001 || Math.abs(tableScale.y - 1) > 0.001)) {
+            const table = scaledTable(blockMap.get('table'), tableScale.x, tableScale.y);
+            blockMap.set('table', table);
+            geometry.width = Math.round(table.columns.reduce((a, w) => a + w, 0) * 10) / 10;
+          }
+          Object.entries(geometry).forEach(([k, v]) => {
+            if (v === null || v === undefined) blockMap.delete(k);
+            else blockMap.set(k, v);
+          });
+          if (obj.type === 'textbox' && obj.data?.kind !== 'table') writeTextInto(blockMap, obj);
         });
       });
+    }
+
+    // Text and its mixed formatting travel together, so typing into a
+    // bold word keeps it bold for collaborators too.
+    function writeTextInto(blockMap, obj) {
+      if (blockMap.get('text') !== obj.text) blockMap.set('text', obj.text);
+      const styles = stylesOf(obj, scaleRef.current);
+      const before = blockMap.get('styles');
+      if (JSON.stringify(styles) !== JSON.stringify(before ?? null)) {
+        if (styles) blockMap.set('styles', styles);
+        else blockMap.delete('styles');
+      }
     }
 
     function writeText(obj) {
@@ -274,10 +315,25 @@ function EditorPage() {
       if (applyingRemoteRef.current || !doc || !obj?.data?.blockId) return;
       const blocksArr = getSlidesArray(doc).get(activeSlideIdxRef.current)?.get('blocks');
       const blockMap = blocksArr?.toArray().find((m) => m.get('id') === obj.data.blockId);
-      if (blockMap && blockMap.get('text') !== obj.text) {
-        doc.transact(() => blockMap.set('text', obj.text));
-      }
+      if (blockMap) doc.transact(() => writeTextInto(blockMap, obj));
     }
+
+    writeTextRef.current = writeText;
+
+    // Web fonts arrive after first paint; re-measure text once they do so
+    // line breaks match the font actually drawn.
+    const relayout = () => {
+      fabric.cache.clearFontCache();
+      canvas.getObjects().forEach((o) => {
+        if (o.type === 'textbox') {
+          o.initDimensions();
+          o.setCoords();
+        }
+      });
+      relayoutRef.current?.();
+      canvas.requestRenderAll();
+    };
+    document.fonts?.addEventListener?.('loadingdone', relayout);
 
     canvas.on('object:modified', (e) => {
       const target = e.target;
@@ -307,7 +363,10 @@ function EditorPage() {
       yjsRef.current?.awareness.setLocalStateField('cursor', null);
     });
 
-    return () => canvas.dispose();
+    return () => {
+      document.fonts?.removeEventListener?.('loadingdone', relayout);
+      canvas.dispose();
+    };
   }, [deckId]);
 
   // --- Reconcile the active slide's blocks onto the Fabric canvas.
@@ -328,15 +387,20 @@ function EditorPage() {
       setSelectedIds([]);
     }
 
-    canvas.backgroundColor = slide.backgroundColor || DEFAULT_SLIDE_BACKGROUND;
+    canvas.backgroundColor = slideBackgroundFill(slide, DEFAULT_SLIDE_BACKGROUND);
     if (slide.backgroundImageUrl) {
       if (canvas.backgroundImage?.data?.src !== slide.backgroundImageUrl) {
         const slideId = slide.id;
         fabric.FabricImage.fromURL(slide.backgroundImageUrl).then((img) => {
           if (renderedSlideIdRef.current !== slideId) return;
-          img.set({ ...BASE_OBJECT_PROPS, scaleX: CANVAS_WIDTH / img.width, scaleY: CANVAS_HEIGHT / img.height });
-          img.data = { src: slide.backgroundImageUrl };
-          canvas.backgroundImage = img;
+          if (slide.backgroundRepeat) {
+            canvas.backgroundImage = undefined;
+            canvas.backgroundColor = new fabric.Pattern({ source: img.getElement(), repeat: 'repeat' });
+          } else {
+            img.set({ ...BASE_OBJECT_PROPS, scaleX: CANVAS_WIDTH / img.width, scaleY: CANVAS_HEIGHT / img.height });
+            img.data = { src: slide.backgroundImageUrl };
+            canvas.backgroundImage = img;
+          }
           canvas.requestRenderAll();
         }).catch(() => {});
       }
@@ -360,14 +424,22 @@ function EditorPage() {
       const idx = slide.blocks.findIndex((b) => b.id === blockId);
       if (idx >= 0 && canvas.getObjects().indexOf(obj) !== idx) canvas.moveObjectTo(obj, idx);
     };
+    const replace = (oldObj, obj, blockId) => {
+      if (oldObj) canvas.remove(oldObj);
+      canvas.add(obj);
+      placeAt(obj, blockId);
+    };
 
     slide.blocks.forEach((block) => {
       let obj = existing.get(block.id);
+      // Inside a multi-selection, positions are relative to the group;
+      // leave geometry alone until the selection is released.
+      const inGroup = !!obj?.group;
 
       if (block.type === 'image') {
         if (!block.imageUrl) return;
-        if (obj) {
-          if (!obj.group) obj.set(imageProps(block, { width: obj.width, height: obj.height }, scale));
+        if (obj && obj.data?.src === block.imageUrl) {
+          if (!inGroup) placeImage(obj, block, scale);
           obj.setCoords();
           placeAt(obj, block.id);
           return;
@@ -375,53 +447,152 @@ function EditorPage() {
         const slideId = slide.id;
         fabric.FabricImage.fromURL(block.imageUrl, { crossOrigin: 'anonymous' }).then((img) => {
           if (renderedSlideIdRef.current !== slideId) return;
-          img.set(imageProps(block, img, scale));
-          img.data = { blockId: block.id };
+          placeImage(img, block, scale);
+          img.data = { blockId: block.id, src: block.imageUrl };
           applyingRemoteRef.current = true;
-          canvas.add(img);
-          placeAt(img, block.id);
+          replace(canvas.getObjects().find((o) => o.data?.blockId === block.id), img, block.id);
           applyingRemoteRef.current = false;
           canvas.requestRenderAll();
         }).catch(() => {});
         return;
       }
 
+      if (block.type === 'shape') {
+        if (obj && obj.data?.key === shapeKey(block)) {
+          if (!inGroup) updateShape(obj, block, scale);
+          obj.setCoords();
+          placeAt(obj, block.id);
+        } else if (!inGroup) {
+          replace(obj, createShape(block, scale), block.id);
+        }
+        return;
+      }
+
+      if (block.type === 'table') {
+        if (obj && obj.data?.key === tableKey(block)) {
+          if (!inGroup) {
+            obj.set({ scaleX: 1, scaleY: 1, angle: block.rotation || 0 });
+            const w = obj.data.layoutWidth * scale;
+            const h = obj.data.layoutHeight * scale;
+            obj.setPositionByOrigin(new fabric.Point(block.x * scale + w / 2, block.y * scale + h / 2), 'center', 'center');
+          }
+          obj.setCoords();
+          placeAt(obj, block.id);
+        } else if (!inGroup) {
+          replace(obj, createTable(block, scale), block.id);
+        }
+        return;
+      }
+
       const props = textboxProps(block, scale);
       if (obj) {
         // Don't fight the user's own typing: Fabric already holds the
-        // newest text for a block that is being edited right now.
-        if (obj.isEditing) delete props.text;
-        // Inside a multi-selection, left/top are relative to the group;
-        // leave geometry alone until the selection is released.
-        if (obj.group) ['left', 'top', 'width', 'scaleX', 'scaleY'].forEach((k) => delete props[k]);
+        // newest text (and its styles) for a block being edited right now.
+        if (obj.isEditing) {
+          delete props.text;
+          delete props.styles;
+        }
+        if (inGroup) ['left', 'top', 'width', 'scaleX', 'scaleY', 'angle'].forEach((k) => delete props[k]);
         obj.set(props);
+        if (!inGroup) placeText(obj, block, scale);
         obj.setCoords();
       } else {
-        obj = new fabric.Textbox(props.text, { ...props, editable: true, splitByGrapheme: false });
-        obj.data = { blockId: block.id };
+        obj = new SlideTextbox(props.text, { ...props, editable: true, splitByGrapheme: false });
+        obj.data = { blockId: block.id, kind: 'text' };
+        placeText(obj, block, scale);
         canvas.add(obj);
       }
       placeAt(obj, block.id);
     });
 
+    // Once web fonts land, text heights change: re-anchor text boxes.
+    relayoutRef.current = () => {
+      slide.blocks.forEach((block) => {
+        const o = canvas.getObjects().find((x) => x.data?.blockId === block.id);
+        if (o && o.type === 'textbox' && o.data?.kind === 'text' && !o.group) {
+          placeText(o, block, scale);
+          o.setCoords();
+        }
+      });
+    };
+    const families = fontFamiliesOf(slide.blocks).filter((f) => !requestedFonts.has(f));
+    if (families.length && document.fonts?.load) {
+      families.forEach((f) => requestedFonts.add(f));
+      const variants = ['400 16px', '700 16px', 'italic 400 16px', 'italic 700 16px'];
+      Promise.all(families.flatMap((f) => variants.map((v) => document.fonts.load(`${v} "${f}"`).catch(() => null)))).then(() => {
+        if (renderedSlideIdRef.current !== slide.id) return;
+        fabric.cache.clearFontCache();
+        canvas.getObjects().forEach((o) => o.type === 'textbox' && o.initDimensions());
+        // Tables measured with fallback fonts are rebuilt.
+        canvas.getObjects().forEach((o) => {
+          if (o.data?.kind === 'table') o.data.key = 'stale';
+        });
+        relayoutRef.current?.();
+        canvas.requestRenderAll();
+        setFontsReady((n) => n + 1);
+      });
+    }
+
     canvas.requestRenderAll();
     applyingRemoteRef.current = false;
-  }, [slides, activeSlideIdx]);
+  }, [slides, activeSlideIdx, fontsReady]);
 
   const activeSlide = slides[activeSlideIdx];
   const selectedBlocks = (activeSlide?.blocks || []).filter((b) => selectedIds.includes(b.id));
-  const selectedText = selectedBlocks.filter((b) => b.type !== 'image');
+  const selectedText = selectedBlocks.filter((b) => (b.type || 'textbox') === 'textbox');
   const primary = selectedText[0];
-  const hasSelection = selectedBlocks.length > 0;
-  const hasTextSelection = selectedText.length > 0;
 
   // --- Toolbar actions ---
 
+  // Text formatting: applies to the characters selected while editing a
+  // text box, otherwise to every selected text box as a whole.
   const formatSelected = useCallback((patch) => {
     const doc = yjsRef.current?.doc;
-    if (!doc || selectedIds.length === 0) return;
-    updateBlocks(doc, activeSlideIdx, selectedIds, patch);
-  }, [selectedIds, activeSlideIdx]);
+    if (!doc) return;
+    const canvas = fabricRef.current;
+    const active = canvas?.getActiveObject();
+    const charLevel = Object.keys(patch).every((k) => CHAR_STYLE_KEYS.includes(k));
+    if (active?.type === 'textbox' && active.isEditing && charLevel && active.selectionStart !== active.selectionEnd) {
+      const s = scaleRef.current;
+      active.setSelectionStyles(patch.fontSize ? { ...patch, fontSize: patch.fontSize * s } : patch);
+      active.initDimensions();
+      canvas.requestRenderAll();
+      writeTextRef.current?.(active);
+      return;
+    }
+    const ids = selectedText.map((b) => b.id);
+    if (ids.length) formatBlocks(doc, activeSlideIdx, ids, patch);
+  }, [selectedText, activeSlideIdx]);
+
+  function handleShapeStyle(patch) {
+    const doc = yjsRef.current?.doc;
+    const ids = selectedBlocks.filter((b) => b.type === 'shape').map((b) => b.id);
+    if (doc && ids.length) updateBlocks(doc, activeSlideIdx, ids, patch);
+  }
+
+  // Edits one table cell's text. Mixed formatting that no longer fits
+  // the new text is trimmed rather than shifted.
+  function handleCellText(r, c, text) {
+    const doc = yjsRef.current?.doc;
+    const block = selectedBlocks.find((b) => b.type === 'table');
+    if (!doc || !block?.table) return;
+    const rows = block.table.rows.map((row, ri) => ({
+      ...row,
+      cells: row.cells.map((cell, ci) => {
+        if (ri !== r || ci !== c) return cell;
+        const len = Array.from(text.replace(/\n/g, '')).length;
+        const styles = (cell.styles || [])
+          .map((st) => ({ ...st, end: Math.min(st.end, len) }))
+          .filter((st) => st.start < st.end);
+        const next = { ...cell, text };
+        if (styles.length) next.styles = styles;
+        else delete next.styles;
+        return next;
+      })
+    }));
+    const plain = rows.map((row) => row.cells.filter((cell) => !cell.covered).map((cell) => cell.text).join('\t')).join('\n');
+    updateBlocks(doc, activeSlideIdx, [block.id], { table: { ...block.table, rows }, text: plain });
+  }
 
   function toggleFormat(key, onValue, offValue) {
     if (!primary) return;
@@ -441,11 +612,6 @@ function EditorPage() {
       fontSize: 18,
       text: 'New text'
     });
-  }
-
-  function handleFontSizeChange(e) {
-    const size = parseInt(e.target.value, 10);
-    if (size >= 8 && size <= 200) formatSelected({ fontSize: size });
   }
 
   const handleDeleteSelected = useCallback(() => {
@@ -469,7 +635,7 @@ function EditorPage() {
   }
 
   function handleZoom(delta) {
-    setZoom((z) => Math.round(Math.max(0.5, Math.min(2, z + delta)) * 10) / 10);
+    setZoom((z) => Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, (z ?? fitScale) + delta)) * 10) / 10);
   }
 
   const handleUndo = useCallback(() => {
@@ -495,7 +661,7 @@ function EditorPage() {
     }
   }, [deckId]);
 
-  // --- Slide ops ---
+  // --- Slide ops (by index, so the rail can act on any slide) ---
   function handleAddSlide() {
     const doc = yjsRef.current?.doc;
     if (!doc) return;
@@ -504,30 +670,36 @@ function EditorPage() {
     setActiveSlideIdx(at);
   }
 
-  function handleDuplicateSlide() {
+  function handleDuplicateSlide(idx) {
     const doc = yjsRef.current?.doc;
     if (!doc) return;
-    setActiveSlideIdx(duplicateSlide(doc, activeSlideIdx));
+    setActiveSlideIdx(duplicateSlide(doc, idx));
   }
 
-  function handleMoveSlide(delta) {
+  function handleMoveSlide(idx, delta) {
     const doc = yjsRef.current?.doc;
     if (!doc) return;
-    setActiveSlideIdx(moveSlide(doc, activeSlideIdx, delta));
+    setActiveSlideIdx(moveSlide(doc, idx, delta));
   }
 
-  function handleDeleteSlide() {
+  function confirmDeleteSlide() {
     const doc = yjsRef.current?.doc;
-    if (!doc || slides.length <= 1) return;
-    if (!window.confirm(`Delete slide ${activeSlideIdx + 1}?`)) return;
-    deleteSlide(doc, activeSlideIdx);
-    setActiveSlideIdx((prev) => Math.max(0, prev - 1));
+    const idx = confirmDeleteIdx;
+    setConfirmDeleteIdx(null);
+    if (!doc || idx === null || slides.length <= 1) return;
+    deleteSlide(doc, idx);
+    setActiveSlideIdx((prev) => (prev > idx ? prev - 1 : prev));
+  }
+
+  function handleSelectSlide(idx) {
+    setActiveSlideIdx(idx);
+    if (railOverlay) setRailOpen(false);
   }
 
   function handleSlideBackground(color) {
     const doc = yjsRef.current?.doc;
     if (!doc) return;
-    updateSlide(doc, activeSlideIdx, { backgroundColor: color });
+    updateSlide(doc, activeSlideIdx, { backgroundColor: color, backgroundGradient: null });
   }
 
   function handleNotesChange(e) {
@@ -536,14 +708,46 @@ function EditorPage() {
     updateSlide(doc, activeSlideIdx, { notes: e.target.value });
   }
 
+  async function handleInsertImage(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const doc = yjsRef.current?.doc;
+    if (!file || !doc) return;
+    if (!IMAGE_TYPES.includes(file.type)) {
+      toast.error('Choose a PNG, JPEG or GIF image.');
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast.error('Images can be up to 1.5 MB. Try a smaller or compressed version.');
+      return;
+    }
+    try {
+      const { dataUrl, width, height } = await readImageFile(file);
+      const fit = Math.min(1, 640 / width, 360 / height);
+      const w = Math.max(1, Math.round(width * fit));
+      const h = Math.max(1, Math.round(height * fit));
+      addBlock(doc, activeSlideIdxRef.current, {
+        id: newId('b'),
+        type: 'image',
+        x: Math.round((CANVAS_WIDTH - w) / 2),
+        y: Math.round((CANVAS_HEIGHT - h) / 2),
+        width: w,
+        height: h,
+        fontSize: 16,
+        text: '',
+        imageUrl: dataUrl
+      });
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
   async function handleExport(format) {
-    setShowExport(false);
     setExporting(format);
-    setSaveError('');
     try {
       await downloadDeckExport(deckId, format);
     } catch (err) {
-      setSaveError(err.message || 'Could not export the deck');
+      toast.error(err.message || 'Could not export the presentation');
     } finally {
       setExporting(null);
     }
@@ -556,7 +760,7 @@ function EditorPage() {
     try {
       setDeckMeta(await renameDeck(deckId, title));
     } catch (err) {
-      setSaveError(err.message || 'Could not rename the deck');
+      toast.error(err.message || 'Could not rename the presentation');
     }
   }
 
@@ -594,7 +798,6 @@ function EditorPage() {
 
   async function handleGoLive() {
     if (goingLive) return;
-    setGoLiveError('');
     setGoingLive(true);
     try {
       // Make sure the presenter sees the very latest edits.
@@ -602,360 +805,283 @@ function EditorPage() {
       const data = await goLive(deckId);
       navigate(`/presenter/${data.code}`, { state: { deckId, roomId: data.roomId } });
     } catch (err) {
-      setGoLiveError(err.message || 'Could not start the session');
+      toast.error(err.message || 'Could not start the session');
       setGoingLive(false);
     }
   }
 
-  async function handleInvite(e) {
-    e.preventDefault();
-    if (!inviteEmail.trim()) return;
-    setInviteBusy(true);
-    setInviteError('');
-    try {
-      const updated = await addCollaborator(deckId, inviteEmail.trim());
-      setDeckMeta(updated);
-      setInviteEmail('');
-    } catch (err) {
-      setInviteError(err.message || 'Could not add that collaborator');
-    } finally {
-      setInviteBusy(false);
-    }
-  }
-
-  async function handleRemoveCollaborator(userId) {
-    try {
-      const updated = await removeCollaborator(deckId, userId);
-      setDeckMeta(updated);
-    } catch (err) {
-      setInviteError(err.message || 'Could not remove that collaborator');
-    }
-  }
-
   const peersOnThisSlide = peers.filter((p) => p.activeSlideIdx === activeSlideIdx && p.cursor);
+  const scale = zoom ?? fitScale;
 
-  let saveLabel;
-  if (syncStatus === 'offline') saveLabel = 'Offline · reconnecting';
-  else if (syncStatus === 'connecting') saveLabel = 'Connecting…';
-  else if (saving) saveLabel = 'Saving…';
-  else if (savedAt) saveLabel = `Saved ${formatTime(savedAt)}`;
-  else saveLabel = 'Autosave on';
+  let status;
+  if (syncStatus === 'offline') status = { tone: 'warn', icon: CloudOff, label: 'Offline', detail: 'Reconnecting. Your edits sync when the connection is back.' };
+  else if (syncStatus === 'connecting') status = { tone: 'muted', icon: null, label: 'Connecting…', detail: 'Connecting to the collaboration server' };
+  else if (saving) status = { tone: 'muted', icon: null, label: 'Saving…', detail: 'Saving a snapshot' };
+  else if (saveError) status = { tone: 'error', icon: AlertCircle, label: 'Save failed', detail: saveError };
+  else if (savedAt) status = { tone: 'ok', icon: Check, label: `Saved ${formatTime(savedAt)}`, detail: 'Edits also sync live to everyone in this presentation' };
+  else status = { tone: 'ok', icon: Check, label: 'Synced', detail: 'Edits sync live and are saved automatically' };
+  const StatusIcon = status.icon;
+
+  const exportItems = Object.entries(EXPORT_FORMATS).map(([format, { label }]) => ({
+    label, icon: Download, onSelect: () => handleExport(format), disabled: !!exporting
+  }));
+  const insertItems = [
+    { label: 'Text box', icon: Type, onSelect: handleAddTextBlock, disabled: !activeSlide },
+    { label: 'Image…', icon: ImagePlus, onSelect: () => imageInputRef.current?.click(), disabled: !activeSlide },
+    'separator',
+    { label: 'New slide', icon: Plus, onSelect: handleAddSlide, disabled: syncStatus === 'connecting' && slides.length === 0 }
+  ];
+  const loading = syncStatus === 'connecting' && slides.length === 0;
+  const peerPeople = peers.map((p) => ({ id: p.clientId, name: p.name, color: p.color }));
 
   return (
-    <div className="editor-page">
-      <header className="editor-topbar">
-        <div className="editor-topbar-left">
-          <button className="btn btn-ghost" onClick={() => navigate('/decks')}>← Decks</button>
-          {titleDraft !== null ? (
-            <input
-              className="editor-title-input"
-              aria-label="Deck title"
-              value={titleDraft}
-              autoFocus
-              maxLength={200}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={commitTitle}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur();
-                if (e.key === 'Escape') setTitleDraft(null);
-              }}
-            />
-          ) : (
-            <button
-              className="editor-deck-title"
-              title="Rename deck"
-              onClick={() => setTitleDraft(deckMeta?.title || '')}
-            >
-              {deckMeta?.title || 'Untitled deck'}
-            </button>
-          )}
-          <span className={`editor-save-status mono status-${syncStatus}`} role="status">{saveLabel}</span>
-        </div>
-
-        <div className="presence-bar">
-          {peers.map((p) => (
-            <span key={p.clientId} className="presence-dot" style={{ background: p.color }} title={p.name}>
-              {p.name?.[0]?.toUpperCase() || '?'}
+    <div
+      className={`editor${railOpen ? ' rail-open' : ''}${panelOpen ? ' panel-open' : ''}${railOverlay ? ' rail-overlay' : ''}${panelOverlay ? ' panel-overlay' : ''}`}
+    >
+      <header className="ed-top">
+        <div className="ed-top-left">
+          <Link to="/decks" className="icon-btn" aria-label="Back to dashboard" data-tip="Dashboard">
+            <ArrowLeft />
+          </Link>
+          <div className="ed-title-wrap">
+            {titleDraft !== null ? (
+              <input
+                className="input ed-title-input"
+                aria-label="Presentation title"
+                value={titleDraft}
+                autoFocus
+                maxLength={200}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur();
+                  if (e.key === 'Escape') setTitleDraft(null);
+                }}
+              />
+            ) : (
+              <button
+                type="button"
+                className="ed-title"
+                aria-label={`Rename presentation, currently ${deckMeta?.title || 'Untitled presentation'}`}
+                onClick={() => setTitleDraft(deckMeta?.title || '')}
+                disabled={!deckMeta}
+              >
+                {deckMeta?.title || (metaError ? 'Unavailable' : 'Loading…')}
+              </button>
+            )}
+            <span className={`ed-status is-${status.tone}`} role="status" title={status.detail}>
+              {StatusIcon ? <StatusIcon aria-hidden="true" /> : <span className="spinner" aria-hidden="true" />}
+              <span className="ed-status-label">{status.label}</span>
             </span>
-          ))}
-          {peers.length > 0 && <span className="presence-label mono">{peers.length} editing</span>}
+          </div>
         </div>
 
-        {saveError && <span className="editor-golive-error">{saveError}</span>}
-        {goLiveError && <span className="editor-golive-error">{goLiveError}</span>}
-        <button className="btn btn-ghost" onClick={handleSave} disabled={saving} title="Save now (Ctrl+S)">
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-        <div className="export-menu">
+        <div className="ed-top-tools" role="toolbar" aria-label="Editor tools">
           <button
-            className="btn btn-ghost"
-            onClick={() => setShowExport((v) => !v)}
-            disabled={!!exporting}
-            aria-haspopup="menu"
-            aria-expanded={showExport}
+            type="button"
+            className="icon-btn"
+            aria-label={railOpen ? 'Hide slides' : 'Show slides'}
+            aria-pressed={railOpen}
+            data-tip="Slides"
+            onClick={() => setRailOpen((o) => !o)}
           >
-            {exporting ? 'Exporting…' : 'Export ▾'}
+            <PanelLeft />
           </button>
-          {showExport && (
-            <div className="export-menu-list" role="menu">
-              {Object.entries(EXPORT_FORMATS).map(([format, { label }]) => (
-                <button key={format} role="menuitem" className="export-menu-item" onClick={() => handleExport(format)}>
-                  {label}
-                </button>
-              ))}
+          <span className="ed-sep" aria-hidden="true" />
+          <button type="button" className="icon-btn" aria-label="Undo" data-tip="Undo (Ctrl+Z)" onClick={handleUndo} disabled={!undoState.canUndo}>
+            <Undo2 />
+          </button>
+          <button type="button" className="icon-btn" aria-label="Redo" data-tip="Redo (Ctrl+Shift+Z)" onClick={handleRedo} disabled={!undoState.canRedo}>
+            <Redo2 />
+          </button>
+          <span className="ed-sep" aria-hidden="true" />
+          <Menu label="Insert" icon={Plus} text="Insert" items={insertItems} align="start" triggerClassName="btn btn-ghost btn-sm" />
+          <input ref={imageInputRef} type="file" accept={IMAGE_TYPES.join(',')} hidden onChange={handleInsertImage} />
+
+          <span className="ed-tools-spacer" />
+
+          {peerPeople.length > 0 && (
+            <div className="ed-presence" title={peers.map((p) => p.name).join(', ')}>
+              <AvatarStack people={peerPeople} max={3} size={26} />
+              <span className="ed-presence-label">{peers.length} editing</span>
             </div>
           )}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowShare(true)} disabled={!deckMeta}>
+            <Users aria-hidden="true" /><span className="ed-hide-sm">Share</span>
+          </button>
+          <Menu
+            label={exporting ? 'Exporting…' : 'Export'}
+            icon={exporting ? ChevronDown : Download}
+            text={exporting ? 'Exporting…' : 'Export'}
+            items={exportItems}
+            triggerClassName="btn btn-ghost btn-sm ed-export"
+          />
+          <button type="button" className="btn btn-ghost btn-sm ed-save" onClick={handleSave} disabled={saving} title="Save a snapshot now (Ctrl+S)">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <span className="ed-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={panelOpen ? 'Hide formatting panel' : 'Show formatting panel'}
+            aria-pressed={panelOpen}
+            data-tip="Format"
+            onClick={() => setPanelOpen((o) => !o)}
+          >
+            <PanelRight />
+            {!panelOpen && selectedIds.length > 0 && <span className="ed-dot" aria-hidden="true" />}
+          </button>
         </div>
-        <button className="btn btn-ghost" onClick={() => setShowCollaborators((v) => !v)}>Collaborators</button>
-        <button className="btn btn-amber" onClick={handleGoLive} disabled={goingLive}>
-          {goingLive ? 'Starting…' : 'Go Live'}
-        </button>
+
+        <div className="ed-top-right">
+          <button type="button" className="btn btn-primary btn-sm ed-present" onClick={handleGoLive} disabled={goingLive || !deckMeta || slides.length === 0}>
+            {goingLive ? <span className="spinner" aria-hidden="true" /> : <Play aria-hidden="true" />}
+            {goingLive ? 'Starting…' : 'Present'}
+          </button>
+        </div>
       </header>
 
-      <div className="desktop-banner">
-        💻 For the best editing experience, use a desktop browser.
-      </div>
-
-      {showCollaborators && (
-        <div className="collaborators-panel">
-          <div className="collaborators-list">
-            {deckMeta?.owner && (
-              <span className="collaborator-chip owner-chip">
-                {deckMeta.owner.name || deckMeta.owner.email} · Owner
-              </span>
-            )}
-            {deckMeta?.collaborators?.map((c) => (
-              <span key={c.id} className="collaborator-chip">
-                {c.name || c.email}
-                {deckMeta.isOwner && (
-                  <button className="collaborator-remove" title="Remove" onClick={() => handleRemoveCollaborator(c.id)}>×</button>
-                )}
-              </span>
-            ))}
-          </div>
-          {deckMeta?.isOwner ? (
-            <form className="invite-form" onSubmit={handleInvite}>
-              <input className="invite-input" type="email" placeholder="Invite by email…" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
-              <button className="btn btn-solid" type="submit" disabled={inviteBusy}>{inviteBusy ? 'Adding…' : 'Invite'}</button>
-            </form>
-          ) : (
-            <p className="invite-hint mono">Only the deck owner can invite collaborators.</p>
-          )}
-          {inviteError && <p className="invite-error">{inviteError}</p>}
-        </div>
-      )}
-
-      {/* ── Toolbar ── */}
-      <div className="editor-toolbar">
-        <div className="toolbar-group">
-          <button className="toolbar-btn" onClick={handleUndo} title="Undo (Ctrl+Z)" disabled={!undoState.canUndo}>↶</button>
-          <button className="toolbar-btn" onClick={handleRedo} title="Redo (Ctrl+Shift+Z)" disabled={!undoState.canRedo}>↷</button>
-          <span className="toolbar-divider" />
-          <button className="toolbar-btn" onClick={handleAddTextBlock} title="Add text block">
-            <span className="toolbar-icon">T+</span>
-          </button>
-          <span className="toolbar-divider" />
-        </div>
-
-        <div className="toolbar-group">
-          <select
-            className="toolbar-select"
-            aria-label="Font"
-            title="Font"
-            value={primary?.fontFamily || DEFAULT_FONT_FAMILY}
-            onChange={(e) => formatSelected({ fontFamily: e.target.value })}
-            disabled={!hasTextSelection}
-          >
-            {FONT_FAMILIES.map((f) => (
-              <option key={f.value} value={f.value}>{f.label}</option>
-            ))}
-          </select>
-          <label className="toolbar-label mono" title="Font size">
-            <input
-              className="toolbar-font-input mono"
-              type="number"
-              aria-label="Font size"
-              min={8}
-              max={200}
-              value={primary ? Math.round(primary.fontSize) : ''}
-              onChange={handleFontSizeChange}
-              disabled={!hasTextSelection}
-              placeholder="--"
-            />
-            <span>px</span>
-          </label>
-          <span className="toolbar-divider" />
-        </div>
-
-        <div className="toolbar-group">
-          <button className={`toolbar-btn ${primary?.fontWeight === 'bold' ? 'active' : ''}`} onClick={() => toggleFormat('fontWeight', 'bold', 'normal')} title="Bold" disabled={!hasTextSelection}>
-            <strong>B</strong>
-          </button>
-          <button className={`toolbar-btn ${primary?.fontStyle === 'italic' ? 'active' : ''}`} onClick={() => toggleFormat('fontStyle', 'italic', 'normal')} title="Italic" disabled={!hasTextSelection}>
-            <em>I</em>
-          </button>
-          <button className={`toolbar-btn ${primary?.underline ? 'active' : ''}`} onClick={() => toggleFormat('underline', true, false)} title="Underline" disabled={!hasTextSelection}>
-            <span style={{ textDecoration: 'underline' }}>U</span>
-          </button>
-          <span className="toolbar-divider" />
-        </div>
-
-        <div className="toolbar-group">
-          {TEXT_ALIGNMENTS.map((align) => (
-            <button
-              key={align}
-              className={`toolbar-btn ${(primary?.textAlign || 'left') === align && hasTextSelection ? 'active' : ''}`}
-              onClick={() => formatSelected({ textAlign: align })}
-              title={`Align ${align}`}
-              disabled={!hasTextSelection}
-            >
-              {ALIGN_ICONS[align]}
-            </button>
-          ))}
-          <select
-            className="toolbar-select toolbar-select-narrow"
-            aria-label="Line spacing"
-            title="Line spacing"
-            value={primary?.lineHeight || DEFAULT_LINE_HEIGHT}
-            onChange={(e) => formatSelected({ lineHeight: Number(e.target.value) })}
-            disabled={!hasTextSelection}
-          >
-            {LINE_HEIGHTS.map((lh) => (
-              <option key={lh} value={lh}>{lh === DEFAULT_LINE_HEIGHT ? '1.15' : lh.toFixed(1)}×</option>
-            ))}
-          </select>
-          <span className="toolbar-divider" />
-        </div>
-
-        <div className="toolbar-group toolbar-colors">
-          {TEXT_COLORS.map((c) => (
-            <button
-              key={c}
-              className={`color-swatch ${(primary?.fill || DEFAULT_TEXT_COLOR) === c && hasTextSelection ? 'active' : ''}`}
-              style={{ background: c, border: c === '#ffffff' ? '1px solid var(--hairline)' : 'none' }}
-              onClick={() => formatSelected({ fill: c })}
-              title={c}
-              disabled={!hasTextSelection}
-            />
-          ))}
-          <input
-            type="color"
-            className="toolbar-color-input"
-            aria-label="Custom text colour"
-            title="Custom text colour"
-            value={primary?.fill || DEFAULT_TEXT_COLOR}
-            onChange={(e) => formatSelected({ fill: e.target.value })}
-            disabled={!hasTextSelection}
+      <div className="ed-body">
+        {(railOverlay && railOpen) || (panelOverlay && panelOpen) ? (
+          <div
+            className="ed-scrim"
+            aria-hidden="true"
+            onClick={() => {
+              if (railOverlay) setRailOpen(false);
+              if (panelOverlay) setPanelOpen(false);
+            }}
           />
-          <span className="toolbar-divider" />
-        </div>
+        ) : null}
 
-        <div className="toolbar-group">
-          <button className="toolbar-btn" onClick={() => handleRestack('front')} title="Bring to front" disabled={selectedIds.length !== 1}>⤒</button>
-          <button className="toolbar-btn" onClick={() => handleRestack('forward')} title="Bring forward" disabled={selectedIds.length !== 1}>↑</button>
-          <button className="toolbar-btn" onClick={() => handleRestack('backward')} title="Send backward" disabled={selectedIds.length !== 1}>↓</button>
-          <button className="toolbar-btn" onClick={() => handleRestack('back')} title="Send to back" disabled={selectedIds.length !== 1}>⤓</button>
-          <button className="toolbar-btn" onClick={handleDuplicateSelected} title="Duplicate (Ctrl+D)" disabled={!hasSelection}>⧉</button>
-          <button className="toolbar-btn toolbar-btn-danger" onClick={handleDeleteSelected} title="Delete selected (Del)" disabled={!hasSelection}>🗑</button>
-          <span className="toolbar-divider" />
-        </div>
-
-        <div className="toolbar-group toolbar-colors" title="Slide background">
-          <span className="toolbar-label mono">Slide</span>
-          {SLIDE_BACKGROUNDS.map((c) => (
-            <button
-              key={c}
-              className={`color-swatch color-swatch-square ${(activeSlide?.backgroundColor || DEFAULT_SLIDE_BACKGROUND) === c ? 'active' : ''}`}
-              style={{ background: c, border: '1px solid var(--hairline)' }}
-              onClick={() => handleSlideBackground(c)}
-              title={`Slide background ${c}`}
-              disabled={!activeSlide}
-            />
-          ))}
-          <input
-            type="color"
-            className="toolbar-color-input"
-            aria-label="Custom slide background"
-            title="Custom slide background"
-            value={activeSlide?.backgroundColor || DEFAULT_SLIDE_BACKGROUND}
-            onChange={(e) => handleSlideBackground(e.target.value)}
-            disabled={!activeSlide}
+        <aside className="ed-rail" aria-label="Slides" hidden={!railOpen}>
+          <SlideRail
+            slides={slides}
+            activeIdx={activeSlideIdx}
+            peers={peers}
+            onSelect={handleSelectSlide}
+            onAdd={handleAddSlide}
+            onDuplicate={handleDuplicateSlide}
+            onMove={handleMoveSlide}
+            onDelete={(i) => setConfirmDeleteIdx(i)}
           />
-        </div>
-
-        <div className="toolbar-group toolbar-right">
-          <button className="toolbar-btn" onClick={() => handleZoom(-0.1)} title="Zoom out">−</button>
-          <span className="toolbar-zoom mono">{Math.round(zoom * 100)}%</span>
-          <button className="toolbar-btn" onClick={() => handleZoom(0.1)} title="Zoom in">+</button>
-        </div>
-      </div>
-
-      <div className="editor-body">
-        <aside className="slide-rail">
-          <div className="slide-rail-list">
-            {slides.map((s, i) => (
-              <button
-                key={s.id}
-                className={`slide-thumb ${i === activeSlideIdx ? 'active' : ''}`}
-                onClick={() => setActiveSlideIdx(i)}
-              >
-                <span className="slide-num mono">{i + 1}</span>
-                <span className="slide-thumb-label">
-                  {s.blocks?.find((b) => b.text)?.text?.split('\n')[0]?.slice(0, 20) || `Slide ${i + 1}`}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="slide-rail-actions">
-            <button className="btn btn-ghost slide-action-btn" onClick={handleAddSlide}>+ Add slide</button>
-            <button className="btn btn-ghost slide-action-btn" onClick={handleDuplicateSlide} disabled={!activeSlide}>Duplicate</button>
-            <div className="slide-move-row">
-              <button className="btn btn-ghost slide-action-btn" onClick={() => handleMoveSlide(-1)} disabled={activeSlideIdx === 0} title="Move slide up">↑ Up</button>
-              <button className="btn btn-ghost slide-action-btn" onClick={() => handleMoveSlide(1)} disabled={activeSlideIdx >= slides.length - 1} title="Move slide down">↓ Down</button>
-            </div>
-            {slides.length > 1 && (
-              <button className="btn btn-ghost slide-action-btn slide-delete-btn" onClick={handleDeleteSlide}>Delete slide</button>
-            )}
-          </div>
         </aside>
 
-        <main className="canvas-area">
-          <div
-            className="canvas-wrapper"
-            style={{ transform: `scale(${zoom})`, transformOrigin: 'center top' }}
-          >
-            <div className="canvas-page" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}>
-              <canvas ref={canvasElRef} />
-              {peersOnThisSlide.map((p) => (
-                <div key={p.clientId} className="peer-cursor" style={{ left: p.cursor.x, top: p.cursor.y, color: p.color }}>
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill={p.color}>
-                    <path d="M1 1 L1 14 L5 10.5 L7.5 15 L9.5 14 L7 9.5 L13 9.5 Z" />
-                  </svg>
-                  <span className="peer-cursor-label" style={{ background: p.color }}>{p.name}</span>
-                </div>
-              ))}
+        <main className="ed-center" id="main">
+          <div className="ed-stage" ref={stageRef}>
+            <div className="canvas-frame" style={{ width: CANVAS_WIDTH * scale, height: CANVAS_HEIGHT * scale }}>
+              <div className="canvas-page" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, transform: `scale(${scale})` }}>
+                <canvas ref={canvasElRef} aria-label={`Slide ${activeSlideIdx + 1} canvas`} />
+                {peersOnThisSlide.map((p) => (
+                  <div key={p.clientId} className="peer-cursor" style={{ left: p.cursor.x, top: p.cursor.y }}>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill={p.color} aria-hidden="true">
+                      <path d="M1 1 L1 14 L5 10.5 L7.5 15 L9.5 14 L7 9.5 L13 9.5 Z" />
+                    </svg>
+                    <span className="peer-cursor-label" style={{ background: p.color }}>{p.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {(loading || metaError) && (
+              <div className="ed-stage-state" role={metaError ? 'alert' : 'status'}>
+                {metaError ? (
+                  <>
+                    <AlertCircle aria-hidden="true" className="is-error" />
+                    <h1>This presentation could not be opened</h1>
+                    <p>{metaError}</p>
+                    <Link to="/decks" className="btn btn-secondary">Back to dashboard</Link>
+                  </>
+                ) : (
+                  <>
+                    <span className="spinner" aria-hidden="true" />
+                    <p>Loading presentation…</p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="ed-stagebar">
+            <span className="ed-slide-pos mono">
+              Slide {slides.length ? activeSlideIdx + 1 : 0} of {slides.length}
+            </span>
+            <button
+              type="button"
+              className="btn btn-quiet btn-sm ed-notes-toggle"
+              aria-expanded={showNotes}
+              aria-controls="speaker-notes"
+              onClick={() => setShowNotes((v) => !v)}
+            >
+              <StickyNote aria-hidden="true" />Notes
+            </button>
+            <div className="ed-zoom" role="group" aria-label="Zoom">
+              <button type="button" className="icon-btn icon-btn-sm" aria-label="Zoom out" onClick={() => handleZoom(-0.1)} disabled={scale <= MIN_ZOOM}>
+                <Minus />
+              </button>
+              <span className="ed-zoom-val mono" aria-live="polite">{Math.round(scale * 100)}%</span>
+              <button type="button" className="icon-btn icon-btn-sm" aria-label="Zoom in" onClick={() => handleZoom(0.1)} disabled={scale >= MAX_ZOOM}>
+                <Plus />
+              </button>
+              <button type="button" className="btn btn-quiet btn-sm" aria-pressed={zoom === null} onClick={() => setZoom(null)}>
+                <Maximize aria-hidden="true" />Fit
+              </button>
             </div>
           </div>
-          <p className="canvas-hint mono">
-            Slide {activeSlideIdx + 1} of {slides.length} · drag to move · double-click to edit · Ctrl+S saves
-          </p>
-          <section className="notes-panel" style={{ width: CANVAS_WIDTH }}>
-            <button className="notes-toggle mono" onClick={() => setShowNotes((v) => !v)}>
-              {showNotes ? '▾' : '▸'} Speaker notes
-            </button>
-            {showNotes && (
+
+          {showNotes && (
+            <section className="ed-notes" id="speaker-notes">
+              <label htmlFor="notes-input" className="ed-notes-label">Speaker notes</label>
               <textarea
-                className="notes-input"
-                aria-label="Speaker notes"
-                placeholder="Notes for this slide — only you and co-editors see these, viewers never do."
+                id="notes-input"
+                className="textarea ed-notes-input"
+                placeholder="Notes for this slide. Only editors see these; the audience never does."
                 value={activeSlide?.notes || ''}
                 onChange={handleNotesChange}
                 disabled={!activeSlide}
               />
-            )}
-          </section>
+            </section>
+          )}
         </main>
+
+        <aside className="ed-panel" aria-label="Formatting" hidden={!panelOpen}>
+          <PropertiesPanel
+            slide={activeSlide}
+            slideIndex={activeSlideIdx}
+            selectedBlocks={selectedBlocks}
+            primary={primary}
+            onFormat={formatSelected}
+            onToggle={toggleFormat}
+            onRestack={handleRestack}
+            onDuplicate={handleDuplicateSelected}
+            onDelete={handleDeleteSelected}
+            onBackground={handleSlideBackground}
+            onShapeStyle={handleShapeStyle}
+            onCellText={handleCellText}
+            onClose={panelOverlay ? () => setPanelOpen(false) : undefined}
+          />
+        </aside>
       </div>
+
+      {showShare && deckMeta && (
+        <ShareDeckDialog
+          deckId={deckId}
+          deckTitle={deckMeta.title}
+          initialMeta={deckMeta}
+          onChanged={setDeckMeta}
+          onClose={() => setShowShare(false)}
+        />
+      )}
+
+      {confirmDeleteIdx !== null && (
+        <ConfirmDialog
+          title={`Delete slide ${confirmDeleteIdx + 1}?`}
+          message="The slide and its speaker notes are removed for everyone editing. You can bring it back with Undo."
+          confirmLabel="Delete slide"
+          destructive
+          onConfirm={confirmDeleteSlide}
+          onCancel={() => setConfirmDeleteIdx(null)}
+        />
+      )}
     </div>
   );
 }

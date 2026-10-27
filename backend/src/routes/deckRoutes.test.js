@@ -430,7 +430,7 @@ describe('POST /api/decks/import', () => {
   it('rejects a file that is neither PDF nor PPTX with a 400', async () => {
     const res = await upload(form('notes.txt', 'text/plain'));
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Only PDF (.pdf) and PowerPoint (.pptx) files can be imported');
+    expect(res.body.error).toBe('Only Word (.docx), PowerPoint (.pptx) and PDF (.pdf) files can be imported');
     expect(extractSlidesFromPdf).not.toHaveBeenCalled();
     expect(extractSlidesFromPptx).not.toHaveBeenCalled();
   });
@@ -528,5 +528,20 @@ describe('GET /api/decks/:deckId/export', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/pdf');
     expect(Deck.findById).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST /api/decks/import (Word)', () => {
+  it('creates a deck straight from a .docx using the suggested outline', async () => {
+    const { buildDocx, p } = await import('../test/buildDocx.js');
+    Deck.create.mockImplementation(async (doc) => ({ _id: DECK_ID, ...doc }));
+    const buf = await buildDocx([p('Report', 'Title'), p('Findings', 'Heading1'), p('It works.')].join(''));
+    const form = new FormData();
+    form.append('file', new Blob([buf]), 'Report.docx');
+
+    const res = await server.request('POST', '/api/decks/import', { token: tokenFor(OWNER_ID), body: form });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ title: 'Report', format: 'docx', slideCount: 2 });
   });
 });

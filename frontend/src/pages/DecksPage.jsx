@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Upload, Search, FileText, Presentation, ArrowRight, RefreshCw, X } from 'lucide-react';
+import { Plus, Search, FileText, Presentation, ArrowRight, RefreshCw, X } from 'lucide-react';
 import AppShell from '../components/layout/AppShell.jsx';
 import DeckCard from '../components/decks/DeckCard.jsx';
 import RenameDeckDialog from '../components/decks/RenameDeckDialog.jsx';
 import ShareDeckDialog from '../components/decks/ShareDeckDialog.jsx';
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
+import ImportDialog from '../components/imports/ImportDialog.jsx';
+import ImportRow from '../components/imports/ImportRow.jsx';
 import SessionHistoryModal from '../components/SessionHistoryModal.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
-import { listDecks, createDeck, importDeckFile, deleteDeck, duplicateDeck, IMPORT_ACCEPT } from '../data/decksApi.js';
+import { listDecks, createDeck, deleteDeck, duplicateDeck } from '../data/decksApi.js';
+import { listImports } from '../data/importsApi.js';
 import { getCurrentUser } from '../data/apiConfig.js';
 import { greetingFor, plural } from '../data/format.js';
 import './DecksPage.css';
@@ -34,6 +37,7 @@ const FILTERS = [
 
 const RECENT_LIMIT = 8;
 const SHARED_PREVIEW_LIMIT = 4;
+const IMPORTS_PREVIEW_LIMIT = 3;
 
 function normalise(d) {
   return { ...d, id: String(d.id || d._id) };
@@ -61,39 +65,40 @@ function SkeletonGrid() {
   );
 }
 
-function Onboarding({ onCreate, onImport, importing }) {
+function Onboarding({ onCreate, onImport }) {
   return (
     <section className="onboarding card" aria-labelledby="onboarding-title">
       <div className="onboarding-copy">
         <span className="eyebrow"><span className="dot" />Getting started</span>
         <h2 id="onboarding-title">Create your first presentation</h2>
-        <p>Start from a blank canvas, or bring in slides you already have. Everything you make here can be co-edited live and presented to an audience.</p>
+        <p>Start from a blank canvas, or bring in content you already have. Everything you make here can be co-edited live and presented to an audience.</p>
       </div>
       <div className="onboarding-actions">
         <button type="button" className="onboarding-option" onClick={onCreate}>
           <span className="onboarding-icon is-primary"><Plus aria-hidden="true" /></span>
           <span className="onboarding-text">
-            <strong>Start from scratch</strong>
+            <strong>Create from scratch</strong>
             <span>A blank 16:9 presentation, ready to edit.</span>
           </span>
           <ArrowRight className="onboarding-arrow" aria-hidden="true" />
         </button>
-        <button type="button" className="onboarding-option" onClick={onImport} disabled={importing}>
+        <button type="button" className="onboarding-option" onClick={() => onImport('docx')}>
+          <span className="onboarding-icon"><FileText aria-hidden="true" /></span>
+          <span className="onboarding-text">
+            <strong>Import a Word document</strong>
+            <span>Headings become slides. Review the outline first.</span>
+          </span>
+          <ArrowRight className="onboarding-arrow" aria-hidden="true" />
+        </button>
+        <button type="button" className="onboarding-option" onClick={() => onImport('pptx')}>
           <span className="onboarding-icon"><Presentation aria-hidden="true" /></span>
           <span className="onboarding-text">
             <strong>Import a PowerPoint</strong>
-            <span>.pptx text, pictures, backgrounds and speaker notes.</span>
+            <span>Keep your slides, or use them as source material.</span>
           </span>
           <ArrowRight className="onboarding-arrow" aria-hidden="true" />
         </button>
-        <button type="button" className="onboarding-option" onClick={onImport} disabled={importing}>
-          <span className="onboarding-icon"><FileText aria-hidden="true" /></span>
-          <span className="onboarding-text">
-            <strong>Import a PDF</strong>
-            <span>Each page becomes an editable slide.</span>
-          </span>
-          <ArrowRight className="onboarding-arrow" aria-hidden="true" />
-        </button>
+        <p className="field-hint onboarding-foot">PDF files can be imported too.</p>
       </div>
     </section>
   );
@@ -102,7 +107,6 @@ function Onboarding({ onCreate, onImport, importing }) {
 function DecksPage({ view = 'home' }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const fileInputRef = useRef(null);
   const user = getCurrentUser();
   const viewInfo = VIEWS[view] || VIEWS.home;
 
@@ -110,7 +114,8 @@ function DecksPage({ view = 'home' }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [creating, setCreating] = useState(false);
-  const [importingName, setImportingName] = useState('');
+  const [importKind, setImportKind] = useState(null);
+  const [imports, setImports] = useState([]);
   const [busyId, setBusyId] = useState(null);
 
   const [query, setQuery] = useState('');
@@ -123,6 +128,12 @@ function DecksPage({ view = 'home' }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => { refreshDecks(); }, []);
+
+  // Recent imports are a secondary list; a failure here shouldn't block the page.
+  useEffect(() => {
+    if (view !== 'home') return;
+    listImports().then(setImports).catch(() => setImports([]));
+  }, [view]);
 
   async function refreshDecks() {
     setLoading(true);
@@ -145,22 +156,6 @@ function DecksPage({ view = 'home' }) {
     } catch (err) {
       toast.error(err.message || 'Could not create a presentation');
       setCreating(false);
-    }
-  }
-
-  function handleImportClick() { fileInputRef.current?.click(); }
-
-  async function handleFileSelected(e) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setImportingName(file.name);
-    try {
-      const deck = await importDeckFile(file);
-      navigate(`/editor/${deck.id || deck._id}`);
-    } catch (err) {
-      toast.error(err.message || 'Could not import that file');
-      setImportingName('');
     }
   }
 
@@ -239,22 +234,17 @@ function DecksPage({ view = 'home' }) {
             <p className="dash-sub">{viewInfo.subtitle}</p>
           </div>
           <div className="dash-actions">
-            <input ref={fileInputRef} type="file" accept={IMPORT_ACCEPT} onChange={handleFileSelected} hidden />
-            <button type="button" className="btn btn-secondary" onClick={handleImportClick} disabled={!!importingName}>
-              <Upload /> Import PowerPoint or PDF
+            <button type="button" className="btn btn-secondary" onClick={() => setImportKind('docx')}>
+              <FileText /> Import Word document
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setImportKind('pptx')}>
+              <Presentation /> Import PowerPoint
             </button>
             <button type="button" className="btn btn-primary" onClick={handleCreate} disabled={creating}>
               <Plus /> {creating ? 'Creating…' : 'Create presentation'}
             </button>
           </div>
         </header>
-
-        {importingName && (
-          <div className="import-banner" role="status">
-            <span className="spinner" aria-hidden="true" />
-            <span>Importing <strong>{importingName}</strong>… extracting slides, text and images.</span>
-          </div>
-        )}
 
         {loadError && (
           <div className="alert alert-error dash-alert" role="alert">
@@ -264,7 +254,7 @@ function DecksPage({ view = 'home' }) {
         )}
 
         {isEmptyAccount && view === 'home' ? (
-          <Onboarding onCreate={handleCreate} onImport={handleImportClick} importing={!!importingName} />
+          <Onboarding onCreate={handleCreate} onImport={setImportKind} />
         ) : (
           <>
             {!loadError && (
@@ -321,6 +311,17 @@ function DecksPage({ view = 'home' }) {
                   </div>
                   <DeckGrid decks={recent} cardProps={cardProps} busyId={busyId} />
                 </section>
+                {imports.length > 0 && (
+                  <section className="dash-section" aria-labelledby="imports-title">
+                    <div className="dash-section-head">
+                      <h2 id="imports-title">Recently imported</h2>
+                      <Link to="/documents" className="dash-link">All documents <ArrowRight /></Link>
+                    </div>
+                    <ul className="import-list">
+                      {imports.slice(0, IMPORTS_PREVIEW_LIMIT).map((item) => <ImportRow key={item.id} item={item} />)}
+                    </ul>
+                  </section>
+                )}
                 {sharedPreview.length > 0 && (
                   <section className="dash-section" aria-labelledby="shared-title">
                     <div className="dash-section-head">
@@ -352,7 +353,7 @@ function DecksPage({ view = 'home' }) {
                 ) : (
                   <>
                     <h2>No presentations here yet</h2>
-                    <p>Create one from scratch or import a PowerPoint or PDF.</p>
+                    <p>Create one from scratch or import a Word, PowerPoint or PDF file.</p>
                     <button type="button" className="btn btn-primary" onClick={handleCreate}><Plus /> Create presentation</button>
                   </>
                 )}
@@ -362,6 +363,7 @@ function DecksPage({ view = 'home' }) {
         )}
       </div>
 
+      {importKind && <ImportDialog kind={importKind} onClose={() => setImportKind(null)} />}
       {renameTarget && (
         <RenameDeckDialog
           deckId={renameTarget.id}

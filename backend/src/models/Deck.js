@@ -10,7 +10,7 @@ const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const blockSchema = new mongoose.Schema(
   {
     id: { type: String, required: true },
-    type: { type: String, enum: ['textbox', 'image'], default: 'textbox' },
+    type: { type: String, enum: ['textbox', 'image', 'shape', 'table'], default: 'textbox' },
     x: { type: Number, required: true },
     y: { type: Number, required: true },
     width: { type: Number, required: true },
@@ -22,11 +22,41 @@ const blockSchema = new mongoose.Schema(
     fontWeight: { type: String, enum: ['normal', 'bold'] },
     fontStyle: { type: String, enum: ['normal', 'italic'] },
     underline: { type: Boolean },
+    linethrough: { type: Boolean },
     fill: { type: String, match: HEX_COLOR },
     textAlign: { type: String, enum: ['left', 'center', 'right', 'justify'] },
     lineHeight: { type: Number, min: 0.5, max: 4 },
-    // Image blocks only: rendered height on the 960×540 canvas.
+    paragraphSpacing: { type: Number, min: 0 }, // extra px between paragraphs
+    // Mixed formatting inside one text box: the ranges that differ from
+    // the block's own formatting, in Fabric.js's serialised form
+    // ([{ start, end, style }], indices not counting line breaks).
+    styles: { type: mongoose.Schema.Types.Mixed },
+    // Rendered height on the 960×540 canvas. Images, shapes and tables
+    // always have one; a text box has one when its text is anchored to
+    // the middle or bottom of a fixed-height area (verticalAlign).
     height: { type: Number },
+    verticalAlign: { type: String, enum: ['top', 'middle', 'bottom'] },
+    rotation: { type: Number }, // degrees clockwise, about the block's centre
+    flipH: { type: Boolean },
+    flipV: { type: Boolean },
+    // What the block is on its slide: the slide title (names the slide in
+    // lists), a subtitle, decoration from the source's master/layout, or
+    // a placeholder for content that couldn't be imported (charts…).
+    role: { type: String, enum: ['title', 'subtitle', 'decor', 'placeholder'] },
+    // Shape blocks: outline geometry and paint. `path` is SVG path data
+    // in a 0–1000 box stretched over the block.
+    shape: { type: String, enum: ['rect', 'roundRect', 'ellipse', 'line', 'path'] },
+    path: { type: String },
+    radius: { type: Number, min: 0 },
+    background: { type: String, match: HEX_COLOR },
+    fillGradient: { type: mongoose.Schema.Types.Mixed }, // { angle, stops: [{ pos, color }] }
+    opacity: { type: Number, min: 0, max: 1 },
+    stroke: { type: String, match: HEX_COLOR },
+    strokeWidth: { type: Number, min: 0 },
+    dash: { type: Boolean },
+    // Table blocks: { columns: [width], rows: [{ height, cells: [cell] }] },
+    // each cell carrying its own text, formatting, fill, borders and merges.
+    table: { type: mongoose.Schema.Types.Mixed },
     // Only set when a slide/region falls back to a flattened image
     // because it didn't extract cleanly (tables, complex layouts).
     imageUrl: { type: String }
@@ -40,6 +70,8 @@ const slideSchema = new mongoose.Schema(
     order: { type: Number, required: true },
     backgroundImageUrl: { type: String }, // fallback flattened background, if any
     backgroundColor: { type: String, match: HEX_COLOR },
+    backgroundGradient: { type: mongoose.Schema.Types.Mixed }, // { angle, stops: [{ pos, color }] }
+    backgroundRepeat: { type: Boolean }, // tile backgroundImageUrl instead of stretching it
     notes: { type: String, default: '' }, // speaker notes, never shown to viewers
     needsImageFallback: { type: Boolean, default: false }, // true until a fallback image is rendered
     blocks: { type: [blockSchema], default: [] }

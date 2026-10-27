@@ -1,0 +1,29 @@
+/* ── Connection pill ── */
+.conn-pill {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 4px 9px; border-radius: 99px; border: 1px solid var(--border-subtle);
+  font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap;
+  background: rgba(242, 244, 240, 0.05); color: var(--text-secondary);
+}
+.conn-pill svg { width: 13px; height: 13px; }
+.conn-pill .spinner { width: 11px; height: 11px; }
+.conn-pill.is-live { background: var(--crimson-tint); color: var(--color-crimson-light); border-color: rgba(240, 161, 173, 0.25); }
+.conn-pill.is-live .live-dot { width: 7px; height: 7px; }
+.conn-pill.is-warn { background: var(--warning-tint); color: var(--warning); border-color: rgba(228, 182, 106, 0.25); }
+
+/* ── Invite dialog ── */
+.invite { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; align-items: start; }
+.invite-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.invite-qr .qr { border-radius: 10px; display: block; }
+.invite-details { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.invite-row { display: flex; gap: 8px; align-items: center; }
+.invite-code {
+  flex: 1; font-size: 30px; font-weight: 600; letter-spacing: 0.16em; color: var(--text-primary);
+}
+.invite-link { flex: 1; min-width: 0; font-size: 13px; }
+@media (max-width: 560px) {
+  .invite { grid-template-columns: 1fr; }
+  .invite-qr .qr { width: 168px; height: 168px; }
+  .invite-row { flex-wrap: wrap; }
+  .invite-row .btn { flex: 1; }
+}
