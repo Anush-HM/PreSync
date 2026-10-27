@@ -74,11 +74,38 @@ function tableBullets(rows) {
 function blockPlainText(b) {
   if (b.type === 'list') return b.items.map((i) => `${'  '.repeat(i.level)}- ${i.text}`).join('\n');
   if (b.type === 'table') return b.rows.map((r) => r.join(' | ')).join('\n');
-  if (b.type === 'image') return '';
-  return b.text;
+  if (b.type === 'image' || b.type === 'pageBreak') return '';
+  return b.text || '';
 }
 
-// Splits a section's points across as many slides as it needs.
+const MAX_TABLE_ROWS_PER_SLIDE = 10;
+
+// Splits a long table into row ranges, never cutting through a merged
+// (row-spanning) cell. Returns [{ tableId, tableRows: [start, end) }].
+function tableChunks(block) {
+  const rows = block.table.rows || [];
+  const out = [];
+  let start = 0;
+  while (start < rows.length) {
+    let end = Math.min(rows.length, start + MAX_TABLE_ROWS_PER_SLIDE);
+    if (end < rows.length) {
+      // Pull the cut back above any cell that spans across it.
+      let cut = end;
+      for (let r = start; r < end; r += 1) {
+        rows[r].cells.forEach((c) => {
+          if (!c.covered && r + (c.rowspan || 1) > cut && r > start) cut = Math.min(cut, r);
+        });
+      }
+      end = cut > start ? cut : end;
+    }
+    out.push({ tableId: block.id, tableRows: [start, end] });
+    start = end;
+  }
+  return out;
+}
+
+// Splits a section's points across as many slides as it needs. Each
+// table (or part of a long table) gets a slide of its own.
 function sectionToOutline(section, nextId) {
   const items = [];
   const points = section.points.length ? section.points : [];
@@ -94,6 +121,25 @@ function sectionToOutline(section, nextId) {
       bullets,
       notes: i === 0 ? notes : '',
       imageId: i === 0 ? section.images[0] || null : null,
+      tableId: null,
+      tableRows: null,
+      source: section.source
+    });
+  });
+  section.tables.forEach((t, i) => {
+    const empty = i === 0 && items.length === 1 && !items[0].bullets.length && !items[0].imageId;
+    if (empty) {
+      Object.assign(items[0], t);
+      return;
+    }
+    items.push({
+      id: nextId(),
+      layout: 'content',
+      title: section.title,
+      bullets: [],
+      notes: '',
+      imageId: null,
+      ...t,
       source: section.source
     });
   });
@@ -120,14 +166,14 @@ export function analyzeDocx(parsed, fileName) {
   let underSubheading = false;
   let unheadedCount = 0;
   const startSection = (sectionTitle, source) => {
-    current = { title: sectionTitle, points: [], notes: [], images: [], subtopics: [], tables: 0, source };
+    current = { title: sectionTitle, points: [], notes: [], images: [], subtopics: [], tables: [], source };
     sections.push(current);
     underSubheading = false;
     unheadedCount = 0;
   };
 
   blocks.forEach((b, index) => {
-    if (b.type === 'title' || b.type === 'subtitle' || b === titleHeading) return;
+    if (b.type === 'pageBreak' || b.type === 'title' || b.type === 'subtitle' || b === titleHeading) return;
     if (b.type === 'heading' && splitLevel !== null && b.level <= splitLevel) {
       startSection(b.text, { heading: b.text, level: b.level, blockIndex: index });
       return;
@@ -157,9 +203,11 @@ export function analyzeDocx(parsed, fileName) {
         current.notes.push(blockPlainText(b));
         break;
       case 'table':
-        tableBullets(b.rows).forEach((p) => current.points.push({ ...p, level: Math.min(p.level + base, 2) }));
+        // Structured tables get a slide of their own; older parses without
+        // the structure fall back to text bullets.
+        if (b.table && b.id) current.tables.push(...tableChunks(b));
+        else tableBullets(b.rows).forEach((p) => current.points.push({ ...p, level: Math.min(p.level + base, 2) }));
         current.notes.push(blockPlainText(b));
-        current.tables += 1;
         break;
       case 'image':
         current.images.push(b.imageId);
@@ -200,9 +248,10 @@ export function analyzeDocx(parsed, fileName) {
   const tables = blocks.filter((b) => b.type === 'table').length;
   const words = meta.words || blocks.reduce((sum, b) => sum + wordCount(blockPlainText(b)), 0);
 
+  const flatTables = blocks.filter((b) => b.type === 'table' && !(b.table && b.id)).length;
   const warnings = [];
+  if (flatTables) warnings.push(`${flatTables} table${flatTables === 1 ? ' was' : 's were'} converted to text bullets.`);
   if (splitLevel === null) warnings.push('No headings were found, so slides were split every few paragraphs. Review the outline before generating.');
-  if (tables) warnings.push(`${tables} table${tables === 1 ? ' was' : 's were'} converted to text bullets; PreSync slides do not support tables yet.`);
   if (found.unsupportedImages) warnings.push(`${found.unsupportedImages} picture${found.unsupportedImages === 1 ? ' is' : 's are'} in a format PreSync cannot show (only PNG, JPEG and GIF are imported).`);
   if (found.skippedImages) warnings.push(`${found.skippedImages} picture${found.skippedImages === 1 ? ' was' : 's were'} skipped for size (1.5 MB each, 8 MB per document).`);
   if (found.charts) warnings.push('Charts are not imported.');
@@ -212,7 +261,7 @@ export function analyzeDocx(parsed, fileName) {
   if (found.footnotes) warnings.push('Footnotes and endnotes are not imported.');
   if (found.comments) warnings.push('Comments are not imported.');
   if (found.trackedChanges) warnings.push('The document has tracked changes; they were read as if accepted.');
-  if (found.headersFooters) warnings.push('Headers and footers are not imported.');
+  if (found.headersFooters) warnings.push('Headers and footers appear in the document preview but are not added to slides.');
 
   return {
     analysis: {
@@ -235,7 +284,7 @@ export function analyzeDocx(parsed, fileName) {
         title: s.title,
         subtopics: s.subtopics,
         points: s.points.length,
-        tables: s.tables,
+        tables: s.tables.length,
         images: s.images.length,
         blockIndex: s.source.blockIndex
       })),
@@ -248,12 +297,34 @@ export function analyzeDocx(parsed, fileName) {
 
 // --- PPTX / PDF -------------------------------------------------------------
 
-function slideTitleFromBlocks(slide) {
-  const text = (slide.blocks || []).filter((b) => b.type !== 'image' && b.text?.trim());
+// Text blocks that carry the slide's own content (not decoration from a
+// master, or a placeholder standing in for a chart).
+function contentTextBlocks(slide) {
+  return (slide.blocks || []).filter(
+    (b) => (b.type || 'textbox') === 'textbox' && b.text?.trim() && b.role !== 'decor' && b.role !== 'placeholder'
+  );
+}
+
+function largestFontSize(block) {
+  const sizes = Array.isArray(block.styles) ? block.styles.map((r) => r.style?.fontSize || 0) : [];
+  return Math.max(block.fontSize || 0, ...sizes);
+}
+
+export function slideTitleFromBlocks(slide) {
+  const text = contentTextBlocks(slide);
   if (text.length === 0) return null;
-  // Largest text, then the highest on the slide.
-  const best = [...text].sort((a, b) => (b.fontSize || 0) - (a.fontSize || 0) || (a.y || 0) - (b.y || 0))[0];
+  // The block the source marked as the title, else the largest text,
+  // then the highest on the slide.
+  const best =
+    text.find((b) => b.role === 'title') ||
+    [...text].sort((a, b) => largestFontSize(b) - largestFontSize(a) || (a.y || 0) - (b.y || 0))[0];
   return { block: best, text: firstWords(best.text.split('\n')[0], 120) };
+}
+
+function tableLines(block) {
+  return (block.table?.rows || []).map((row) =>
+    row.cells.filter((c) => !c.covered && c.text?.trim()).map((c) => c.text.replace(/\s+/g, ' ').trim()).join(' · ')
+  );
 }
 
 // details: optional per-slide { title, tables, charts, smartArt, media, ... }
@@ -266,13 +337,16 @@ export function analyzeSlides(slides, { kind, fileName, coreTitle = null, detail
     const title = d.title || guess?.text || null;
     const titleBlockId = d.title ? null : guess?.block.id;
     const bodyLines = (slide.blocks || [])
-      .filter((b) => b.type !== 'image' && b.text?.trim() && b.id !== titleBlockId && b.text.trim() !== d.title)
-      .flatMap((b) => b.text.split('\n'))
-      .map((t) => t.replace(/^[\s•\-–*]+/, '').trim())
+      .filter((b) => b.role !== 'decor' && b.role !== 'placeholder' && b.id !== titleBlockId)
+      .flatMap((b) => {
+        if (b.type === 'table') return tableLines(b);
+        if ((b.type || 'textbox') !== 'textbox' || !b.text?.trim() || b.text.trim() === d.title) return [];
+        return b.text.split('\n');
+      })
+      .map((t) => t.replace(/^[\s\u00a0•▪➢✓■●◆\-–*]+/, '').replace(/^\d+[.)]\s+/, '').trim())
       .filter(Boolean);
     const images = (slide.blocks || []).filter((b) => b.type === 'image').length;
     const notSupported = [];
-    if (d.tables) notSupported.push(`${d.tables} table${d.tables === 1 ? '' : 's'}`);
     if (d.charts) notSupported.push(`${d.charts} chart${d.charts === 1 ? '' : 's'}`);
     if (d.smartArt) notSupported.push('SmartArt');
     if (d.media) notSupported.push('audio/video');
@@ -281,7 +355,7 @@ export function analyzeSlides(slides, { kind, fileName, coreTitle = null, detail
       index: i,
       title,
       bodyLines,
-      textBlocks: (slide.blocks || []).filter((b) => b.type !== 'image').length,
+      textBlocks: contentTextBlocks(slide).length,
       images,
       hasNotes: !!slide.notes?.trim(),
       empty: (slide.blocks || []).length === 0,
@@ -312,9 +386,8 @@ export function analyzeSlides(slides, { kind, fileName, coreTitle = null, detail
   }
   const withGaps = slideInfo.filter((s) => s.notSupported.length);
   if (withGaps.length) {
-    warnings.push(`Some content is not imported: ${withGaps.map((s) => `slide ${s.index + 1} (${s.notSupported.join(', ')})`).join('; ')}.`);
+    warnings.push(`Some content is shown as a placeholder or left out: ${withGaps.map((s) => `slide ${s.index + 1} (${s.notSupported.join(', ')})`).join('; ')}.`);
   }
-  if (kind === 'pdf') warnings.push('PDF import keeps text only. Pictures, drawings and page backgrounds are not extracted.');
 
   const titled = slideInfo.filter((s) => s.title);
   return {
@@ -351,7 +424,7 @@ const MAX_TEXT = 1000;
 
 // Checks an outline sent back by the client after the user edited it.
 // Returns a cleaned copy, or throws with a message for a 400.
-export function sanitizeOutline(outline, imageIds = new Set()) {
+export function sanitizeOutline(outline, imageIds = new Set(), tableIds = new Set()) {
   if (!Array.isArray(outline) || outline.length === 0) throw new Error('outline must be a non-empty array');
   if (outline.length > MAX_OUTLINE_ITEMS) throw new Error(`outline can have at most ${MAX_OUTLINE_ITEMS} slides`);
   return outline.map((item, i) => {
@@ -371,9 +444,86 @@ export function sanitizeOutline(outline, imageIds = new Set()) {
         }))
         .filter((b) => b.text),
       notes: typeof item.notes === 'string' ? item.notes.slice(0, MAX_NOTES_CHARS * 2) : '',
-      imageId: typeof item.imageId === 'string' && imageIds.has(item.imageId) ? item.imageId : null
+      imageId: typeof item.imageId === 'string' && imageIds.has(item.imageId) ? item.imageId : null,
+      ...sanitizeTableRef(item, tableIds)
     };
   });
+}
+
+function sanitizeTableRef(item, tableIds) {
+  if (typeof item.tableId !== 'string' || !tableIds.has(item.tableId)) return { tableId: null, tableRows: null };
+  const r = item.tableRows;
+  const ok = Array.isArray(r) && r.length === 2 && r.every((n) => Number.isInteger(n) && n >= 0) && r[1] > r[0];
+  return { tableId: item.tableId, tableRows: ok ? [r[0], r[1]] : null };
+}
+
+// Ids of the structured tables in a parsed Word document.
+export function tableIdsOf(blocks = []) {
+  return new Set(blocks.filter((b) => b.type === 'table' && b.table && b.id).map((b) => b.id));
+}
+
+const round1 = (v) => Math.round(v * 10) / 10;
+
+// Rough height of a cell's text at its width, for sizing a table that
+// came from a flowing Word page (where rows grow to fit their text).
+function cellTextHeight(cell, width) {
+  const size = cell.fontSize || 14.7;
+  const usable = Math.max(10, width - (cell.padding?.[1] ?? 7) - (cell.padding?.[3] ?? 7));
+  const charsPerLine = Math.max(1, Math.floor(usable / (size * 0.5)));
+  const lines = String(cell.text || '')
+    .split('\n')
+    .reduce((n, para) => n + Math.max(1, Math.ceil(para.length / charsPerLine)), 0);
+  return lines * size * 1.13 * (cell.lineHeight || 1.16) + (cell.padding?.[0] ?? 4) + (cell.padding?.[2] ?? 4);
+}
+
+function scaleCell(cell, k) {
+  if (cell.covered) return cell;
+  const out = { ...cell };
+  if (out.fontSize) out.fontSize = round1(out.fontSize * k);
+  if (Array.isArray(out.styles)) {
+    out.styles = out.styles.map((r) => (r.style?.fontSize ? { ...r, style: { ...r.style, fontSize: round1(r.style.fontSize * k) } } : r));
+  }
+  if (out.padding) out.padding = out.padding.map((v) => round1(v * k));
+  return out;
+}
+
+// A Word table (or a row range of it) as a slide table block, scaled to
+// fit `box` while keeping its column proportions, fonts, shading and
+// borders. Rows before the range that every chunk shares (the header
+// row) are repeated on continuation slides.
+export function tableSlideBlock(block, rowsRange, box) {
+  const all = block.table.rows;
+  const [start, end] = rowsRange || [0, all.length];
+  const headerRepeat = start > 0 && all[0].cells.every((c) => c.covered || (c.rowspan || 1) === 1) ? [all[0]] : [];
+  const rows = [...headerRepeat, ...all.slice(start, end)];
+  const columns = block.table.columns;
+  const tableW = columns.reduce((a, w) => a + w, 0) || 1;
+  const colX = [0];
+  columns.forEach((w, i) => colX.push(colX[i] + w));
+  const heights = rows.map((r) =>
+    Math.max(
+      r.height || 0,
+      ...r.cells.map((c, ci) => (c.covered || (c.rowspan || 1) > 1 ? 0 : cellTextHeight(c, colX[Math.min(columns.length, ci + (c.colspan || 1))] - colX[ci])))
+    )
+  );
+  const tableH = heights.reduce((a, h) => a + h, 0) || 1;
+  const k = Math.min(box.width / tableW, box.height / tableH, 1.6);
+  const table = {
+    columns: columns.map((w) => round1(w * k)),
+    rows: rows.map((r, i) => ({ ...r, height: round1(heights[i] * k), cells: r.cells.map((c) => scaleCell(c, k)) }))
+  };
+  const width = round1(tableW * k);
+  const height = round1(tableH * k);
+  return {
+    type: 'table',
+    x: round1(box.x + (box.width - width) / 2),
+    y: box.y,
+    width,
+    height,
+    fontSize: 16,
+    text: rows.map((r) => r.cells.filter((c) => !c.covered).map((c) => c.text).join('\t')).join('\n'),
+    table
+  };
 }
 
 function fitImage(image, box) {
@@ -387,8 +537,9 @@ function fitImage(image, box) {
 
 // Builds Deck slides from a (sanitized) outline. Images are looked up by
 // id in `images` ([{ id, dataUrl, widthPx, heightPx }]).
-export function outlineToSlides(outline, images = []) {
+export function outlineToSlides(outline, images = [], docBlocks = []) {
   const imageById = new Map(images.map((img) => [img.id, img]));
+  const tableById = new Map(docBlocks.filter((d) => d.type === 'table' && d.table && d.id).map((d) => [d.id, d]));
   return outline.map((item, i) => {
     const slideId = `slide-${i + 1}`;
     let b = 0;
@@ -396,13 +547,15 @@ export function outlineToSlides(outline, images = []) {
     const blocks = [];
 
     if (item.layout === 'title') {
-      blocks.push({ id: id(), type: 'textbox', x: 80, y: 180, width: 800, fontSize: 44, fontWeight: 'bold', textAlign: 'center', fill: '#171a19', text: item.title || 'Untitled' });
+      blocks.push({ id: id(), type: 'textbox', role: 'title', x: 80, y: 180, width: 800, fontSize: 44, fontWeight: 'bold', textAlign: 'center', fill: '#171a19', text: item.title || 'Untitled' });
       if (item.subtitle) {
         blocks.push({ id: id(), type: 'textbox', x: 120, y: 300, width: 720, fontSize: 22, textAlign: 'center', fill: MUTED_TEXT_COLOR, text: item.subtitle });
       }
     } else {
       const image = item.imageId && imageById.get(item.imageId);
-      blocks.push({ id: id(), type: 'textbox', x: 60, y: 44, width: 840, fontSize: 32, fontWeight: 'bold', fill: '#171a19', text: item.title || `Slide ${i + 1}` });
+      const table = item.tableId && tableById.get(item.tableId);
+      const side = image || table;
+      blocks.push({ id: id(), type: 'textbox', role: 'title', x: 60, y: 44, width: 840, fontSize: 32, fontWeight: 'bold', fill: '#171a19', text: item.title || `Slide ${i + 1}` });
       if (item.bullets.length) {
         const dense = item.bullets.length > 5 || item.bullets.some((p) => p.text.length > 110);
         blocks.push({
@@ -410,14 +563,21 @@ export function outlineToSlides(outline, images = []) {
           type: 'textbox',
           x: 60,
           y: 124,
-          width: image ? 500 : 840,
+          width: side ? (table ? 300 : 500) : 840,
           fontSize: dense ? 18 : 22,
           lineHeight: 1.35,
           fill: BODY_TEXT_COLOR,
-          text: item.bullets.map((p) => `${'    '.repeat(p.level)}${p.level === 0 ? '•' : '–'} ${p.text}`).join('\n')
+          // A non-breaking space after the marker lets the slide hang
+          // wrapped lines under the text instead of under the bullet.
+          text: item.bullets.map((p) => `${'\u00a0\u00a0\u00a0\u00a0'.repeat(p.level)}${p.level === 0 ? '•' : '–'}\u00a0${p.text}`).join('\n')
         });
       }
-      if (image) {
+      if (table) {
+        const box = item.bullets.length
+          ? { x: 380, y: 124, width: 540, height: CANVAS_H - 164 }
+          : { x: 60, y: 124, width: 840, height: CANVAS_H - 164 };
+        blocks.push({ id: id(), ...tableSlideBlock(table, item.tableRows, box) });
+      } else if (image) {
         const box = item.bullets.length
           ? { x: 590, y: 124, width: 320, height: 360 }
           : { x: 180, y: 124, width: 600, height: CANVAS_H - 164 };

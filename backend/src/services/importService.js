@@ -49,15 +49,27 @@ export async function extractImport(file, format) {
     if (format === 'docx') {
       const parsed = await parseDocx(file.buffer);
       const { analysis, outline } = analyzeDocx(parsed, fileName);
-      return { format, title: analysis.title, analysis, outline, blocks: parsed.blocks, images: parsed.images, slides: [] };
+      return {
+        format,
+        title: analysis.title,
+        analysis,
+        outline,
+        blocks: parsed.blocks,
+        images: parsed.images,
+        page: parsed.meta.page || null,
+        header: parsed.header || [],
+        footer: parsed.footer || [],
+        slides: []
+      };
     }
     if (format === 'pptx') {
       const { slides, analysis, outline } = await analyzePptx(file.buffer, fileName);
       return { format, title: analysis.title, analysis, outline, blocks: [], images: [], slides };
     }
-    const slides = await extractSlidesFromPdf(file.buffer);
+    const report = {};
+    const slides = await extractSlidesFromPdf(file.buffer, report);
     if (slides.length === 0) throw new Error('The PDF has no pages');
-    const { analysis, outline } = analyzeSlides(slides, { kind: 'pdf', fileName });
+    const { analysis, outline } = analyzeSlides(slides, { kind: 'pdf', fileName, packageWarnings: report.warnings });
     return { format, title: analysis.title, analysis, outline, blocks: [], images: [], slides };
   } catch (err) {
     throw new ImportParseError(`Could not read this ${FORMAT_LABELS[format]}: ${err.message}`);

@@ -56,6 +56,27 @@ describe('SlideRail', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete slide' })).toBeDisabled();
   });
 
+  // Test H: the sidebar lists each slide's own title, in order, and falls
+  // back to "Slide N" for slides without one; the list scrolls on its own.
+  it('labels slides with their real titles, falling back to the slide number', () => {
+    const titled = (id, title, body) => ({
+      id,
+      notes: '',
+      blocks: [
+        { id: `${id}-d`, type: 'textbox', role: 'decor', x: 0, y: 0, width: 200, fontSize: 40, text: 'Company' },
+        ...(title ? [{ id: `${id}-t`, type: 'textbox', role: 'title', x: 10, y: 10, width: 600, fontSize: 32, text: title }] : []),
+        { id: `${id}-b`, type: 'textbox', x: 10, y: 100, width: 600, fontSize: 18, text: body }
+      ]
+    });
+    const slides = [titled('a', null, 'Cover text'), titled('b', 'Table of Contents', '1. Introduction'), titled('c', 'Introduction', 'Body')];
+    setup({ slides, activeIdx: 0 });
+    expect(screen.getByRole('button', { name: /^Slide 1$/ })).toBeInTheDocument();
+    expect([...document.querySelectorAll('.rail-title')].map((e) => e.textContent)).toEqual(['Slide 1', 'Table of Contents', 'Introduction']);
+    expect(screen.getByRole('button', { name: /^Slide 2: Table of Contents/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Slide 3: Introduction/ })).toBeInTheDocument();
+    expect(document.querySelector('.rail-list')).toBeInTheDocument();
+  });
+
   it('names collaborators viewing a slide', () => {
     setup({ peers: [{ clientId: 7, name: 'Ada', color: '#A3D4B2', activeSlideIdx: 0 }] });
     expect(screen.getByRole('button', { name: 'Slide 1, Ada here' })).toBeInTheDocument();

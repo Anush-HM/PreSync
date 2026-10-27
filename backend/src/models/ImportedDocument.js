@@ -17,6 +17,11 @@ const importedDocumentSchema = new mongoose.Schema(
     outline: { type: [mongoose.Schema.Types.Mixed], default: [] },
     // Word: ordered content blocks for the document preview.
     blocks: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    // Word: page size and margins in px ({ width, height, margins }), and
+    // the default header and footer paragraphs, for a paginated preview.
+    page: { type: mongoose.Schema.Types.Mixed, default: null },
+    header: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    footer: { type: [mongoose.Schema.Types.Mixed], default: [] },
     // Word: extracted pictures ({ id, mime, dataUrl, widthPx, heightPx }).
     images: { type: [mongoose.Schema.Types.Mixed], default: [] },
     // PowerPoint / PDF: slides exactly as extracted, ready for a Deck.

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { ArrowDown, ArrowUp, Copy, MoreHorizontal, Plus, StickyNote, Trash2 } from 'lucide-react';
 import ScaledSlide from '../ScaledSlide.jsx';
+import { slideTitle } from '../../data/slideFormat.js';
 import Menu from '../ui/Menu.jsx';
 import './editor.css';
 
@@ -42,6 +43,8 @@ function SlideRail({ slides, activeIdx, peers, onSelect, onAdd, onDuplicate, onM
         {slides.map((slide, i) => {
           const here = peers.filter((p) => p.activeSlideIdx === i);
           const active = i === activeIdx;
+          const title = slideTitle(slide, i);
+          const named = title !== `Slide ${i + 1}`;
           return (
             <li key={slide.id} className={`rail-item${active ? ' is-active' : ''}`}>
               <span className="rail-num mono" aria-hidden="true">{i + 1}</span>
@@ -50,11 +53,12 @@ function SlideRail({ slides, activeIdx, peers, onSelect, onAdd, onDuplicate, onM
                 className="rail-thumb"
                 data-slide-idx={i}
                 aria-current={active ? 'true' : undefined}
-                aria-label={`Slide ${i + 1}${here.length ? `, ${here.map((p) => p.name).join(', ')} here` : ''}`}
+                aria-label={`Slide ${i + 1}${named ? `: ${title}` : ''}${here.length ? `, ${here.map((p) => p.name).join(', ')} here` : ''}`}
                 tabIndex={active ? 0 : -1}
                 onClick={() => onSelect(i)}
               >
                 <ScaledSlide slide={slide} />
+                <span className="rail-title" aria-hidden="true" title={title}>{title}</span>
                 {slide.notes?.trim() && <StickyNote className="rail-notes" aria-hidden="true" />}
                 {here.length > 0 && (
                   <span className="rail-peers" aria-hidden="true">

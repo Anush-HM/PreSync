@@ -10,7 +10,7 @@ import { detectFormat, FORMAT_LABELS, unsupportedFormatError } from '../services
 async function extractSlidesFromDocx(buffer, fileName) {
   const parsed = await parseDocx(buffer);
   const { outline } = analyzeDocx(parsed, fileName);
-  return outlineToSlides(outline, parsed.images);
+  return outlineToSlides(outline, parsed.images, parsed.blocks);
 }
 
 const EXTRACTORS = {

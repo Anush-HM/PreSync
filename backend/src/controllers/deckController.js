@@ -60,6 +60,8 @@ export function thumbnailSlide(slides) {
   return {
     id: first.id,
     backgroundColor: first.backgroundColor,
+    backgroundGradient: first.backgroundGradient,
+    backgroundRepeat: first.backgroundRepeat,
     backgroundImageUrl: trimImage(first.backgroundImageUrl),
     blocks: (first.blocks || []).map((b) => {
       if (b.type !== 'image') return b;

@@ -215,10 +215,19 @@ function ImportReviewPage() {
                       </button>
                     </div>
                   </div>
-                  <OutlineEditor outline={outline} images={doc.images} onChange={setOutline} />
+                  <OutlineEditor outline={outline} images={doc.images} blocks={doc.blocks} onChange={setOutline} />
                 </>
               )}
-              {tab === 'document' && <DocumentPreview blocks={doc.blocks} images={doc.images} headings={doc.analysis.headings} />}
+              {tab === 'document' && (
+                <DocumentPreview
+                  blocks={doc.blocks}
+                  images={doc.images}
+                  headings={doc.analysis.headings}
+                  page={doc.page}
+                  header={doc.header}
+                  footer={doc.footer}
+                />
+              )}
               {tab === 'slides' && <SlidesPreview slides={doc.slides} info={doc.analysis.slides} />}
             </div>
           </div>
