@@ -67,13 +67,20 @@ export async function apiFetch(path, options = {}) {
 
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
+    let body = null;
     try {
-      const body = await res.json();
+      body = await res.json();
       if (body?.error) message = body.error;
     } catch {
       // response wasn't JSON — keep the generic message
     }
-    throw new Error(message);
+    // Status and the backend's error code ride along for callers that
+    // react to specific failures (e.g. the Copilot's rate-limit notice).
+    const err = new Error(message);
+    err.status = res.status;
+    if (body?.code) err.code = body.code;
+    if (body?.retryAfter) err.retryAfter = body.retryAfter;
+    throw err;
   }
 
   if (res.status === 204) return null;

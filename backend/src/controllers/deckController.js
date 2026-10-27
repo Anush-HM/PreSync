@@ -1,5 +1,6 @@
 import Deck from '../models/Deck.js';
 import User from '../models/User.js';
+import AiConversation from '../models/AiConversation.js';
 import { flushDoc } from '../yjs/docManager.js';
 
 // Every handler here assumes requireAuth has already run — req.userId is
@@ -229,5 +230,7 @@ export async function deleteDeck(req, res) {
     return res.status(403).json({ error: 'Only the owner can delete this deck' });
   }
   await deck.deleteOne();
+  // Copilot conversations about a deleted deck go with it.
+  await AiConversation.deleteMany({ deckId: deck._id });
   res.status(204).end();
 }

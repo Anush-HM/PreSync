@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import * as fabric from 'fabric';
 import * as Y from 'yjs';
 import {
   AlertCircle, ArrowLeft, Check, CloudOff, Download, Image as ImageIcon, Maximize, Minus, PanelLeft, PanelRight,
-  Play, Plus, Redo2, StickyNote, Undo2, Users, ChevronDown
+  Play, Plus, Redo2, Sparkles, StickyNote, Undo2, Users, ChevronDown
 } from 'lucide-react';
 import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from '../data/yjsClient.js';
 import {
@@ -69,6 +69,8 @@ import SlideRail from '../components/editor/SlideRail.jsx';
 import PropertiesPanel from '../components/editor/PropertiesPanel.jsx';
 import ContextToolbar from '../components/editor/ContextToolbar.jsx';
 import InsertMenu from '../components/editor/InsertMenu.jsx';
+import CopilotPanel from '../components/copilot/CopilotPanel.jsx';
+import { createEditorBridge } from '../components/copilot/editorBridge.js';
 import ShareDeckDialog from '../components/decks/ShareDeckDialog.jsx';
 import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
 import Menu from '../components/ui/Menu.jsx';
@@ -194,6 +196,11 @@ function EditorPage() {
   const [fontsReady, setFontsReady] = useState(0);
   const activeSlideIdxRef = useRef(0);
   activeSlideIdxRef.current = activeSlideIdx;
+
+  // AI Copilot sidebar: inline on wide screens, an overlay otherwise.
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const copilotOverlay = useMediaQuery('(max-width: 1399px)');
+  const copilotBridge = useMemo(() => createEditorBridge({ fabricRef, yjsRef, undoRef, scaleRef }), []);
 
   useEffect(() => {
     getDeck(deckId)
@@ -1402,10 +1409,25 @@ function EditorPage() {
             aria-label={panelOpen ? 'Hide formatting panel' : 'Show formatting panel'}
             aria-pressed={panelOpen}
             data-tip="Format"
-            onClick={() => setPanelOpen((o) => !o)}
+            onClick={() => {
+              setPanelOpen((o) => !o);
+              if (copilotOverlay) setCopilotOpen(false);
+            }}
           >
             <PanelRight />
             {!panelOpen && selectedIds.length > 0 && <span className="ed-dot" aria-hidden="true" />}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm ed-copilot-toggle"
+            aria-pressed={copilotOpen}
+            aria-controls="ai-copilot"
+            onClick={() => {
+              setCopilotOpen((o) => !o);
+              if (panelOverlay) setPanelOpen(false);
+            }}
+          >
+            <Sparkles aria-hidden="true" /><span className="ed-hide-sm">Copilot</span>
           </button>
         </div>
 
@@ -1418,13 +1440,14 @@ function EditorPage() {
       </header>
 
       <div className="ed-body">
-        {(railOverlay && railOpen) || (panelOverlay && panelOpen) ? (
+        {(railOverlay && railOpen) || (panelOverlay && panelOpen) || (copilotOverlay && copilotOpen) ? (
           <div
             className="ed-scrim"
             aria-hidden="true"
             onClick={() => {
               if (railOverlay) setRailOpen(false);
               if (panelOverlay) setPanelOpen(false);
+              if (copilotOverlay) setCopilotOpen(false);
             }}
           />
         ) : null}
@@ -1565,6 +1588,21 @@ function EditorPage() {
             focusSection={focusSection}
           />
         </aside>
+
+        {copilotOpen && (
+          <aside id="ai-copilot" className={`ed-copilot${copilotOverlay ? ' is-overlay' : ''}`} aria-label="AI Copilot">
+            <CopilotPanel
+              deckId={deckId}
+              deckTitle={deckMeta?.title || ''}
+              slides={slides}
+              activeSlideIdx={activeSlideIdx}
+              selectedIds={selectedIds}
+              bridge={copilotBridge}
+              onSelectSlide={setActiveSlideIdx}
+              onClose={() => setCopilotOpen(false)}
+            />
+          </aside>
+        )}
       </div>
 
       {showShare && deckMeta && (
