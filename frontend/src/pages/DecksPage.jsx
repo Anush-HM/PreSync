@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileText, Presentation, ArrowRight, RefreshCw, X } from 'lucide-react';
+import { Plus, Search, FileText, Presentation, ArrowRight, RefreshCw, X, LayoutTemplate } from 'lucide-react';
 import AppShell from '../components/layout/AppShell.jsx';
 import DeckCard from '../components/decks/DeckCard.jsx';
 import RenameDeckDialog from '../components/decks/RenameDeckDialog.jsx';
@@ -9,6 +9,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
 import ImportDialog from '../components/imports/ImportDialog.jsx';
 import ImportRow from '../components/imports/ImportRow.jsx';
 import SessionHistoryModal from '../components/SessionHistoryModal.jsx';
+import TemplateGallery from '../components/templates/TemplateGallery.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
 import { listDecks, createDeck, deleteDeck, duplicateDeck } from '../data/decksApi.js';
 import { listImports } from '../data/importsApi.js';
@@ -65,7 +66,7 @@ function SkeletonGrid() {
   );
 }
 
-function Onboarding({ onCreate, onImport }) {
+function Onboarding({ onCreate, onImport, onTemplate }) {
   return (
     <section className="onboarding card" aria-labelledby="onboarding-title">
       <div className="onboarding-copy">
@@ -79,6 +80,14 @@ function Onboarding({ onCreate, onImport }) {
           <span className="onboarding-text">
             <strong>Create from scratch</strong>
             <span>A blank 16:9 presentation, ready to edit.</span>
+          </span>
+          <ArrowRight className="onboarding-arrow" aria-hidden="true" />
+        </button>
+        <button type="button" className="onboarding-option" onClick={onTemplate}>
+          <span className="onboarding-icon"><LayoutTemplate aria-hidden="true" /></span>
+          <span className="onboarding-text">
+            <strong>Start from a template</strong>
+            <span>A pitch, lesson, project update and more.</span>
           </span>
           <ArrowRight className="onboarding-arrow" aria-hidden="true" />
         </button>
@@ -126,6 +135,7 @@ function DecksPage({ view = 'home' }) {
   const [shareTarget, setShareTarget] = useState(null);
   const [historyTarget, setHistoryTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [showTemplates, setShowTemplates] = useState(false);
 
   useEffect(() => { refreshDecks(); }, []);
 
@@ -240,6 +250,9 @@ function DecksPage({ view = 'home' }) {
             <button type="button" className="btn btn-secondary" onClick={() => setImportKind('pptx')}>
               <Presentation /> Import PowerPoint
             </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setShowTemplates(true)}>
+              <LayoutTemplate /> Templates
+            </button>
             <button type="button" className="btn btn-primary" onClick={handleCreate} disabled={creating}>
               <Plus /> {creating ? 'Creating…' : 'Create presentation'}
             </button>
@@ -254,7 +267,7 @@ function DecksPage({ view = 'home' }) {
         )}
 
         {isEmptyAccount && view === 'home' ? (
-          <Onboarding onCreate={handleCreate} onImport={setImportKind} />
+          <Onboarding onCreate={handleCreate} onImport={setImportKind} onTemplate={() => setShowTemplates(true)} />
         ) : (
           <>
             {!loadError && (
@@ -395,6 +408,12 @@ function DecksPage({ view = 'home' }) {
           destructive
           onConfirm={confirmDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+      {showTemplates && (
+        <TemplateGallery
+          onClose={() => setShowTemplates(false)}
+          onCreated={(deck) => navigate(`/editor/${deck.id}`)}
         />
       )}
     </AppShell>

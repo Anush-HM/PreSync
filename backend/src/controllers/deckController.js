@@ -122,12 +122,20 @@ export async function duplicateDeck(req, res) {
   });
 }
 
+// Starter templates (frontend/src/data/templates.js) send their slides
+// with the new deck; anything else starts empty.
+export const MAX_CREATE_SLIDES = 60;
+
 export async function createDeck(req, res) {
-  const { title } = req.body;
+  const { title, slides } = req.body;
+  if (slides !== undefined && (!Array.isArray(slides) || slides.length > MAX_CREATE_SLIDES || slides.some((s) => !s || typeof s !== 'object'))) {
+    return res.status(400).json({ error: `slides must be a list of at most ${MAX_CREATE_SLIDES} slides` });
+  }
+  const name = typeof title === 'string' ? title.trim().slice(0, MAX_TITLE_LENGTH) : '';
   const deck = await Deck.create({
-    title: title || 'Untitled deck',
+    title: name || 'Untitled deck',
     ownerId: req.userId,
-    slides: []
+    slides: slides || []
   });
   res.status(201).json(deck);
 }

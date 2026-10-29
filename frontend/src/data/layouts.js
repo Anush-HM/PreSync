@@ -6,7 +6,7 @@ import { newId } from './deckOps.js';
 // pictures into picture slots) and adds prompt text only for slots that
 // are still empty; nothing already on the slide is deleted.
 
-const PROMPT = '#8a8f88';
+export const PROMPT_COLOR = '#8a8f88';
 
 export const LAYOUTS = [
   {
@@ -166,7 +166,7 @@ export function applyLayout(slide, layout, theme = null) {
     }
     const block = {
       id: newId('b'), type: 'textbox', x: slot.x, y: slot.y, width: slot.width, fontSize: slot.fontSize,
-      text: slot.prompt, fill: slot.fill ? paint(slot.fill, theme) : slot.kind === 'title' ? titleColor : slot.kind === 'subtitle' ? PROMPT : textColor,
+      text: slot.prompt, fill: slot.fill ? paint(slot.fill, theme) : slot.kind === 'title' ? titleColor : slot.kind === 'subtitle' ? PROMPT_COLOR : textColor,
       layoutSlot: slot.kind
     };
     if (slot.fontWeight) block.fontWeight = slot.fontWeight;

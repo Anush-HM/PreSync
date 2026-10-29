@@ -6,6 +6,7 @@ import deckRoutes from './routes/deckRoutes.js';
 import roomRoutes from './routes/roomRoutes.js';
 import importRoutes from './routes/importRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
+import templateRoutes from './routes/templateRoutes.js';
 
 // Builds the Express app without opening a port or a DB connection, so
 // server.js can wire it to the HTTP/Socket.io/Yjs servers and tests can
@@ -26,9 +27,14 @@ export function createApp({ corsOptions } = {}) {
   app.use('/api/rooms', roomRoutes);
   app.use('/api/imports', importRoutes);
   app.use('/api/ai', aiRoutes);
+  app.use('/api/templates', templateRoutes);
 
   // Centralized error handler — controllers can throw/reject freely.
   app.use((err, req, res, next) => {
+    // Content that doesn't fit the schema is the client's mistake.
+    if (err?.name === 'ValidationError' || err?.name === 'CastError') {
+      return res.status(400).json({ error: 'Some of that content is not valid' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   });

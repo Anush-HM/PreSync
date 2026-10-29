@@ -1,10 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import './ui.css';
 
+const ITEM = '[role="menuitem"], [role="menuitemcheckbox"]';
+
 // Small dropdown menu (button + role="menu"). Arrow keys move between
 // items, Escape closes and returns focus to the trigger.
 // `text` adds a visible label next to the trigger icon.
-// items: [{ label, icon: LucideIcon, onSelect, danger?, disabled? } | 'separator']
+// items: [{ label, icon: LucideIcon, onSelect, danger?, disabled?, checked?, shortcut? } | 'separator']
+// An item with `checked` (true or false) is a toggle.
 function Menu({ label, icon: TriggerIcon, text, items, align = 'end', triggerClassName = 'icon-btn' }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -13,7 +16,7 @@ function Menu({ label, icon: TriggerIcon, text, items, align = 'end', triggerCla
 
   useEffect(() => {
     if (!open) return undefined;
-    const first = rootRef.current?.querySelector('[role="menuitem"]:not([disabled])');
+    const first = rootRef.current?.querySelector(`${ITEM}:not([disabled])`);
     first?.focus();
     function onDocDown(e) {
       if (!rootRef.current?.contains(e.target)) setOpen(false);
@@ -23,7 +26,7 @@ function Menu({ label, icon: TriggerIcon, text, items, align = 'end', triggerCla
   }, [open]);
 
   function onMenuKey(e) {
-    const entries = [...rootRef.current.querySelectorAll('[role="menuitem"]:not([disabled])')];
+    const entries = [...rootRef.current.querySelectorAll(`${ITEM}:not([disabled])`)];
     const i = entries.indexOf(document.activeElement);
     if (e.key === 'ArrowDown') { e.preventDefault(); entries[(i + 1) % entries.length]?.focus(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); entries[(i - 1 + entries.length) % entries.length]?.focus(); }
@@ -60,13 +63,16 @@ function Menu({ label, icon: TriggerIcon, text, items, align = 'end', triggerCla
               <button
                 key={item.label}
                 type="button"
-                role="menuitem"
+                role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+                aria-checked={item.checked === undefined ? undefined : !!item.checked}
                 className={`menu-item${item.danger ? ' menu-item-danger' : ''}`}
                 disabled={item.disabled}
                 onClick={() => { setOpen(false); item.onSelect(); }}
               >
                 {Icon && <Icon aria-hidden="true" />}
                 {item.label}
+                {item.checked !== undefined && <span className={`menu-check${item.checked ? ' is-on' : ''}`} aria-hidden="true" />}
+                {item.shortcut && <kbd className="menu-kbd">{item.shortcut}</kbd>}
               </button>
             );
           })}
