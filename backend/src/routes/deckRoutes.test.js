@@ -5,6 +5,8 @@ vi.mock('../models/Deck.js', () => ({
 }));
 vi.mock('../models/User.js', () => ({ default: { findOne: vi.fn() } }));
 vi.mock('../models/AiConversation.js', () => ({ default: { deleteMany: vi.fn().mockResolvedValue({}) } }));
+vi.mock('../models/DeckVersion.js', () => ({ default: { deleteMany: vi.fn().mockResolvedValue({}), findOne: vi.fn(), find: vi.fn(), create: vi.fn(), deleteOne: vi.fn() } }));
+vi.mock('../models/Comment.js', () => ({ default: { deleteMany: vi.fn().mockResolvedValue({}) } }));
 vi.mock('../services/pdfIngestService.js', () => ({ extractSlidesFromPdf: vi.fn() }));
 vi.mock('../services/pptxIngestService.js', () => ({ extractSlidesFromPptx: vi.fn() }));
 vi.mock('../services/deckExportService.js', () => ({
@@ -12,6 +14,7 @@ vi.mock('../services/deckExportService.js', () => ({
   exportDeckToPptx: vi.fn(),
   exportFileName: (title, ext) => `${title}.${ext}`
 }));
+vi.mock('../services/docxExportService.js', () => ({ exportDeckToDocx: vi.fn() }));
 vi.mock('../yjs/docManager.js', () => ({ flushDoc: vi.fn() }));
 
 const { default: Deck } = await import('../models/Deck.js');
@@ -21,6 +24,7 @@ const { extractSlidesFromPdf } = await import('../services/pdfIngestService.js')
 const { flushDoc } = await import('../yjs/docManager.js');
 const { extractSlidesFromPptx } = await import('../services/pptxIngestService.js');
 const { exportDeckToPdf, exportDeckToPptx } = await import('../services/deckExportService.js');
+const { exportDeckToDocx } = await import('../services/docxExportService.js');
 const { startTestServer, tokenFor } = await import('../test/httpServer.js');
 
 const OWNER_ID = '64b000000000000000000001';
@@ -516,7 +520,7 @@ describe('GET /api/decks/:deckId/export', () => {
     server.request('GET', `/api/decks/${DECK_ID}/export?format=${format}`, { token: tokenFor(userId) });
 
   it('rejects an unknown format', async () => {
-    const res = await exportAs('docx');
+    const res = await exportAs('odp');
     expect(res.status).toBe(400);
     expect(Deck.findById).not.toHaveBeenCalled();
   });
@@ -553,6 +557,21 @@ describe('GET /api/decks/:deckId/export', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/pdf');
     expect(Deck.findById).toHaveBeenCalledTimes(1);
+    expect(exportDeckToPdf.mock.calls[0][1]).toEqual({ includeHidden: false, notes: false });
+  });
+
+  it('exports Word with notes by default, and passes the hidden and notes options', async () => {
+    Deck.findById.mockResolvedValue(makeDeck());
+    flushDoc.mockResolvedValue(false);
+    exportDeckToDocx.mockResolvedValue(Buffer.from('PK-fake'));
+    exportDeckToPdf.mockResolvedValue(Buffer.from('%PDF-fake'));
+    const res = await exportAs('docx');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    expect(res.headers.get('content-disposition')).toContain('Quarterly review.docx');
+    expect(exportDeckToDocx.mock.calls[0][1]).toEqual({ includeHidden: false, notes: true });
+    await server.request('GET', `/api/decks/${DECK_ID}/export?format=pdf&hidden=1&notes=1`, { token: tokenFor(COLLAB_ID) });
+    expect(exportDeckToPdf.mock.calls[0][1]).toEqual({ includeHidden: true, notes: true });
   });
 });
 

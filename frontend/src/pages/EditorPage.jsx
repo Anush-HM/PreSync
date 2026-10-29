@@ -6,7 +6,8 @@ import {
   AlertCircle, ArrowLeft, Check, CloudOff, Download, Image as ImageIcon, Maximize, Minus, PanelLeft, PanelRight,
   Play, Plus, Redo2, Sparkles, StickyNote, Undo2, Users, ChevronDown, MoreHorizontal, Command, Keyboard, LayoutTemplate,
   Magnet, Smile, Type, Shapes, Table2, BarChart3, Copy, Trash2, Group, Ungroup, AlignLeft, AlignCenter, AlignRight,
-  AlignStartVertical, AlignCenterVertical, AlignEndVertical, Palette, LayoutGrid, Save, Presentation
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical, Palette, LayoutGrid, Save, Presentation, MessageSquare, History,
+  FileText, SlidersHorizontal
 } from 'lucide-react';
 import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from '../data/yjsClient.js';
 import {
@@ -42,6 +43,7 @@ import {
   moveSlide,
   newId,
   patchBlocks,
+  replaceAllSlides,
   replaceSlideContent,
   restackBlock,
   updateBlocks,
@@ -70,6 +72,7 @@ import {
 } from '../data/slideFormat.js';
 import { goLive } from '../data/roomsApi.js';
 import { getDeck, renameDeck, saveDeck, downloadDeckExport, EXPORT_FORMATS } from '../data/decksApi.js';
+import { listComments } from '../data/collabApi.js';
 import { getCurrentUser } from '../data/apiConfig.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import SlideRail from '../components/editor/SlideRail.jsx';
@@ -79,6 +82,10 @@ import InsertMenu from '../components/editor/InsertMenu.jsx';
 import CommandPalette from '../components/editor/CommandPalette.jsx';
 import ShortcutsDialog from '../components/editor/ShortcutsDialog.jsx';
 import SaveTemplateDialog from '../components/templates/SaveTemplateDialog.jsx';
+import CommentsPanel from '../components/collab/CommentsPanel.jsx';
+import VersionHistoryPanel from '../components/collab/VersionHistoryPanel.jsx';
+import ExportDialog from '../components/collab/ExportDialog.jsx';
+import '../components/collab/collab.css';
 import CopilotPanel from '../components/copilot/CopilotPanel.jsx';
 import { createEditorBridge } from '../components/copilot/editorBridge.js';
 import ShareDeckDialog from '../components/decks/ShareDeckDialog.jsx';
@@ -187,6 +194,10 @@ function EditorPage() {
   const [snapOn, setSnapOn] = useState(readSnapSetting);
   const [dialog, setDialog] = useState(null); // 'palette' | 'shortcuts' | 'template'
   const [insertRequest, setInsertRequest] = useState(null); // opens Insert on a tab
+  const [sheet, setSheet] = useState(null); // side sheet: 'comments' | 'history'
+  const [threads, setThreads] = useState([]);
+  const [focusCommentId, setFocusCommentId] = useState(null);
+  const [historyKey, setHistoryKey] = useState(0); // bumps when a version is made elsewhere
   const [fitScale, setFitScale] = useState(1);
 
   // Panels start open where there is room for them; on smaller screens
@@ -426,6 +437,25 @@ function EditorPage() {
     canvas.on('selection:created', syncSelection);
     canvas.on('selection:updated', syncSelection);
     canvas.on('selection:cleared', syncSelection);
+
+    // What this editor has selected, for collaborators to see. Boxes are
+    // in canvas pixels, like cursors.
+    let lastBroadcast = 0;
+    const broadcastSelection = (force = true) => {
+      const now = Date.now();
+      if (!force && now - lastBroadcast < 80) return;
+      lastBroadcast = now;
+      const active = canvas.getActiveObject();
+      const slideId = slidesRef.current[activeSlideIdxRef.current]?.id;
+      const boxes = active && slideId ? [active.getBoundingRect()].map((r) => ({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) })) : [];
+      yjsRef.current?.awareness.setLocalStateField('selection', boxes.length ? { slideId, boxes } : null);
+    };
+    canvas.on('selection:created', () => broadcastSelection());
+    canvas.on('selection:updated', () => broadcastSelection());
+    canvas.on('selection:cleared', () => broadcastSelection());
+    canvas.on('object:modified', () => broadcastSelection());
+    canvas.on('object:moving', () => broadcastSelection(false));
+    canvas.on('object:scaling', () => broadcastSelection(false));
 
     // The formatting under the caret, so the format bar shows what
     // typing will produce.
@@ -835,6 +865,60 @@ function EditorPage() {
     return out.slice(-MAX_DECK_IMAGES);
   }, [slides]);
 
+  // --- Comments: loaded once, refreshed when anyone changes them (each
+  // editor announces a change through presence).
+  const reloadComments = useCallback(() => {
+    listComments(deckId).then(setThreads).catch(() => {});
+  }, [deckId]);
+  useEffect(() => { reloadComments(); }, [reloadComments]);
+  const commentsRevRef = useRef(0);
+  const historyRevRef = useRef(0);
+  useEffect(() => {
+    const rev = Math.max(0, ...peers.map((p) => p.commentsRev || 0));
+    if (rev > commentsRevRef.current) {
+      commentsRevRef.current = rev;
+      reloadComments();
+    }
+    const hrev = Math.max(0, ...peers.map((p) => p.historyRev || 0));
+    if (hrev > historyRevRef.current) {
+      historyRevRef.current = hrev;
+      setHistoryKey((k) => k + 1);
+    }
+  }, [peers, reloadComments]);
+  function handleCommentsChanged() {
+    reloadComments();
+    const rev = Date.now();
+    commentsRevRef.current = Math.max(commentsRevRef.current, rev);
+    yjsRef.current?.awareness.setLocalStateField('commentsRev', rev);
+  }
+  function announceHistory() {
+    yjsRef.current?.awareness.setLocalStateField('historyRev', Date.now());
+  }
+  function handleOpenThread(thread) {
+    const idx = slides.findIndex((s) => s.id === thread.slideId);
+    if (idx < 0) return;
+    setFocusCommentId(thread.id);
+    setSheet('comments');
+    if (copilotOverlay) setCopilotOpen(false);
+    if (idx !== activeSlideIdx) setActiveSlideIdx(idx);
+    if (thread.blockId) requestAnimationFrame(() => selectIds([thread.blockId], 20));
+  }
+  function toggleSheet(name) {
+    setSheet((cur) => (cur === name ? null : name));
+    setCopilotOpen(false);
+    if (panelOverlay) setPanelOpen(false);
+  }
+
+  // Restores a version for everyone, as one undo step.
+  function handleRestoreVersion(version) {
+    const d = doc();
+    if (!d || !version?.slides?.length) return;
+    fabricRef.current?.discardActiveObject();
+    replaceAllSlides(d, version.slides);
+    setActiveSlideIdx(0);
+    announceHistory();
+  }
+
   function handleInsertDeckImage(img) {
     const ratio = img.width && img.height ? img.height / img.width : 0.75;
     const width = Math.min(360, img.width || 360);
@@ -1194,8 +1278,12 @@ function EditorPage() {
     setSaving(true);
     setSaveError('');
     try {
-      const { savedAt: at } = await saveDeck(deckId);
+      const { savedAt: at, versionId } = await saveDeck(deckId);
       setSavedAt(at);
+      if (versionId) {
+        setHistoryKey((k) => k + 1);
+        yjsRef.current?.awareness.setLocalStateField('historyRev', Date.now());
+      }
     } catch (err) {
       setSaveError(err.message || 'Could not save');
     } finally {
@@ -1256,10 +1344,15 @@ function EditorPage() {
     if (file) addImageFile(file);
   }
 
-  async function handleExport(format) {
+  async function handleExport(format, options) {
+    if (format === 'png' || format === 'jpeg') {
+      setDialog(null);
+      return handleExportSlideImage(format);
+    }
     setExporting(format);
     try {
-      await downloadDeckExport(deckId, format);
+      await downloadDeckExport(deckId, format, options);
+      if (dialog === 'export') setDialog(null);
     } catch (err) {
       toast.error(err.message || 'Could not export the presentation');
     } finally {
@@ -1383,6 +1476,26 @@ function EditorPage() {
   }
 
   const peersOnThisSlide = peers.filter((p) => p.activeSlideIdx === activeSlideIdx && p.cursor);
+  const peerSelections = peers.filter((p) => p.selection?.slideId && p.selection.slideId === activeSlide?.id);
+  const openThreads = threads.filter((t) => !t.resolved).length;
+  // Unresolved threads on this slide, one pin per element (or for the slide).
+  const commentPins = (() => {
+    if (!activeSlide) return [];
+    const s = legacyFitScale(activeSlide.blocks);
+    const groups = new Map();
+    for (const t of threads) {
+      if (t.resolved || t.slideId !== activeSlide.id) continue;
+      const block = t.blockId ? activeSlide.blocks.find((b) => b.id === t.blockId) : null;
+      const key = block ? block.id : 'slide';
+      if (!groups.has(key)) {
+        const x = block ? ((block.x || 0) + (block.width || 0)) * s : CANVAS_WIDTH - 22;
+        const y = block ? (block.y || 0) * s : 34;
+        groups.set(key, { key, x: Math.min(CANVAS_WIDTH - 14, Math.max(14, x)), y: Math.max(28, y), threads: [] });
+      }
+      groups.get(key).threads.push(t);
+    }
+    return [...groups.values()];
+  })();
   const scale = zoom ?? fitScale;
   viewScaleRef.current = scale;
 
@@ -1401,7 +1514,9 @@ function EditorPage() {
     })),
     'separator',
     { label: 'This slide as PNG', icon: ImageIcon, onSelect: () => handleExportSlideImage('png'), disabled: !activeSlide },
-    { label: 'This slide as JPEG', icon: ImageIcon, onSelect: () => handleExportSlideImage('jpeg'), disabled: !activeSlide }
+    { label: 'This slide as JPEG', icon: ImageIcon, onSelect: () => handleExportSlideImage('jpeg'), disabled: !activeSlide },
+    'separator',
+    { label: 'Export options…', icon: SlidersHorizontal, onSelect: () => setDialog('export') }
   ];
   const hasSlide = !!activeSlide;
   const some = selectedIds.length > 0;
@@ -1437,6 +1552,9 @@ function EditorPage() {
     { id: 'save', group: 'File', label: 'Save a snapshot', icon: Save, keys: shortcutFor('save'), run: handleSave },
     { id: 'template', group: 'File', label: 'Save as template', icon: LayoutTemplate, run: () => setDialog('template'), disabled: !deckMeta || slides.length === 0 },
     ...Object.entries(EXPORT_FORMATS).map(([format, { label }]) => ({ id: `export-${format}`, group: 'File', label: `Export as ${label}`, icon: Download, run: () => handleExport(format), disabled: !!exporting })),
+    { id: 'export-options', group: 'File', label: 'Export options', icon: SlidersHorizontal, keywords: 'download word pdf notes hidden', run: () => setDialog('export') },
+    { id: 'comments', group: 'Review', label: sheet === 'comments' ? 'Hide comments' : 'Show comments', icon: MessageSquare, run: () => toggleSheet('comments') },
+    { id: 'history', group: 'Review', label: 'Version history', icon: History, keywords: 'restore versions revert', run: () => toggleSheet('history') },
     { id: 'present', group: 'File', label: 'Present', icon: Presentation, keywords: 'go live start', run: handleGoLive, disabled: goingLive || !deckMeta || slides.length === 0 }
   ];
   const moreItems = [
@@ -1445,7 +1563,9 @@ function EditorPage() {
     'separator',
     { label: 'Snap to guides', icon: Magnet, checked: snapOn, onSelect: handleToggleSnap },
     'separator',
-    { label: 'Save as template…', icon: LayoutTemplate, onSelect: () => setDialog('template'), disabled: !deckMeta || slides.length === 0 }
+    { label: 'Save as template…', icon: LayoutTemplate, onSelect: () => setDialog('template'), disabled: !deckMeta || slides.length === 0 },
+    { label: 'Version history', icon: History, onSelect: () => toggleSheet('history') },
+    { label: 'Export options…', icon: FileText, onSelect: () => setDialog('export') }
   ];
   const toolbarActions = {
     format: formatSelected,
@@ -1559,6 +1679,17 @@ function EditorPage() {
               <span className="ed-presence-label">{peers.length} editing</span>
             </div>
           )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm ed-comments-toggle"
+            aria-pressed={sheet === 'comments'}
+            aria-label={`Comments${openThreads ? `, ${openThreads} open` : ''}`}
+            data-tip="Comments"
+            onClick={() => toggleSheet('comments')}
+          >
+            <MessageSquare aria-hidden="true" />
+            {openThreads > 0 && <span className="ed-count mono" aria-hidden="true">{openThreads}</span>}
+          </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowShare(true)} disabled={!deckMeta}>
             <Users aria-hidden="true" /><span className="ed-hide-sm">Share</span>
           </button>
@@ -1595,6 +1726,7 @@ function EditorPage() {
             aria-controls="ai-copilot"
             onClick={() => {
               setCopilotOpen((o) => !o);
+              setSheet(null);
               if (panelOverlay) setPanelOpen(false);
             }}
           >
@@ -1611,14 +1743,17 @@ function EditorPage() {
       </header>
 
       <div className="ed-body">
-        {(railOverlay && railOpen) || (panelOverlay && panelOpen) || (copilotOverlay && copilotOpen) ? (
+        {(railOverlay && railOpen) || (panelOverlay && panelOpen) || (copilotOverlay && (copilotOpen || sheet)) ? (
           <div
             className="ed-scrim"
             aria-hidden="true"
             onClick={() => {
               if (railOverlay) setRailOpen(false);
               if (panelOverlay) setPanelOpen(false);
-              if (copilotOverlay) setCopilotOpen(false);
+              if (copilotOverlay) {
+                setCopilotOpen(false);
+                setSheet(null);
+              }
             }}
           />
         ) : null}
@@ -1666,6 +1801,23 @@ function EditorPage() {
                     </svg>
                     <span className="peer-cursor-label" style={{ background: p.color }}>{p.name}</span>
                   </div>
+                ))}
+                {peerSelections.flatMap((p) => p.selection.boxes.map((b, i) => (
+                  <div key={`${p.clientId}-${i}`} className="peer-selection" style={{ left: b.x - 3, top: b.y - 3, width: b.w + 6, height: b.h + 6, borderColor: p.color }} aria-hidden="true">
+                    {i === 0 && <span className="peer-selection-label" style={{ background: p.color }}>{p.name}</span>}
+                  </div>
+                )))}
+                {commentPins.map((pin) => (
+                  <button
+                    key={pin.key}
+                    type="button"
+                    className="comment-pin"
+                    style={{ left: pin.x, top: pin.y }}
+                    aria-label={`${pin.threads.length} comment${pin.threads.length === 1 ? '' : 's'}${pin.key === 'slide' ? ' on this slide' : ''}`}
+                    onClick={() => handleOpenThread(pin.threads[0])}
+                  >
+                    {pin.threads.length}
+                  </button>
                 ))}
               </div>
             </div>
@@ -1774,6 +1926,33 @@ function EditorPage() {
             />
           </aside>
         )}
+
+        {sheet && (
+          <aside className={`ed-sheet${copilotOverlay ? ' is-overlay' : ''}`} aria-label={sheet === 'comments' ? 'Comments' : 'Version history'}>
+            {sheet === 'comments' ? (
+              <CommentsPanel
+                deckId={deckId}
+                threads={threads}
+                slides={slides}
+                activeSlide={activeSlide}
+                selectedBlock={selectedBlocks.length === 1 ? selectedBlocks[0] : null}
+                me={getCurrentUser()?.id}
+                isOwner={!!deckMeta?.isOwner}
+                focusId={focusCommentId}
+                onOpen={handleOpenThread}
+                onChanged={handleCommentsChanged}
+                onClose={() => setSheet(null)}
+              />
+            ) : (
+              <VersionHistoryPanel
+                deckId={deckId}
+                refreshKey={historyKey}
+                onRestore={handleRestoreVersion}
+                onClose={() => setSheet(null)}
+              />
+            )}
+          </aside>
+        )}
       </div>
 
       {showShare && deckMeta && (
@@ -1788,6 +1967,14 @@ function EditorPage() {
 
       {dialog === 'palette' && <CommandPalette commands={commands} onClose={() => setDialog(null)} />}
       {dialog === 'shortcuts' && <ShortcutsDialog onClose={() => setDialog(null)} />}
+      {dialog === 'export' && (
+        <ExportDialog
+          hiddenCount={slides.filter((sl) => sl.hidden).length}
+          busy={!!exporting}
+          onExport={handleExport}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog === 'template' && (
         <SaveTemplateDialog
           deckId={deckId}

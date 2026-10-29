@@ -233,3 +233,13 @@ export function replaceSlideContent(doc, slideIdx, blocks, slidePatch = {}) {
     blocksArr.push(blocks.map(plainToBlockMap));
   });
 }
+
+// Replaces every slide (restoring a version) in one undo step. Each
+// slide gets a fresh order from its position.
+export function replaceAllSlides(doc, slides) {
+  const arr = getSlidesArray(doc);
+  doc.transact(() => {
+    arr.delete(0, arr.length);
+    arr.push(slides.map((s, i) => plainToSlideMap({ ...s, order: i })));
+  });
+}

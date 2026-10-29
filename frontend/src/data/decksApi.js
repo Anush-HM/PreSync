@@ -65,14 +65,24 @@ export async function renameDeck(deckId, title) {
 
 // Flush the live co-editing document to the database right now.
 // Resolves to { savedAt, flushed }.
+// Saving also keeps an automatic version now and then ({ versionId }).
 export async function saveDeck(deckId) {
   return apiFetch(`/api/decks/${deckId}/save`, { method: 'POST' });
 }
 
 export const EXPORT_FORMATS = {
   pdf: { label: 'PDF (.pdf)', ext: 'pdf' },
-  pptx: { label: 'PowerPoint (.pptx)', ext: 'pptx' }
+  pptx: { label: 'PowerPoint (.pptx)', ext: 'pptx' },
+  docx: { label: 'Word outline (.docx)', ext: 'docx' }
 };
+
+// Query string for export options: { includeHidden, notes }.
+export function exportQuery(format, { includeHidden, notes } = {}) {
+  const q = new URLSearchParams({ format });
+  if (includeHidden) q.set('hidden', '1');
+  if (notes !== undefined) q.set('notes', notes ? '1' : '0');
+  return q.toString();
+}
 
 function fileNameFrom(res, fallback) {
   const header = res.headers.get('Content-Disposition') || '';
@@ -84,8 +94,8 @@ function fileNameFrom(res, fallback) {
 
 // Downloads the deck as a PDF or PPTX file. Uses fetch directly (not
 // apiFetch) because the response is a binary file, not JSON.
-export async function downloadDeckExport(deckId, format) {
-  const res = await fetch(`${API_BASE}/api/decks/${deckId}/export?format=${format}`, {
+export async function downloadDeckExport(deckId, format, options) {
+  const res = await fetch(`${API_BASE}/api/decks/${deckId}/export?${exportQuery(format, options)}`, {
     headers: { Authorization: `Bearer ${getAuthToken()}` }
   });
   if (!res.ok) {
