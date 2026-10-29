@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { BarChart3, ImagePlus, LayoutTemplate, Minus, Plus, Shapes, Table2, Type } from 'lucide-react';
+import { BarChart3, ImagePlus, LayoutTemplate, Minus, Plus, Shapes, Smile, Table2, Type } from 'lucide-react';
 import Popover from '../ui/Popover.jsx';
 import LayoutThumb from './LayoutThumb.jsx';
+import ElementsPanel from './ElementsPanel.jsx';
 import { SHAPE_GROUPS } from '../../data/shapes.js';
 import { CHART_KIND_LABELS, CHART_KINDS } from '../../data/chartLayout.js';
 import { LAYOUTS } from '../../data/layouts.js';
@@ -9,6 +10,7 @@ import { TEXT_PRESETS } from '../../data/textPresets.js';
 
 const TABS = [
   { id: 'text', label: 'Text', icon: Type },
+  { id: 'elements', label: 'Elements', icon: Smile },
   { id: 'shapes', label: 'Shapes', icon: Shapes },
   { id: 'table', label: 'Table', icon: Table2 },
   { id: 'chart', label: 'Chart', icon: BarChart3 },
@@ -75,10 +77,16 @@ function TableSizePicker({ onPick }) {
   );
 }
 
-// Insert: text styles, shapes, tables, charts, pictures, dividers and
-// new slides from a layout.
-function InsertMenu({ disabled, onText, onShape, onTable, onChart, onImage, onDivider, onSlide }) {
+// Insert: text styles, stickers, icons and emoji, shapes, tables, charts,
+// pictures, dividers and new slides from a layout. A new `request`
+// ({ tab }) opens the menu on that tab, for the command palette.
+function InsertMenu({ disabled, onText, onAsset, deckImages, onDeckImage, onShape, onTable, onChart, onImage, onDivider, onSlide, request }) {
   const [tab, setTab] = useState('text');
+  const [lastRequest, setLastRequest] = useState(request);
+  if (request !== lastRequest) {
+    setLastRequest(request);
+    if (request?.tab) setTab(request.tab);
+  }
   return (
     <Popover
       label="Insert"
@@ -87,6 +95,7 @@ function InsertMenu({ disabled, onText, onShape, onTable, onChart, onImage, onDi
       triggerClassName="btn btn-ghost btn-sm"
       trigger={<><Plus aria-hidden="true" /><span className="menu-trigger-text">Insert</span></>}
       panelClassName="insert-pop"
+      openSignal={request}
     >
       {(close) => {
         const done = (fn) => (...args) => {
@@ -117,6 +126,13 @@ function InsertMenu({ disabled, onText, onShape, onTable, onChart, onImage, onDi
                     <Minus aria-hidden="true" /> Divider line
                   </button>
                 </div>
+              )}
+              {tab === 'elements' && (
+                <ElementsPanel
+                  onInsert={(asset, color) => { onAsset(asset, color); close(); }}
+                  deckImages={deckImages}
+                  onDeckImage={(img) => { onDeckImage(img); close(); }}
+                />
               )}
               {tab === 'shapes' && SHAPE_GROUPS.map((g) => (
                 <div key={g.id} className="insert-group">

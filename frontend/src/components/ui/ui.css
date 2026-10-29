@@ -92,6 +92,12 @@
 .menu-item svg { width: 15px; height: 15px; color: var(--text-secondary); }
 .menu-item:hover:not(:disabled), .menu-item:focus-visible { background: rgba(242, 244, 240, 0.07); outline: none; }
 .menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.menu-kbd, .menu-check { margin-left: auto; }
+.menu-kbd { padding-left: 16px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.menu-check { width: 26px; height: 15px; border-radius: 999px; background: var(--border-strong); position: relative; flex: none; }
+.menu-check::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--text-secondary); transition: transform var(--dur-fast) var(--ease-out); }
+.menu-check.is-on { background: var(--color-forest); }
+.menu-check.is-on::after { transform: translateX(11px); background: #fff; }
 .menu-item-danger, .menu-item-danger svg { color: var(--color-crimson-light); }
 .menu-item-danger:hover:not(:disabled), .menu-item-danger:focus-visible { background: var(--crimson-tint); }
 .menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 4px; }

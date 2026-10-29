@@ -4,7 +4,9 @@ import * as fabric from 'fabric';
 import * as Y from 'yjs';
 import {
   AlertCircle, ArrowLeft, Check, CloudOff, Download, Image as ImageIcon, Maximize, Minus, PanelLeft, PanelRight,
-  Play, Plus, Redo2, Sparkles, StickyNote, Undo2, Users, ChevronDown
+  Play, Plus, Redo2, Sparkles, StickyNote, Undo2, Users, ChevronDown, MoreHorizontal, Command, Keyboard, LayoutTemplate,
+  Magnet, Smile, Type, Shapes, Table2, BarChart3, Copy, Trash2, Group, Ungroup, AlignLeft, AlignCenter, AlignRight,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical, Palette, LayoutGrid, Save, Presentation
 } from 'lucide-react';
 import { connectYjsDoc, getSlidesArray, slideMapToPlain, plainToSlideMap } from '../data/yjsClient.js';
 import {
@@ -54,6 +56,11 @@ import { defaultChart, setChartField } from '../data/chartOps.js';
 import { makeTable, tableSize, tableText } from '../data/tableOps.js';
 import { shapeFields } from '../data/shapes.js';
 import { loadFont } from '../data/fonts.js';
+import { assetToBlock } from '../data/assetLibrary.js';
+import { snapBox, SNAP_THRESHOLD } from '../data/snapping.js';
+import { keyParts, shortcutFor } from '../data/shortcuts.js';
+import { LAYOUTS } from '../data/layouts.js';
+import { THEMES } from '../data/themes.js';
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
@@ -69,6 +76,9 @@ import SlideRail from '../components/editor/SlideRail.jsx';
 import PropertiesPanel from '../components/editor/PropertiesPanel.jsx';
 import ContextToolbar from '../components/editor/ContextToolbar.jsx';
 import InsertMenu from '../components/editor/InsertMenu.jsx';
+import CommandPalette from '../components/editor/CommandPalette.jsx';
+import ShortcutsDialog from '../components/editor/ShortcutsDialog.jsx';
+import SaveTemplateDialog from '../components/templates/SaveTemplateDialog.jsx';
 import CopilotPanel from '../components/copilot/CopilotPanel.jsx';
 import { createEditorBridge } from '../components/copilot/editorBridge.js';
 import ShareDeckDialog from '../components/decks/ShareDeckDialog.jsx';
@@ -94,6 +104,18 @@ const centred = (w, h) => ({ x: Math.round((CANVAS_WIDTH - w) / 2), y: Math.roun
 // Font families this page has already asked the browser to load.
 const requestedFonts = new Set();
 const MAX_ZOOM = 2;
+const SNAP_KEY = 'presync.snapToGuides';
+const GUIDE_COLOR = '#d6455d';
+// Pictures offered again under Insert › Elements.
+const MAX_DECK_IMAGES = 24;
+
+function readSnapSetting() {
+  try {
+    return localStorage.getItem(SNAP_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
 
 function colorForUser(id) {
   let hash = 0;
@@ -162,6 +184,9 @@ function EditorPage() {
   const [focusSection, setFocusSection] = useState(null);
   const [dropActive, setDropActive] = useState(false);
   const [zoom, setZoom] = useState(null); // null = fit the slide to the stage
+  const [snapOn, setSnapOn] = useState(readSnapSetting);
+  const [dialog, setDialog] = useState(null); // 'palette' | 'shortcuts' | 'template'
+  const [insertRequest, setInsertRequest] = useState(null); // opens Insert on a tab
   const [fitScale, setFitScale] = useState(1);
 
   // Panels start open where there is room for them; on smaller screens
@@ -196,6 +221,9 @@ function EditorPage() {
   const [fontsReady, setFontsReady] = useState(0);
   const activeSlideIdxRef = useRef(0);
   activeSlideIdxRef.current = activeSlideIdx;
+  const snapRef = useRef(snapOn);
+  snapRef.current = snapOn;
+  const viewScaleRef = useRef(1); // on-screen pixels per slide pixel
 
   // AI Copilot sidebar: inline on wide screens, an overlay otherwise.
   const [copilotOpen, setCopilotOpen] = useState(false);
@@ -418,6 +446,51 @@ function EditorPage() {
     };
     canvas.on('text:selection:changed', syncCharStyle);
     canvas.on('text:editing:entered', syncCharStyle);
+
+    // Smart guides: a dragged element snaps to the slide's and the other
+    // elements' edges and centres. Hold Alt to move freely.
+    let guides = [];
+    const boxOf = (o) => {
+      const r = o.getBoundingRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    };
+    canvas.on('object:moving', (e) => {
+      const t = e.target;
+      guides = [];
+      if (!t || !snapRef.current || e.e?.altKey) return;
+      // Fabric doesn't refresh an object's corners while it is dragged.
+      t.setCoords();
+      const moving = new Set(t.type === 'activeselection' ? t.getObjects() : [t]);
+      const others = canvas.getObjects().filter((o) => o.data?.blockId && !moving.has(o) && o.visible !== false).map(boxOf);
+      const frame = { left: 0, top: 0, width: CANVAS_WIDTH, height: CANVAS_HEIGHT };
+      const snap = snapBox(boxOf(t), others, frame, SNAP_THRESHOLD / (viewScaleRef.current || 1));
+      if (snap.dx || snap.dy) {
+        t.set({ left: t.left + snap.dx, top: t.top + snap.dy });
+        t.setCoords();
+      }
+      guides = snap.guides;
+    });
+    const clearGuides = () => {
+      if (!guides.length) return;
+      guides = [];
+      canvas.requestRenderAll();
+    };
+    canvas.on('mouse:up', clearGuides);
+    canvas.on('after:render', ({ ctx }) => {
+      if (!guides.length || !ctx) return;
+      const r = canvas.getRetinaScaling();
+      ctx.save();
+      ctx.setTransform(r, 0, 0, r, 0, 0);
+      ctx.strokeStyle = GUIDE_COLOR;
+      ctx.lineWidth = 1 / (viewScaleRef.current || 1);
+      ctx.beginPath();
+      for (const g of guides) {
+        if (g.axis === 'x') { ctx.moveTo(g.at, g.from); ctx.lineTo(g.at, g.to); }
+        else { ctx.moveTo(g.from, g.at); ctx.lineTo(g.to, g.at); }
+      }
+      ctx.stroke();
+      ctx.restore();
+    });
 
     // Cursor broadcast
     let lastSent = 0;
@@ -738,6 +811,48 @@ function EditorPage() {
 
   function handleInsertDivider() {
     insertBlock({ id: newId('b'), type: 'shape', shape: 'rect', ...centred(600, 3), width: 600, height: 3, background: theme?.accent || '#c9cec9', fontSize: 16, text: '' });
+  }
+
+  // A sticker, icon or emoji from Insert › Elements, in the middle of the slide.
+  async function handleInsertAsset(asset, color) {
+    const size = asset.kind === 'emoji' ? 120 : 160;
+    const w = asset.kind === 'emoji' ? Math.round(size * 1.2) : size;
+    const block = await assetToBlock(asset, { id: newId('b'), size, color, ...centred(w, size) });
+    insertBlock(block);
+  }
+
+  // Pictures already in this presentation, newest slide last, each once.
+  const deckImages = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const sl of slides) {
+      for (const b of sl.blocks || []) {
+        if (b.type !== 'image' || !b.imageUrl || seen.has(b.imageUrl)) continue;
+        seen.add(b.imageUrl);
+        out.push({ key: `${sl.id}:${b.id}`, url: b.imageUrl, alt: b.alt || '', width: b.width, height: b.height });
+      }
+    }
+    return out.slice(-MAX_DECK_IMAGES);
+  }, [slides]);
+
+  function handleInsertDeckImage(img) {
+    const ratio = img.width && img.height ? img.height / img.width : 0.75;
+    const width = Math.min(360, img.width || 360);
+    const height = Math.round(width * ratio);
+    const block = { id: newId('b'), type: 'image', ...centred(width, height), width, height, fontSize: 16, text: '', imageUrl: img.url };
+    if (img.alt) block.alt = img.alt;
+    insertBlock(block);
+  }
+
+  function handleToggleSnap() {
+    setSnapOn((on) => {
+      try {
+        localStorage.setItem(SNAP_KEY, on ? 'off' : 'on');
+      } catch {
+        // the setting just won't persist
+      }
+      return !on;
+    });
   }
 
   function handleSlideFromLayout(layoutId) {
@@ -1165,7 +1280,7 @@ function EditorPage() {
 
   // --- Keyboard shortcuts (skipped while typing in a panel field)
   const keyRef = useRef(null);
-  keyRef.current = { formatToggle: toggleFormat, list: handleList, indent: handleIndent, group: handleGroup, ungroup: handleUngroup, painter, setPainter };
+  keyRef.current = { formatToggle: toggleFormat, list: handleList, indent: handleIndent, group: handleGroup, ungroup: handleUngroup, painter, setPainter, setDialog };
   useEffect(() => {
     function onKeyDown(e) {
       const mod = e.metaKey || e.ctrlKey;
@@ -1174,6 +1289,12 @@ function EditorPage() {
       if (mod && key === 's') {
         e.preventDefault();
         handleSave();
+        return;
+      }
+      // Palette and shortcuts help, unless another dialog is open.
+      if (mod && !e.altKey && (key === 'k' || key === '/') && !document.querySelector('.dialog-backdrop')) {
+        e.preventDefault();
+        k.setDialog(key === 'k' ? 'palette' : 'shortcuts');
         return;
       }
       const active = fabricRef.current?.getActiveObject();
@@ -1263,6 +1384,7 @@ function EditorPage() {
 
   const peersOnThisSlide = peers.filter((p) => p.activeSlideIdx === activeSlideIdx && p.cursor);
   const scale = zoom ?? fitScale;
+  viewScaleRef.current = scale;
 
   let status;
   if (syncStatus === 'offline') status = { tone: 'warn', icon: CloudOff, label: 'Offline', detail: 'Reconnecting. Your edits sync when the connection is back.' };
@@ -1280,6 +1402,50 @@ function EditorPage() {
     'separator',
     { label: 'This slide as PNG', icon: ImageIcon, onSelect: () => handleExportSlideImage('png'), disabled: !activeSlide },
     { label: 'This slide as JPEG', icon: ImageIcon, onSelect: () => handleExportSlideImage('jpeg'), disabled: !activeSlide }
+  ];
+  const hasSlide = !!activeSlide;
+  const some = selectedIds.length > 0;
+  const many = selectedIds.length > 1;
+  const insertTab = (tab) => () => setInsertRequest({ tab });
+  const commands = [
+    { id: 'insert-text', group: 'Insert', label: 'Insert text box', icon: Type, run: insertTab('text'), disabled: !hasSlide },
+    { id: 'insert-elements', group: 'Insert', label: 'Insert sticker, icon or emoji', icon: Smile, keywords: 'elements emoji sticker icon decoration', run: insertTab('elements'), disabled: !hasSlide },
+    { id: 'insert-shape', group: 'Insert', label: 'Insert shape', icon: Shapes, run: insertTab('shapes'), disabled: !hasSlide },
+    { id: 'insert-table', group: 'Insert', label: 'Insert table', icon: Table2, run: insertTab('table'), disabled: !hasSlide },
+    { id: 'insert-chart', group: 'Insert', label: 'Insert chart', icon: BarChart3, run: insertTab('chart'), disabled: !hasSlide },
+    { id: 'insert-image', group: 'Insert', label: 'Upload a picture', icon: ImageIcon, keywords: 'image photo', run: () => imageInputRef.current?.click(), disabled: !hasSlide },
+    { id: 'new-slide', group: 'Slides', label: 'New slide', icon: Plus, run: handleAddSlide },
+    { id: 'new-slide-layout', group: 'Slides', label: 'New slide from a layout', icon: LayoutGrid, run: insertTab('slide') },
+    { id: 'duplicate-slide', group: 'Slides', label: 'Duplicate slide', icon: Copy, run: () => handleDuplicateSlide(activeSlideIdx), disabled: !hasSlide },
+    { id: 'hide-slide', group: 'Slides', label: activeSlide?.hidden ? 'Show slide' : 'Hide slide', icon: StickyNote, keywords: 'skip', run: () => handleSlidePatch({ hidden: activeSlide?.hidden ? null : true }), disabled: !hasSlide },
+    ...LAYOUTS.map((l) => ({ id: `layout-${l.id}`, group: 'Layouts', label: `Layout: ${l.name}`, icon: LayoutGrid, run: () => handleApplyLayout(l.id), disabled: !hasSlide })),
+    ...THEMES.map((t) => ({ id: `theme-${t.id}`, group: 'Themes', label: `Theme: ${t.name} (all slides)`, icon: Palette, run: () => handleApplyTheme(t.id, true), disabled: !hasSlide })),
+    { id: 'duplicate', group: 'Arrange', label: 'Duplicate selection', icon: Copy, keys: shortcutFor('duplicate'), run: handleDuplicateSelected, disabled: !some },
+    { id: 'delete', group: 'Arrange', label: 'Delete selection', icon: Trash2, keys: shortcutFor('delete'), run: handleDeleteSelected, disabled: !some },
+    { id: 'group', group: 'Arrange', label: 'Group', icon: Group, keys: shortcutFor('group'), run: handleGroup, disabled: !many },
+    { id: 'ungroup', group: 'Arrange', label: 'Ungroup', icon: Ungroup, keys: shortcutFor('ungroup'), run: handleUngroup, disabled: !some },
+    { id: 'align-left', group: 'Arrange', label: 'Align left', icon: AlignLeft, run: () => handleAlign('left'), disabled: !some },
+    { id: 'align-center', group: 'Arrange', label: 'Align centre', icon: AlignCenter, keywords: 'center', run: () => handleAlign('centre'), disabled: !some },
+    { id: 'align-right', group: 'Arrange', label: 'Align right', icon: AlignRight, run: () => handleAlign('right'), disabled: !some },
+    { id: 'align-top', group: 'Arrange', label: 'Align top', icon: AlignStartVertical, run: () => handleAlign('top'), disabled: !some },
+    { id: 'align-middle', group: 'Arrange', label: 'Align middle', icon: AlignCenterVertical, run: () => handleAlign('middle'), disabled: !some },
+    { id: 'align-bottom', group: 'Arrange', label: 'Align bottom', icon: AlignEndVertical, run: () => handleAlign('bottom'), disabled: !some },
+    { id: 'snap', group: 'View', label: snapOn ? 'Turn off snapping to guides' : 'Turn on snapping to guides', icon: Magnet, keywords: 'smart guides align', run: handleToggleSnap },
+    { id: 'shortcuts', group: 'Help', label: 'Keyboard shortcuts', icon: Keyboard, keys: shortcutFor('shortcuts'), run: () => setDialog('shortcuts') },
+    { id: 'undo', group: 'Edit', label: 'Undo', icon: Undo2, keys: shortcutFor('undo'), run: handleUndo, disabled: !undoState.canUndo },
+    { id: 'redo', group: 'Edit', label: 'Redo', icon: Redo2, keys: shortcutFor('redo'), run: handleRedo, disabled: !undoState.canRedo },
+    { id: 'save', group: 'File', label: 'Save a snapshot', icon: Save, keys: shortcutFor('save'), run: handleSave },
+    { id: 'template', group: 'File', label: 'Save as template', icon: LayoutTemplate, run: () => setDialog('template'), disabled: !deckMeta || slides.length === 0 },
+    ...Object.entries(EXPORT_FORMATS).map(([format, { label }]) => ({ id: `export-${format}`, group: 'File', label: `Export as ${label}`, icon: Download, run: () => handleExport(format), disabled: !!exporting })),
+    { id: 'present', group: 'File', label: 'Present', icon: Presentation, keywords: 'go live start', run: handleGoLive, disabled: goingLive || !deckMeta || slides.length === 0 }
+  ];
+  const moreItems = [
+    { label: 'Command palette', icon: Command, shortcut: keyParts('Mod+K').join(' '), onSelect: () => setDialog('palette') },
+    { label: 'Keyboard shortcuts', icon: Keyboard, shortcut: keyParts('Mod+/').join(' '), onSelect: () => setDialog('shortcuts') },
+    'separator',
+    { label: 'Snap to guides', icon: Magnet, checked: snapOn, onSelect: handleToggleSnap },
+    'separator',
+    { label: 'Save as template…', icon: LayoutTemplate, onSelect: () => setDialog('template'), disabled: !deckMeta || slides.length === 0 }
   ];
   const toolbarActions = {
     format: formatSelected,
@@ -1377,6 +1543,10 @@ function EditorPage() {
             onImage={() => imageInputRef.current?.click()}
             onDivider={handleInsertDivider}
             onSlide={handleSlideFromLayout}
+            onAsset={handleInsertAsset}
+            deckImages={deckImages}
+            onDeckImage={handleInsertDeckImage}
+            request={insertRequest}
           />
           <input ref={imageInputRef} type="file" accept={IMAGE_TYPES.join(',')} hidden onChange={handleInsertImage} />
           <input ref={replaceInputRef} type="file" accept={IMAGE_TYPES.join(',')} hidden onChange={handleReplaceImage} aria-label="Replacement picture" />
@@ -1402,6 +1572,7 @@ function EditorPage() {
           <button type="button" className="btn btn-ghost btn-sm ed-save" onClick={handleSave} disabled={saving} title="Save a snapshot now (Ctrl+S)">
             {saving ? 'Saving…' : 'Save'}
           </button>
+          <Menu label="More" icon={MoreHorizontal} items={moreItems} />
           <span className="ed-sep" aria-hidden="true" />
           <button
             type="button"
@@ -1612,6 +1783,20 @@ function EditorPage() {
           initialMeta={deckMeta}
           onChanged={setDeckMeta}
           onClose={() => setShowShare(false)}
+        />
+      )}
+
+      {dialog === 'palette' && <CommandPalette commands={commands} onClose={() => setDialog(null)} />}
+      {dialog === 'shortcuts' && <ShortcutsDialog onClose={() => setDialog(null)} />}
+      {dialog === 'template' && (
+        <SaveTemplateDialog
+          deckId={deckId}
+          defaultName={deckMeta?.title}
+          onClose={() => setDialog(null)}
+          onSaved={(t) => {
+            setDialog(null);
+            toast.success(`Saved “${t.name}” to your templates`);
+          }}
         />
       )}
 

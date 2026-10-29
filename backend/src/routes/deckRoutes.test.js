@@ -203,6 +203,28 @@ describe('POST /api/decks', () => {
       slides: []
     });
   });
+
+  it('starts the deck with the slides of a starter template', async () => {
+    Deck.create.mockImplementation(async (doc) => ({ _id: DECK_ID, ...doc }));
+    const slides = [{ id: 's1', order: 0, blocks: [{ id: 'b1', type: 'textbox', x: 10, y: 10, width: 300, text: 'Hello' }] }];
+    const res = await server.request('POST', '/api/decks', { token: tokenFor(OWNER_ID), body: { title: '  Pitch  ', slides } });
+    expect(res.status).toBe(201);
+    expect(Deck.create).toHaveBeenCalledWith({ title: 'Pitch', ownerId: OWNER_ID, slides });
+  });
+
+  it('refuses slides that are not a short list of slides', async () => {
+    for (const slides of ['nope', [1, 2], Array.from({ length: 61 }, (_, i) => ({ id: `s${i}`, order: i }))]) {
+      const res = await server.request('POST', '/api/decks', { token: tokenFor(OWNER_ID), body: { slides } });
+      expect(res.status).toBe(400);
+    }
+    expect(Deck.create).not.toHaveBeenCalled();
+  });
+
+  it('answers 400, not 500, when the slides do not fit the schema', async () => {
+    Deck.create.mockRejectedValue(Object.assign(new Error('bad'), { name: 'ValidationError' }));
+    const res = await server.request('POST', '/api/decks', { token: tokenFor(OWNER_ID), body: { slides: [{ order: 'x' }] } });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('GET /api/decks/:deckId', () => {

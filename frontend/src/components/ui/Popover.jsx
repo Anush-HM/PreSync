@@ -4,9 +4,15 @@ import './ui.css';
 // A button that opens a panel of arbitrary content (a colour grid, a
 // font list, a size picker). Escape or a click outside closes it and
 // focus returns to the trigger. `children` may be a function receiving
-// `close`, for content that closes itself after a pick.
-function Popover({ label, trigger, children, align = 'start', className = '', triggerClassName = 'icon-btn', panelClassName = '', tip, disabled, onOpenChange }) {
+// `close`, for content that closes itself after a pick. A new truthy
+// `openSignal` opens it from outside.
+function Popover({ label, trigger, children, align = 'start', className = '', triggerClassName = 'icon-btn', panelClassName = '', tip, disabled, onOpenChange, openSignal }) {
   const [open, setOpenState] = useState(false);
+  const [lastSignal, setLastSignal] = useState(openSignal);
+  if (openSignal !== lastSignal) {
+    setLastSignal(openSignal);
+    if (openSignal && !disabled) setOpenState(true);
+  }
   const rootRef = useRef(null);
   const triggerRef = useRef(null);
   const panelId = useId();
