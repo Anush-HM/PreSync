@@ -660,7 +660,19 @@ function drawPdfImage(doc, b, buffer) {
   }
 }
 
-export function exportDeckToPdf(deck) {
+function drawPdfNotesPage(doc, s, number) {
+  doc.addPage();
+  doc.rect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT).fill('#ffffff');
+  const head = `Speaker notes · Slide ${number}`;
+  const bold = useFont(doc, { fontWeight: 'bold' });
+  doc.fillColor('#285c43').fontSize(14).text(bold ? head : pdfSafeText(head), 60, 48, { width: CANVAS_WIDTH - 120 });
+  const body = useFont(doc, {});
+  doc.fillColor('#2b302d').fontSize(16).text(body ? String(s.notes) : pdfSafeText(String(s.notes)), 60, 84, { width: CANVAS_WIDTH - 120, height: CANVAS_HEIGHT - 120, ellipsis: true, lineGap: 4 });
+}
+
+// Options: { includeHidden: false, notes: false }. With `notes`, a page
+// of speaker notes follows each slide that has some.
+export function exportDeckToPdf(deck, { includeHidden = false, notes = false } = {}) {
   const doc = new PDFDocument({
     size: [CANVAS_WIDTH, CANVAS_HEIGHT],
     margin: 0,
@@ -675,8 +687,8 @@ export function exportDeckToPdf(deck) {
     doc.on('error', reject);
   });
 
-  // Hidden slides are left out of the PDF, as when presenting.
-  const slides = sortedSlides(deck).filter((s) => !s.hidden);
+  // Hidden slides are left out of the PDF, as when presenting, unless asked for.
+  const slides = sortedSlides(deck).filter((s) => includeHidden || !s.hidden);
   if (slides.length === 0) doc.addPage();
 
   for (const s of slides) {
@@ -712,6 +724,7 @@ export function exportDeckToPdf(deck) {
       if (!b.text) continue;
       withTransform(doc, b, () => drawPdfText(doc, b, { x: b.x || 0, y: b.y || 0, width: b.width || 300, height: b.height || 0 }));
     }
+    if (notes && String(s.notes || '').trim()) drawPdfNotesPage(doc, s, slides.indexOf(s) + 1);
   }
 
   doc.end();

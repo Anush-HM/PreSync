@@ -1,6 +1,9 @@
 import Deck from '../models/Deck.js';
 import User from '../models/User.js';
 import AiConversation from '../models/AiConversation.js';
+import DeckVersion from '../models/DeckVersion.js';
+import Comment from '../models/Comment.js';
+import { autoSnapshot } from './versionController.js';
 import { flushDoc } from '../yjs/docManager.js';
 
 // Every handler here assumes requireAuth has already run — req.userId is
@@ -186,7 +189,10 @@ export async function saveDeck(req, res) {
   if (!isEditorOf(deck, req.userId)) return res.status(403).json({ error: 'Not a collaborator on this deck' });
 
   const flushed = await flushDoc(req.params.deckId);
-  res.json({ savedAt: new Date().toISOString(), flushed });
+  // Save also keeps an automatic version now and then.
+  const saved = flushed ? (await Deck.findById(req.params.deckId)) || deck : deck;
+  const version = await autoSnapshot(saved, req.userId);
+  res.json({ savedAt: new Date().toISOString(), flushed, versionId: version ? version._id.toString() : null });
 }
 
 // Owner-only: invite another user to co-edit this deck by email. This is
@@ -238,7 +244,11 @@ export async function deleteDeck(req, res) {
     return res.status(403).json({ error: 'Only the owner can delete this deck' });
   }
   await deck.deleteOne();
-  // Copilot conversations about a deleted deck go with it.
-  await AiConversation.deleteMany({ deckId: deck._id });
+  // Copilot conversations, versions and comments go with the deck.
+  await Promise.all([
+    AiConversation.deleteMany({ deckId: deck._id }),
+    DeckVersion.deleteMany({ deckId: deck._id }),
+    Comment.deleteMany({ deckId: deck._id })
+  ]);
   res.status(204).end();
 }
