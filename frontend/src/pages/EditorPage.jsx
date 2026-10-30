@@ -175,6 +175,8 @@ function EditorPage() {
   const CH = deckMeta?.canvasHeight || 540;
   // Local centred helper using this deck's canvas dimensions.
   const centredSlide = (w, h) => centred(w, h, CW, CH);
+  // The size for the Fabric handlers, which outlive any one render.
+  const canvasSizeRef = useRef({ width: 960, height: 540 });
   const [metaError, setMetaError] = useState('');
   const [titleDraft, setTitleDraft] = useState(null); // non-null while renaming
   const [showShare, setShowShare] = useState(false);
@@ -261,6 +263,7 @@ function EditorPage() {
     if (!canvas || !deckMeta) return;
     const cw = deckMeta.canvasWidth  || 960;
     const ch = deckMeta.canvasHeight || 540;
+    canvasSizeRef.current = { width: cw, height: ch };
     if (canvas.getWidth() !== cw || canvas.getHeight() !== ch) {
       canvas.setDimensions({ width: cw, height: ch });
       canvas.renderAll();
@@ -362,8 +365,7 @@ function EditorPage() {
   // --- Fabric canvas init
   useEffect(() => {
     const canvas = new fabric.Canvas(canvasElRef.current, {
-      width: CW,
-      height: CH,
+      ...canvasSizeRef.current,
       backgroundColor: DEFAULT_SLIDE_BACKGROUND,
       preserveObjectStacking: true,
     });
@@ -512,7 +514,7 @@ function EditorPage() {
       t.setCoords();
       const moving = new Set(t.type === 'activeselection' ? t.getObjects() : [t]);
       const others = canvas.getObjects().filter((o) => o.data?.blockId && !moving.has(o) && o.visible !== false).map(boxOf);
-      const frame = { left: 0, top: 0, width: CW, height: CH };
+      const frame = { left: 0, top: 0, ...canvasSizeRef.current };
       const snap = snapBox(boxOf(t), others, frame, SNAP_THRESHOLD / (viewScaleRef.current || 1));
       if (snap.dx || snap.dy) {
         t.set({ left: t.left + snap.dx, top: t.top + snap.dy });
@@ -881,7 +883,7 @@ function EditorPage() {
 
     canvas.requestRenderAll();
     applyingRemoteRef.current = false;
-  }, [slides, activeSlideIdx, fontsReady]);
+  }, [slides, activeSlideIdx, fontsReady, CW, CH]);
 
   const activeSlide = slides[activeSlideIdx];
   const selectedBlocks = (activeSlide?.blocks || []).filter((b) => selectedIds.includes(b.id));

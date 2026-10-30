@@ -40,7 +40,7 @@ describe('exportDeckToPptx', () => {
     const buffer = await exportDeckToPptx(deck);
     expect(buffer.subarray(0, 2).toString()).toBe('PK');
 
-    const slides = await extractSlidesFromPptx(buffer);
+    const { slides } = await extractSlidesFromPptx(buffer);
     expect(slides).toHaveLength(2);
     const [first, second] = slides; // sorted by order
 
@@ -70,7 +70,7 @@ describe('exportDeckToPdf', () => {
     expect([width, height]).toEqual([960, 540]);
     await pdf.destroy();
 
-    const slides = await extractSlidesFromPdf(buffer);
+    const { slides } = await extractSlidesFromPdf(buffer);
     const texts = slides.map((s) => s.blocks.map((b) => b.text).join(' | '));
     expect(texts[0]).toContain('Big title');
     expect(texts[0]).toContain('Body "quoted" text');
@@ -129,7 +129,7 @@ describe('export of imported content', () => {
   };
 
   it('keeps mixed formatting, shapes and tables in PowerPoint', async () => {
-    const [slide] = await extractSlidesFromPptx(await exportDeckToPptx(rich));
+    const { slides: [slide] } = await extractSlidesFromPptx(await exportDeckToPptx(rich));
     const text = slide.blocks.find((b) => b.type === 'textbox' && b.text.startsWith('Lead'));
     expect(text.text).toBe('Lead: rest\nSecond line');
     const boldRange = text.styles.find((r) => r.style.fontWeight === 'bold');

@@ -31,7 +31,7 @@ async function buildPptx() {
 
 describe('extractSlidesFromPptx', () => {
   it('extracts text, formatting, images, backgrounds and notes', async () => {
-    const slides = await extractSlidesFromPptx(await buildPptx());
+    const { slides } = await extractSlidesFromPptx(await buildPptx());
     expect(slides).toHaveLength(3);
 
     const [s1, s2, s3] = slides;
@@ -72,7 +72,7 @@ describe('extractSlidesFromPptx', () => {
   });
 
   it('keeps slide order from presentation.xml and gives blocks unique ids', async () => {
-    const slides = await extractSlidesFromPptx(await buildPptx());
+    const { slides } = await extractSlidesFromPptx(await buildPptx());
     expect(slides.map((s) => s.order)).toEqual([0, 1, 2]);
     const ids = slides.flatMap((s) => s.blocks.map((b) => b.id));
     expect(new Set(ids).size).toBe(ids.length);
@@ -82,14 +82,14 @@ describe('extractSlidesFromPptx', () => {
     // Made with python-pptx's default (PowerPoint-authored) template: the
     // slide shapes carry only text, everything else comes from layouts.
     const file = await readFile(new URL('../test/fixtures/placeholders.pptx', import.meta.url));
-    const [titleSlide, contentSlide] = await extractSlidesFromPptx(file);
+    const { slides: [titleSlide, contentSlide] } = await extractSlidesFromPptx(file);
 
     expect(titleSlide.blocks).toEqual([
       expect.objectContaining({
-        text: 'Placeholder title', x: 181.2, y: 171.4, width: 597.6, fontSize: 44, textAlign: 'center',
+        text: 'Placeholder title', x: 81.6, y: 228.5, width: 796.8, fontSize: 58.7, textAlign: 'center',
         role: 'title', verticalAlign: 'middle'
       }),
-      expect.objectContaining({ text: 'Subtitle from layout', x: 235.2, y: 309.6, fontSize: 32, textAlign: 'center', role: 'subtitle', fill: '#404040' })
+      expect.objectContaining({ text: 'Subtitle from layout', x: 153.6, y: 412.8, fontSize: 42.7, textAlign: 'center', role: 'subtitle', fill: '#404040' })
     ]);
     // The body placeholder's bullets come from the master's body style.
     expect(contentSlide.blocks.map((b) => b.text.replace(/\u00a0+/g, ' '))).toEqual([
@@ -97,8 +97,8 @@ describe('extractSlidesFromPptx', () => {
       '• First point\n• Second point',
       'Grouped text'
     ]);
-    // 4:3 slide: content is centred horizontally on the 16:9 canvas.
-    expect(contentSlide.blocks[2]).toMatchObject({ x: 227.2, y: 403.6, width: 185.6 });
+    // 4:3 slide: content fills the 4:3 canvas instead of being letterboxed.
+    expect(contentSlide.blocks[2]).toMatchObject({ x: 142.9, y: 538.1, width: 247.5 });
     expect(contentSlide.notes).toBe('Keep it short');
   });
 
