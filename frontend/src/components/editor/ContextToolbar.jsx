@@ -240,7 +240,7 @@ export function ThemeChooser({ current, onApply }) {
       <p className="props-label">Changes colours and fonts only. Your content and layout stay as they are.</p>
       <div className="theme-grid">
         {THEMES.map((t) => (
-          <div key={t.id} className={`theme-card${current === t.id ? ' is-current' : ''}`}>
+          <div key={t.id} className={`theme-card${current === t.id ? ' is-current' : ''}`} style={{ cursor: 'pointer' }} onClick={() => onApply(t.id, false)}>
             <div
               className="theme-swatch"
               style={{ background: t.backgroundGradient ? `linear-gradient(${t.backgroundGradient.angle}deg, ${t.backgroundGradient.stops.map((s) => `${s.color} ${s.pos * 100}%`).join(', ')})` : t.background }}
@@ -250,7 +250,7 @@ export function ThemeChooser({ current, onApply }) {
               <i style={{ background: t.accent }} />
             </div>
             <span className="theme-name">{t.name}</span>
-            <div className="theme-actions">
+            <div className="theme-actions" onClick={(e) => e.stopPropagation()}>
               <button type="button" className="btn btn-quiet btn-sm" onClick={() => onApply(t.id, false)}>This slide</button>
               <button type="button" className="btn btn-quiet btn-sm" onClick={() => onApply(t.id, true)}>All</button>
             </div>

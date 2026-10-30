@@ -204,7 +204,9 @@ describe('POST /api/decks', () => {
     expect(Deck.create).toHaveBeenCalledWith({
       title: 'Untitled deck',
       ownerId: OWNER_ID,
-      slides: []
+      slides: [],
+      canvasWidth: 960,
+      canvasHeight: 540
     });
   });
 
@@ -213,7 +215,7 @@ describe('POST /api/decks', () => {
     const slides = [{ id: 's1', order: 0, blocks: [{ id: 'b1', type: 'textbox', x: 10, y: 10, width: 300, text: 'Hello' }] }];
     const res = await server.request('POST', '/api/decks', { token: tokenFor(OWNER_ID), body: { title: '  Pitch  ', slides } });
     expect(res.status).toBe(201);
-    expect(Deck.create).toHaveBeenCalledWith({ title: 'Pitch', ownerId: OWNER_ID, slides });
+    expect(Deck.create).toHaveBeenCalledWith({ title: 'Pitch', ownerId: OWNER_ID, slides, canvasWidth: 960, canvasHeight: 540 });
   });
 
   it('refuses slides that are not a short list of slides', async () => {
@@ -485,25 +487,25 @@ describe('POST /api/decks/import', () => {
 
   it('creates a deck from a PDF, titled after the file (legacy "pdf" field)', async () => {
     const slides = [{ id: 's1', order: 0, blocks: [] }];
-    extractSlidesFromPdf.mockResolvedValue(slides);
+    extractSlidesFromPdf.mockResolvedValue({ slides, canvasWidth: 960, canvasHeight: 720 });
     Deck.create.mockImplementation(async (doc) => ({ _id: DECK_ID, ...doc }));
     const res = await upload(form('Launch Plan.pdf', 'application/pdf', { field: 'pdf' }));
     expect(res.status).toBe(201);
     expect(Buffer.isBuffer(extractSlidesFromPdf.mock.calls[0][0])).toBe(true);
-    expect(Deck.create).toHaveBeenCalledWith({ title: 'Launch Plan', ownerId: OWNER_ID, slides });
+    expect(Deck.create).toHaveBeenCalledWith({ title: 'Launch Plan', ownerId: OWNER_ID, slides, canvasWidth: 960, canvasHeight: 720 });
     expect(res.body).toEqual({ id: DECK_ID, title: 'Launch Plan', format: 'pdf', slideCount: 1, slides });
   });
 
   it('creates a deck from a PPTX, even when the browser sends it as octet-stream', async () => {
     const slides = [{ id: 's1', order: 0, blocks: [] }];
-    extractSlidesFromPptx.mockResolvedValue(slides);
+    extractSlidesFromPptx.mockResolvedValue({ slides, canvasWidth: 960, canvasHeight: 720 });
     Deck.create.mockImplementation(async (doc) => ({ _id: DECK_ID, ...doc }));
     for (const type of [PPTX_MIME, 'application/octet-stream']) {
       const res = await upload(form('Board Deck.pptx', type));
       expect(res.status).toBe(201);
       expect(res.body.format).toBe('pptx');
     }
-    expect(Deck.create).toHaveBeenLastCalledWith({ title: 'Board Deck', ownerId: OWNER_ID, slides });
+    expect(Deck.create).toHaveBeenLastCalledWith({ title: 'Board Deck', ownerId: OWNER_ID, slides, canvasWidth: 960, canvasHeight: 720 });
     expect(extractSlidesFromPdf).not.toHaveBeenCalled();
   });
 

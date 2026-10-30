@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import SlideView from './SlideView.jsx';
-import { CANVAS_WIDTH } from '../data/slideFormat.js';
 import './SlideView.css';
 
 // Renders a slide at its native 960×540 and scales it to the width of

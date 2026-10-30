@@ -10,7 +10,7 @@ import { detectFormat, FORMAT_LABELS, unsupportedFormatError } from '../services
 async function extractSlidesFromDocx(buffer, fileName) {
   const parsed = await parseDocx(buffer);
   const { outline } = analyzeDocx(parsed, fileName);
-  return outlineToSlides(outline, parsed.images, parsed.blocks);
+  return { slides: outlineToSlides(outline, parsed.images, parsed.blocks) };
 }
 
 const EXTRACTORS = {
@@ -32,19 +32,22 @@ export async function importDeck(req, res) {
   const unsupported = unsupportedFormatError(format);
   if (unsupported) return res.status(unsupported.status).json({ error: unsupported.error });
 
-  let slides;
+  let extracted;
   try {
-    slides = await EXTRACTORS[format](file);
+    extracted = await EXTRACTORS[format](file);
   } catch (err) {
     return res.status(422).json({ error: `Could not parse ${FORMAT_LABELS[format]}: ${err.message}` });
   }
 
+  const { slides, canvasWidth = 960, canvasHeight = 540 } = extracted;
   const title = req.body.title?.trim() || file.originalname.replace(/\.(pdf|pptx|docx)$/i, '');
 
   const deck = await Deck.create({
     title,
     ownerId: req.userId,
-    slides
+    slides,
+    canvasWidth,
+    canvasHeight
   });
 
   res.status(201).json({

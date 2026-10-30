@@ -59,7 +59,7 @@ async function buildDeck() {
 describe('charts, SmartArt and embedded objects', () => {
   it('turns charts into chart blocks with their data, colours and options', async () => {
     const report = {};
-    const [s1] = await extractSlidesFromPptx(await buildDeck(), report);
+    const { slides: [s1] } = await extractSlidesFromPptx(await buildDeck(), report);
     const charts = s1.blocks.filter((b) => b.type === 'chart');
     expect(charts).toHaveLength(2);
     const [pie, bar] = charts;
@@ -75,7 +75,7 @@ describe('charts, SmartArt and embedded objects', () => {
   });
 
   it('redraws SmartArt from its saved layout as editable shapes and text', async () => {
-    const slides = await extractSlidesFromPptx(await buildDeck());
+    const { slides } = await extractSlidesFromPptx(await buildDeck());
     const s2 = slides[1];
     const shapes = s2.blocks.filter((b) => b.type === 'shape' && b.role !== 'placeholder');
     expect(shapes).toHaveLength(2);
@@ -90,14 +90,14 @@ describe('charts, SmartArt and embedded objects', () => {
   });
 
   it('shows an embedded object as its preview picture in the object frame', async () => {
-    const slides = await extractSlidesFromPptx(await buildDeck());
+    const { slides } = await extractSlidesFromPptx(await buildDeck());
     const preview = slides[1].blocks.find((b) => b.role === 'object');
     expect(preview).toMatchObject({ type: 'image', x: 672, y: 336, width: 192, height: 144 });
     expect(preview.imageUrl).toMatch(/^data:image\/png;base64,/);
   });
 
   it('exports charts as native PowerPoint charts and draws them in PDFs', async () => {
-    const slides = await extractSlidesFromPptx(await buildDeck());
+    const { slides } = await extractSlidesFromPptx(await buildDeck());
     const deck = { title: 'Charts', slides };
     const out = await JSZip.loadAsync(await exportDeckToPptx(deck));
     const chartParts = Object.keys(out.files).filter((f) => /^ppt\/charts\/chart\d+\.xml$/.test(f));
@@ -106,7 +106,7 @@ describe('charts, SmartArt and embedded objects', () => {
     expect(xml).toMatch(/<c:pieChart\b/);
     expect(xml).toContain('<c:barDir val="bar"/>');
     // Re-importing the export gives the same data back.
-    const again = await extractSlidesFromPptx(await exportDeckToPptx(deck));
+    const { slides: again } = await extractSlidesFromPptx(await exportDeckToPptx(deck));
     const pie = again[0].blocks.find((b) => b.type === 'chart' && b.chart.kind === 'pie');
     expect(pie.chart.series[0].values).toEqual([50, 30, 20]);
     const pdf = await exportDeckToPdf(deck);

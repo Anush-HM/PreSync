@@ -10,10 +10,7 @@ export const CANVAS_HEIGHT = 540;
 export const ASPECT_RATIOS = [
   { label: 'Widescreen 16:9 (Default)', width: 960,  height: 540 },
   { label: 'Standard 4:3',              width: 960,  height: 720 },
-  { label: 'A4 Portrait',               width: 540,  height: 763 },
   { label: 'A4 Landscape',              width: 960,  height: 680 },
-  { label: 'Square 1:1',                width: 720,  height: 720 },
-  { label: 'Vertical 9:16',             width: 540,  height: 960 },
 ];
 
 export const DEFAULT_TEXT_COLOR = '#1a1a2e';
@@ -186,7 +183,7 @@ export function styledRuns(text, styles) {
 // A list marker at the start of a paragraph, as imported: optional
 // indent, a bullet or number, then non-breaking spaces up to the text.
 // Wrapped lines of such a paragraph hang under the text, not the marker.
-export const LIST_PREFIX = /^\u00a0*(?:[â€¢â–ªâ–«âž¢âž¤âž”âžœâžâœ“â– â–¡â—â—‹â—¦â—†â—‡â–â‘â™¦â—»â€“\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)])\u00a0+/u;
+export const LIST_PREFIX = /^\u00a0*(?:[\u2022\u25aa\u25ab\u27a4\u279c\u2713\u25a0\u25a1\u25cf\u25cb\u25c6\u25c7\u2666\u2013\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)])\u00a0+/u;
 
 // Runs split into hard lines (paragraphs), each [{ text, style }].
 export function paragraphRuns(text, styles) {

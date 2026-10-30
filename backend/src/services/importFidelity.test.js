@@ -18,7 +18,7 @@ describe('PowerPoint import fidelity', () => {
   let report;
   beforeAll(async () => {
     report = {};
-    slides = await extractSlidesFromPptx(await fixture('fidelity-deck.pptx'), report);
+    ({ slides } = await extractSlidesFromPptx(await fixture('fidelity-deck.pptx'), report));
   });
 
   it('A: title slide keeps separate boxes, sizes and only the bold that is in the source', () => {
@@ -88,7 +88,7 @@ describe('PowerPoint import fidelity', () => {
 describe('PDF import fidelity', () => {
   it('F: pages keep their rendered background (images, colours) under editable, aligned text', async () => {
     const report = {};
-    const slides = await extractSlidesFromPdf(await fixture('fidelity-deck.pdf'), report);
+    const { slides } = await extractSlidesFromPdf(await fixture('fidelity-deck.pdf'), report);
     expect(slides).toHaveLength(6);
     slides.forEach((s) => expect(s.backgroundImageUrl).toMatch(/^data:image\/jpeg;base64,/));
     const toc = slides[1];

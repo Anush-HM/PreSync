@@ -53,7 +53,7 @@ describe('export of editor fields', () => {
     expect(s1).toMatch(/baseline="30000"/);
     expect(s2).toContain('show="0"');
     // The cropped picture still lands where it was on the slide.
-    const [slide] = await extractSlidesFromPptx(buffer);
+    const { slides: [slide] } = await extractSlidesFromPptx(buffer);
     expect(slide.blocks.find((b) => b.type === 'image')).toMatchObject({ x: 100, y: 100, width: 300, height: 150 });
   });
 
