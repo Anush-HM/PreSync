@@ -1,4 +1,4 @@
-import JSZip from 'jszip';
+﻿import JSZip from 'jszip';
 import path from 'path';
 import { attr, child, children, find, num, parseXml, readRels, readXml, relOfType } from './ooxml.js';
 import {
@@ -19,7 +19,7 @@ import { mimeForExt, processImage, toDataUrl, WEB_IMAGE_EXT } from './imageProce
 import { readChart } from './pptxCharts.js';
 
 // Extracts editable content from a .pptx (Office Open XML) deck onto the
-// 960×540 editor canvas:
+// 960Ã—540 editor canvas:
 //  - text keeps per-run formatting (font, size, weight, italic,
 //    underline, strike, colour), bullets and numbering, indents, line
 //    spacing, box margins, vertical anchoring and shrink-on-overflow,
@@ -47,8 +47,8 @@ const MAX_TOTAL_IMAGE_BYTES = 9 * 1024 * 1024;
 const DEFAULT_FONT_PT = 18;
 const ALIGN = { l: 'left', ctr: 'center', r: 'right', just: 'justify', dist: 'justify' };
 const ANCHOR = { t: 'top', ctr: 'middle', b: 'bottom', just: 'top', dist: 'top' };
-// PowerPoint's single line spacing is about 1.2× the font size; Fabric's
-// is 1.13×, so lineHeight values are scaled by this.
+// PowerPoint's single line spacing is about 1.2Ã— the font size; Fabric's
+// is 1.13Ã—, so lineHeight values are scaled by this.
 const LINE_SCALE = 1.2 / 1.13;
 
 export class PptxParseError extends Error {}
@@ -126,13 +126,13 @@ export function paragraphText(p) {
 // Symbol fonts store bullets as private code points; these are the
 // glyphs they draw.
 const SYMBOL_BULLETS = {
-  wingdings: { 'Ø': '➢', '§': '▪', 'ü': '✓', 'q': '❑', 'v': '❖', 'n': '■', 'l': '●', 'Ü': '➤', 'ð': '➔', 'à': '➔', 'o': '□', 'p': '□', 'w': '◆', 'u': '◆', 'ª': '▫', '¨': '◻', 'è': '➜', 'Þ': '➝' },
-  symbol: { '·': '•', 'Ø': '➢', '¨': '♦', 'ß': '⇐', 'à': '◊', 'Þ': '⇒' }
+  wingdings: { 'Ã˜': 'âž¢', 'Â§': 'â–ª', 'Ã¼': 'âœ“', 'q': 'â‘', 'v': 'â–', 'n': 'â– ', 'l': 'â—', 'Ãœ': 'âž¤', 'Ã°': 'âž”', 'Ã ': 'âž”', 'o': 'â–¡', 'p': 'â–¡', 'w': 'â—†', 'u': 'â—†', 'Âª': 'â–«', 'Â¨': 'â—»', 'Ã¨': 'âžœ', 'Ãž': 'âž' },
+  symbol: { 'Â·': 'â€¢', 'Ã˜': 'âž¢', 'Â¨': 'â™¦', 'ÃŸ': 'â‡', 'Ã ': 'â—Š', 'Ãž': 'â‡’' }
 };
 
 function bulletChar(char, font) {
   const key = (font || '').toLowerCase();
-  if (key.startsWith('wingdings')) return SYMBOL_BULLETS.wingdings[char] || '•';
+  if (key.startsWith('wingdings')) return SYMBOL_BULLETS.wingdings[char] || 'â€¢';
   if (key === 'symbol') return SYMBOL_BULLETS.symbol[char] || char;
   return char;
 }
@@ -231,7 +231,7 @@ function makeTextExtractor({ theme, fontPx, emuToPx }) {
     return { style, cap: firstAttr(rPrs, 'cap'), pt };
   }
 
-  // Returns text-block fields: { text, styles, fontSize, fontFamily, …,
+  // Returns text-block fields: { text, styles, fontSize, fontFamily, â€¦,
   // textAlign, lineHeight } for a txBody, or null when it has no text.
   return function textFields(txBody, { levelChain = () => [], overrides = {}, fallbackColor = null, autofit = null } = {}) {
     if (!txBody) return null;
@@ -297,12 +297,12 @@ function makeTextExtractor({ theme, fontPx, emuToPx }) {
       counters.length = Math.min(counters.length, lvl + 1);
       if (hasText && bulletNode && bulletNode.nodeName !== 'a:buNone') {
         const buFont = attr(firstChild(chain, 'a:buFont'), 'typeface');
-        if (bulletNode.nodeName === 'a:buChar') prefix = bulletChar(attr(bulletNode, 'char') || '•', buFont);
+        if (bulletNode.nodeName === 'a:buChar') prefix = bulletChar(attr(bulletNode, 'char') || 'â€¢', buFont);
         else if (bulletNode.nodeName === 'a:buAutoNum') {
           const start = num(bulletNode, 'startAt') || 1;
           counters[lvl] = counters[lvl] === undefined ? start : counters[lvl] + 1;
           prefix = autoNumber(attr(bulletNode, 'type'), counters[lvl]);
-        } else prefix = '•';
+        } else prefix = 'â€¢';
         const bulletStyle = { ...firstStyle };
         const buClr = firstChild(chain, 'a:buClr');
         if (buClr) bulletStyle.fill = colorFrom(buClr, theme) || bulletStyle.fill;
@@ -330,7 +330,7 @@ function makeTextExtractor({ theme, fontPx, emuToPx }) {
         const algn = ALIGN[firstAttr(chain, 'algn')] || 'left';
         aligns.set(algn, (aligns.get(algn) || 0) + plain.length);
       }
-      // Space before/after paragraphs: percentages are of the line (1.2×
+      // Space before/after paragraphs: percentages are of the line (1.2Ã—
       // the font size), points are absolute.
       const spacing = (tag) => {
         const node = firstChild(chain, tag);
@@ -386,9 +386,9 @@ function makeTextExtractor({ theme, fontPx, emuToPx }) {
 
 // Maps EMU coordinates (after any group transforms) onto the editor canvas.
 function makeMapper(slideCx, slideCy) {
-  const scale = Math.min(TARGET_WIDTH / slideCx, TARGET_HEIGHT / slideCy);
-  const offsetX = (TARGET_WIDTH - slideCx * scale) / 2;
-  const offsetY = (TARGET_HEIGHT - slideCy * scale) / 2;
+  const scale = TARGET_WIDTH / slideCx; // canvas aspect == source aspect, fill exactly
+  const offsetX = 0;
+  const offsetY = 0;
   const round1 = (v) => Math.round(v * 10) / 10;
   return {
     box: ({ x, y, cx, cy }) => ({
@@ -814,7 +814,7 @@ async function extractSlide(zip, slidePath, slideIndex, ctx) {
       return placeholderBlock(box, 'SmartArt graphic\n(no saved layout to redraw)');
     }
     if (uri.endsWith('/ole') || descendant(data, 'p:oleObj')) {
-      // Embedded documents (Excel sheets, Visio drawings…) carry a preview
+      // Embedded documents (Excel sheets, Visio drawingsâ€¦) carry a preview
       // picture of themselves; show that in the object's frame.
       const pic = descendant(data, 'p:pic');
       if (pic) {
@@ -988,5 +988,7 @@ export async function extractSlidesFromPptx(buffer, report = null) {
     report.smartArt = ctx.smartArt;
     report.aspect = slideCx / slideCy;
   }
-  return slides;
+  const canvasWidth  = TARGET_WIDTH;
+  const canvasHeight = Math.round(TARGET_WIDTH / (slideCx / slideCy));
+  return { slides, canvasWidth, canvasHeight };
 }

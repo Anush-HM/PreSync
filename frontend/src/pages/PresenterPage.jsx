@@ -58,6 +58,7 @@ function PresenterPage() {
 
   const [deckTitle, setDeckTitle] = useState('');
   const [slides, setSlides] = useState(null); // null while loading
+  const [canvasDims, setCanvasDims] = useState({ width: 960, height: 540 });
   const [slideIdx, setSlideIdx] = useState(0);
   const [loadError, setLoadError] = useState('');
   const [socketError, setSocketError] = useState('');
@@ -90,6 +91,7 @@ function PresenterPage() {
     getDeck(deckId)
       .then((deck) => {
         setDeckTitle(deck.title || '');
+        setCanvasDims({ width: deck.canvasWidth || 960, height: deck.canvasHeight || 540 });
         // Hidden slides stay in the deck but are skipped when presenting.
         const all = deck.slides || [];
         const shown = all.filter((s) => !s.hidden);
@@ -346,7 +348,7 @@ function PresenterPage() {
             ) : !slide ? (
               <div className="pres-state"><p>This presentation has no slides.</p></div>
             ) : (
-              <ScaledSlide slide={slide} className="pres-slide" label={`Slide ${slideIdx + 1} of ${slideCount}`} />
+              <ScaledSlide slide={slide} className="pres-slide" canvasWidth={canvasDims.width} canvasHeight={canvasDims.height} label={`Slide ${slideIdx + 1} of ${slideCount}`} />
             )}
           </div>
 

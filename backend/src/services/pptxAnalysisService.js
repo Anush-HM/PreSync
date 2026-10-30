@@ -1,4 +1,4 @@
-import JSZip from 'jszip';
+﻿import JSZip from 'jszip';
 import path from 'path';
 import { attr, child, children, find, readRels, readXml } from './ooxml.js';
 import { extractSlidesFromPptx, paragraphText, placeholderOf } from './pptxIngestService.js';
@@ -71,7 +71,7 @@ async function slideDetails(zip, slidePath) {
 // { slides, analysis, outline } where slides are ready for a Deck.
 export async function analyzePptx(buffer, fileName) {
   const report = {};
-  const slides = await extractSlidesFromPptx(buffer, report);
+  const { slides, canvasWidth, canvasHeight } = await extractSlidesFromPptx(buffer, report);
 
   const zip = await JSZip.loadAsync(buffer);
   const presentationPath = 'ppt/presentation.xml';
@@ -109,5 +109,5 @@ export async function analyzePptx(buffer, fileName) {
     details,
     packageWarnings
   });
-  return { slides, analysis, outline };
+  return { slides, analysis, outline, canvasWidth, canvasHeight };
 }

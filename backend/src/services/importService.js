@@ -1,4 +1,4 @@
-import { extractSlidesFromPdf } from './pdfIngestService.js';
+﻿import { extractSlidesFromPdf } from './pdfIngestService.js';
 import { parseDocx } from './docxIngestService.js';
 import { analyzePptx } from './pptxAnalysisService.js';
 import { analyzeDocx, analyzeSlides } from './documentAnalysis.js';
@@ -63,14 +63,14 @@ export async function extractImport(file, format) {
       };
     }
     if (format === 'pptx') {
-      const { slides, analysis, outline } = await analyzePptx(file.buffer, fileName);
-      return { format, title: analysis.title, analysis, outline, blocks: [], images: [], slides };
+      const { slides, analysis, outline, canvasWidth, canvasHeight } = await analyzePptx(file.buffer, fileName);
+      return { format, title: analysis.title, analysis, outline, blocks: [], images: [], slides, canvasWidth: canvasWidth || 960, canvasHeight: canvasHeight || 540 };
     }
     const report = {};
-    const slides = await extractSlidesFromPdf(file.buffer, report);
+    const { slides, canvasWidth, canvasHeight } = await extractSlidesFromPdf(file.buffer, report);
     if (slides.length === 0) throw new Error('The PDF has no pages');
     const { analysis, outline } = analyzeSlides(slides, { kind: 'pdf', fileName, packageWarnings: report.warnings });
-    return { format, title: analysis.title, analysis, outline, blocks: [], images: [], slides };
+    return { format, title: analysis.title, analysis, outline, blocks: [], images: [], slides, canvasWidth: canvasWidth || 960, canvasHeight: canvasHeight || 540 };
   } catch (err) {
     throw new ImportParseError(`Could not read this ${FORMAT_LABELS[format]}: ${err.message}`);
   }

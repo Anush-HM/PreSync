@@ -107,7 +107,7 @@ const MIN_ZOOM = 0.25;
 // Formatting Fabric can hold per character (the rest is per text box).
 const CHAR_STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'underline', 'linethrough', 'fill', 'textBackgroundColor'];
 // Where new elements land: the middle of the slide.
-const centred = (w, h) => ({ x: Math.round((CANVAS_WIDTH - w) / 2), y: Math.round((CANVAS_HEIGHT - h) / 2) });
+const centred = (w, h, cw = CANVAS_WIDTH, ch = CANVAS_HEIGHT) => ({ x: Math.round((cw - w) / 2), y: Math.round((ch - h) / 2) });
 // Font families this page has already asked the browser to load.
 const requestedFonts = new Set();
 const MAX_ZOOM = 2;
@@ -167,6 +167,11 @@ function EditorPage() {
   const [goingLive, setGoingLive] = useState(false);
 
   const [deckMeta, setDeckMeta] = useState(null);
+  // Canvas dimensions derived from the deck; fall back to 960×540 until loaded.
+  const CW = deckMeta?.canvasWidth  || 960;
+  const CH = deckMeta?.canvasHeight || 540;
+  // Local centred helper using this deck's canvas dimensions.
+  const centredSlide = (w, h) => centred(w, h, CW, CH);
   const [metaError, setMetaError] = useState('');
   const [titleDraft, setTitleDraft] = useState(null); // non-null while renaming
   const [showShare, setShowShare] = useState(false);
@@ -247,13 +252,25 @@ function EditorPage() {
       .catch((err) => setMetaError(err.message || 'This presentation could not be opened'));
   }, [deckId]);
 
+  // When deckMeta loads (or changes), resize the Fabric canvas to the deck's dimensions.
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || !deckMeta) return;
+    const cw = deckMeta.canvasWidth  || 960;
+    const ch = deckMeta.canvasHeight || 540;
+    if (canvas.getWidth() !== cw || canvas.getHeight() !== ch) {
+      canvas.setDimensions({ width: cw, height: ch });
+      canvas.renderAll();
+    }
+  }, [deckMeta]);
+
   // Largest zoom at which the whole slide fits the stage.
   useLayoutEffect(() => {
     const el = stageRef.current;
     if (!el) return undefined;
     const update = () => {
       const pad = el.clientWidth < 600 ? 24 : 64;
-      const s = Math.min((el.clientWidth - pad) / CANVAS_WIDTH, (el.clientHeight - pad) / CANVAS_HEIGHT);
+      const s = Math.min((el.clientWidth - pad) / CW, (el.clientHeight - pad) / CH);
       if (s > 0) setFitScale(Math.max(0.1, Math.min(MAX_ZOOM, Math.floor(s * 100) / 100)));
     };
     update();
@@ -261,7 +278,7 @@ function EditorPage() {
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [CW, CH]);
 
   // --- Connect Yjs, hydrate slides, observe remote changes
   useEffect(() => {
@@ -342,8 +359,8 @@ function EditorPage() {
   // --- Fabric canvas init
   useEffect(() => {
     const canvas = new fabric.Canvas(canvasElRef.current, {
-      width: CANVAS_WIDTH,
-      height: CANVAS_HEIGHT,
+      width: CW,
+      height: CH,
       backgroundColor: DEFAULT_SLIDE_BACKGROUND,
       preserveObjectStacking: true,
     });
@@ -492,7 +509,7 @@ function EditorPage() {
       t.setCoords();
       const moving = new Set(t.type === 'activeselection' ? t.getObjects() : [t]);
       const others = canvas.getObjects().filter((o) => o.data?.blockId && !moving.has(o) && o.visible !== false).map(boxOf);
-      const frame = { left: 0, top: 0, width: CANVAS_WIDTH, height: CANVAS_HEIGHT };
+      const frame = { left: 0, top: 0, width: CW, height: CH };
       const snap = snapBox(boxOf(t), others, frame, SNAP_THRESHOLD / (viewScaleRef.current || 1));
       if (snap.dx || snap.dy) {
         t.set({ left: t.left + snap.dx, top: t.top + snap.dy });
@@ -569,7 +586,7 @@ function EditorPage() {
             canvas.backgroundImage = undefined;
             canvas.backgroundColor = new fabric.Pattern({ source: img.getElement(), repeat: 'repeat' });
           } else {
-            img.set({ ...BASE_OBJECT_PROPS, scaleX: CANVAS_WIDTH / img.width, scaleY: CANVAS_HEIGHT / img.height });
+            img.set({ ...BASE_OBJECT_PROPS, scaleX: CW / img.width, scaleY: CH / img.height });
             img.data = { src: slide.backgroundImageUrl };
             canvas.backgroundImage = img;
           }
@@ -807,7 +824,7 @@ function EditorPage() {
 
   function handleInsertText(preset) {
     const width = preset.width || 400;
-    const pos = centred(width, preset.fontSize * 1.4);
+    const pos = centredSlide(width, preset.fontSize * 1.4);
     const block = { id: newId('b'), type: 'textbox', ...pos, width, fontSize: preset.fontSize, text: preset.sample };
     for (const k of ['fontWeight', 'fontStyle', 'textAlign', 'lineHeight', 'role']) if (preset[k]) block[k] = preset[k];
     block.fill = preset.fill || (preset.role === 'title' ? theme?.title : theme?.text) || undefined;
@@ -820,7 +837,7 @@ function EditorPage() {
     const line = preset.shape === 'line';
     const w = line ? 240 : preset.id.startsWith('arrow') || preset.id === 'thinArrow' ? 220 : 180;
     const h = line ? 120 : preset.id.startsWith('arrow') || preset.id === 'thinArrow' ? 110 : 180;
-    const block = { id: newId('b'), type: 'shape', ...shapeFields(preset), ...centred(w, h), width: w, height: h, fontSize: 16, text: '' };
+    const block = { id: newId('b'), type: 'shape', ...shapeFields(preset), ...centredSlide(w, h), width: w, height: h, fontSize: 16, text: '' };
     if (line) Object.assign(block, { stroke: theme?.accent || '#285c43', strokeWidth: 3 });
     else block.background = theme?.accent || '#347653';
     insertBlock(block);
@@ -830,24 +847,24 @@ function EditorPage() {
     const width = Math.min(840, cols * 140);
     const table = makeTable(rows, cols, { width });
     const { height } = tableSize(table);
-    insertBlock({ id: newId('b'), type: 'table', ...centred(width, height), width, height, fontSize: 16, text: tableText(table), table });
+    insertBlock({ id: newId('b'), type: 'table', ...centredSlide(width, height), width, height, fontSize: 16, text: tableText(table), table });
   }
 
   function handleInsertChart(kind) {
     const chart = defaultChart(kind);
     if (theme) chart.textColor = theme.text;
-    insertBlock({ id: newId('b'), type: 'chart', ...centred(560, 320), width: 560, height: 320, fontSize: 16, text: '', chart });
+    insertBlock({ id: newId('b'), type: 'chart', ...centredSlide(560, 320), width: 560, height: 320, fontSize: 16, text: '', chart });
   }
 
   function handleInsertDivider() {
-    insertBlock({ id: newId('b'), type: 'shape', shape: 'rect', ...centred(600, 3), width: 600, height: 3, background: theme?.accent || '#c9cec9', fontSize: 16, text: '' });
+    insertBlock({ id: newId('b'), type: 'shape', shape: 'rect', ...centredSlide(600, 3), width: 600, height: 3, background: theme?.accent || '#c9cec9', fontSize: 16, text: '' });
   }
 
   // A sticker, icon or emoji from Insert › Elements, in the middle of the slide.
   async function handleInsertAsset(asset, color) {
     const size = asset.kind === 'emoji' ? 120 : 160;
     const w = asset.kind === 'emoji' ? Math.round(size * 1.2) : size;
-    const block = await assetToBlock(asset, { id: newId('b'), size, color, ...centred(w, size) });
+    const block = await assetToBlock(asset, { id: newId('b'), size, color, ...centredSlide(w, size) });
     insertBlock(block);
   }
 
@@ -923,7 +940,7 @@ function EditorPage() {
     const ratio = img.width && img.height ? img.height / img.width : 0.75;
     const width = Math.min(360, img.width || 360);
     const height = Math.round(width * ratio);
-    const block = { id: newId('b'), type: 'image', ...centred(width, height), width, height, fontSize: 16, text: '', imageUrl: img.url };
+    const block = { id: newId('b'), type: 'image', ...centredSlide(width, height), width, height, fontSize: 16, text: '', imageUrl: img.url };
     if (img.alt) block.alt = img.alt;
     insertBlock(block);
   }
@@ -1197,7 +1214,7 @@ function EditorPage() {
       const fit = Math.min(1, 640 / width, 360 / height);
       const w = Math.max(1, Math.round(width * fit));
       const h = Math.max(1, Math.round(height * fit));
-      const pos = at ? { x: Math.round(Math.max(0, Math.min(CANVAS_WIDTH - w, at.x - w / 2))), y: Math.round(Math.max(0, Math.min(CANVAS_HEIGHT - h, at.y - h / 2))) } : centred(w, h);
+      const pos = at ? { x: Math.round(Math.max(0, Math.min(CW - w, at.x - w / 2))), y: Math.round(Math.max(0, Math.min(CH - h, at.y - h / 2))) } : centredSlide(w, h);
       insertBlock({ id: newId('b'), type: 'image', ...pos, width: w, height: h, fontSize: 16, text: '', imageUrl: dataUrl });
     } catch (err) {
       toast.error(err.message);
@@ -1215,7 +1232,7 @@ function EditorPage() {
     if (!file) return;
     e.preventDefault();
     const rect = canvasElRef.current?.getBoundingClientRect();
-    const at = rect ? { x: ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH, y: ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT } : null;
+    const at = rect ? { x: ((e.clientX - rect.left) / rect.width) * CW, y: ((e.clientY - rect.top) / rect.height) * CH } : null;
     addImageFile(file, at);
   }
 
@@ -1488,9 +1505,9 @@ function EditorPage() {
       const block = t.blockId ? activeSlide.blocks.find((b) => b.id === t.blockId) : null;
       const key = block ? block.id : 'slide';
       if (!groups.has(key)) {
-        const x = block ? ((block.x || 0) + (block.width || 0)) * s : CANVAS_WIDTH - 22;
+        const x = block ? ((block.x || 0) + (block.width || 0)) * s : CW - 22;
         const y = block ? (block.y || 0) * s : 34;
-        groups.set(key, { key, x: Math.min(CANVAS_WIDTH - 14, Math.max(14, x)), y: Math.max(28, y), threads: [] });
+        groups.set(key, { key, x: Math.min(CW - 14, Math.max(14, x)), y: Math.max(28, y), threads: [] });
       }
       groups.get(key).threads.push(t);
     }
@@ -1760,6 +1777,8 @@ function EditorPage() {
 
         <aside className="ed-rail" aria-label="Slides" hidden={!railOpen}>
           <SlideRail
+              canvasWidth={CW}
+              canvasHeight={CH}
             slides={slides}
             activeIdx={activeSlideIdx}
             peers={peers}
@@ -1791,8 +1810,8 @@ function EditorPage() {
             }}
             onDrop={onStageDrop}
           >
-            <div className="canvas-frame" style={{ width: CANVAS_WIDTH * scale, height: CANVAS_HEIGHT * scale }}>
-              <div className="canvas-page" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, transform: `scale(${scale})` }}>
+            <div className="canvas-frame" style={{ width: CW * scale, height: CH * scale }}>
+              <div className="canvas-page" style={{ width: CW, height: CH, transform: `scale(${scale})` }}>
                 <canvas ref={canvasElRef} aria-label={`Slide ${activeSlideIdx + 1} canvas`} />
                 {peersOnThisSlide.map((p) => (
                   <div key={p.clientId} className="peer-cursor" style={{ left: p.cursor.x, top: p.cursor.y }}>

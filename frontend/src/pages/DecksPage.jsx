@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, FileText, Presentation, ArrowRight, RefreshCw, X, LayoutTemplate } from 'lucide-react';
 import AppShell from '../components/layout/AppShell.jsx';
@@ -15,6 +15,7 @@ import { listDecks, createDeck, deleteDeck, duplicateDeck } from '../data/decksA
 import { listImports } from '../data/importsApi.js';
 import { getCurrentUser } from '../data/apiConfig.js';
 import { greetingFor, plural } from '../data/format.js';
+import { ASPECT_RATIOS } from '../data/slideFormat.js';
 import './DecksPage.css';
 
 const VIEWS = {
@@ -25,7 +26,7 @@ const VIEWS = {
 
 const SORTS = {
   recent: { label: 'Last edited', compare: (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0) },
-  title: { label: 'Name (A–Z)', compare: (a, b) => a.title.localeCompare(b.title) },
+  title: { label: 'Name (Aâ€“Z)', compare: (a, b) => a.title.localeCompare(b.title) },
   created: { label: 'Date created', compare: (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0) },
   slides: { label: 'Most slides', compare: (a, b) => b.slideCount - a.slideCount }
 };
@@ -113,6 +114,69 @@ function Onboarding({ onCreate, onImport, onTemplate }) {
   );
 }
 
+
+function NewDeckDialog({ onConfirm, onClose }) {
+  const [selected, setSelected] = useState(ASPECT_RATIOS[0]);
+  return (
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="new-deck-title" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog dialog-md">
+        <div className="dialog-head">
+          <div>
+            <div className="dialog-title" id="new-deck-title">New presentation</div>
+            <div className="dialog-desc">Choose a slide size for your presentation.</div>
+          </div>
+        </div>
+        <div className="dialog-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {ASPECT_RATIOS.map((ratio) => (
+            <label
+              key={ratio.label}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '10px 14px',
+                borderRadius: 8,
+                border: `2px solid ${selected.label === ratio.label ? 'var(--color-primary, #5b6ef5)' : 'var(--color-border, #ddd)'}`,
+                cursor: 'pointer',
+                background: selected.label === ratio.label ? 'rgba(91,110,245,0.15)' : 'transparent',
+                color: 'var(--text-primary, inherit)'
+              }}
+            >
+              <input
+                type="radio"
+                name="aspect-ratio"
+                style={{ accentColor: 'var(--color-primary, #5b6ef5)' }}
+                checked={selected.label === ratio.label}
+                onChange={() => setSelected(ratio)}
+              />
+              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                <strong style={{ fontSize: 14, color: 'inherit' }}>{ratio.label}</strong>
+                <span style={{ fontSize: 12, opacity: 0.65 }}>{ratio.width} × {ratio.height} px</span>
+              </span>
+              <span
+                aria-hidden="true"
+                style={{
+                  marginLeft: 'auto',
+                  width: Math.round(56 * ratio.width / Math.max(ratio.width, ratio.height)),
+                  height: Math.round(56 * ratio.height / Math.max(ratio.width, ratio.height)),
+                  border: '1.5px solid var(--color-border, #ccc)',
+                  borderRadius: 3,
+                  background: '#f9f9f9',
+                  flexShrink: 0
+                }}
+              />
+            </label>
+          ))}
+        </div>
+        <div className="dialog-foot">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={() => onConfirm({ width: selected.width, height: selected.height })}>Create</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DecksPage({ view = 'home' }) {
   const navigate = useNavigate();
   const toast = useToast();
@@ -123,6 +187,7 @@ function DecksPage({ view = 'home' }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [showNewDeckDialog, setShowNewDeckDialog] = useState(false);
   const [importKind, setImportKind] = useState(null);
   const [imports, setImports] = useState([]);
   const [busyId, setBusyId] = useState(null);
@@ -158,10 +223,15 @@ function DecksPage({ view = 'home' }) {
     }
   }
 
-  async function handleCreate() {
+  function handleCreate() {
+    setShowNewDeckDialog(true);
+  }
+
+  async function handleCreateConfirmed({ width, height }) {
+    setShowNewDeckDialog(false);
     setCreating(true);
     try {
-      const deck = await createDeck('Untitled presentation');
+      const deck = await createDeck('Untitled presentation', { width, height });
       navigate(`/editor/${deck._id || deck.id}`);
     } catch (err) {
       toast.error(err.message || 'Could not create a presentation');
@@ -173,7 +243,7 @@ function DecksPage({ view = 'home' }) {
     setBusyId(deck.id);
     try {
       const copy = await duplicateDeck(deck.id);
-      toast.success(`Created “${copy.title}”`);
+      toast.success(`Created â€œ${copy.title}â€`);
       await refreshDecks();
     } catch (err) {
       toast.error(err.message || 'Could not duplicate that presentation');
@@ -187,7 +257,7 @@ function DecksPage({ view = 'home' }) {
     await deleteDeck(target.id);
     setDecks((prev) => prev.filter((d) => d.id !== target.id));
     setDeleteTarget(null);
-    toast.success(`Deleted “${target.title}”`);
+    toast.success(`Deleted â€œ${target.title}â€`);
   }
 
   function handleRenamed(updated) {
@@ -254,7 +324,7 @@ function DecksPage({ view = 'home' }) {
               <LayoutTemplate /> Templates
             </button>
             <button type="button" className="btn btn-primary" onClick={handleCreate} disabled={creating}>
-              <Plus /> {creating ? 'Creating…' : 'Create presentation'}
+              <Plus /> {creating ? 'Creatingâ€¦' : 'Create presentation'}
             </button>
           </div>
         </header>
@@ -354,7 +424,7 @@ function DecksPage({ view = 'home' }) {
               <div className="dash-empty">
                 {query.trim() ? (
                   <>
-                    <h2>No matches for “{query.trim()}”</h2>
+                    <h2>No matches for â€œ{query.trim()}â€</h2>
                     <p>Try a different name, or clear the search.</p>
                     <button type="button" className="btn btn-ghost" onClick={() => setQuery('')}>Clear search</button>
                   </>
@@ -403,11 +473,17 @@ function DecksPage({ view = 'home' }) {
       {deleteTarget && (
         <ConfirmDialog
           title="Delete presentation?"
-          message={`“${deleteTarget.title}” and its slides will be permanently deleted for you and every collaborator. This cannot be undone.`}
+          message={`â€œ${deleteTarget.title}â€ and its slides will be permanently deleted for you and every collaborator. This cannot be undone.`}
           confirmLabel="Delete presentation"
           destructive
           onConfirm={confirmDelete}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+      {showNewDeckDialog && (
+        <NewDeckDialog
+          onConfirm={handleCreateConfirmed}
+          onClose={() => setShowNewDeckDialog(false)}
         />
       )}
       {showTemplates && (

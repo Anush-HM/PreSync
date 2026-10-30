@@ -1,13 +1,16 @@
-import { API_BASE, apiFetch, getAuthToken } from './apiConfig.js';
+﻿import { API_BASE, apiFetch, getAuthToken } from './apiConfig.js';
 
 export async function listDecks() {
   return apiFetch('/api/decks');
 }
 
-export async function createDeck(title) {
+export async function createDeck(title, { width, height } = {}) {
+  const body = { title };
+  if (width)  body.width  = width;
+  if (height) body.height = height;
   return apiFetch('/api/decks', {
     method: 'POST',
-    body: JSON.stringify({ title })
+    body: JSON.stringify(body)
   });
 }
 
@@ -30,7 +33,7 @@ export async function updateDeckSlides(deckId, slides) {
 // with an explanation, so it's offered in the picker too).
 export const IMPORT_ACCEPT = '.pdf,.pptx,.ppt,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
-// PDF / PPTX import — multipart, so apiFetch's JSON header logic backs
+// PDF / PPTX import â€” multipart, so apiFetch's JSON header logic backs
 // off automatically for FormData bodies.
 export async function importDeckFile(file) {
   const form = new FormData();
@@ -104,7 +107,7 @@ export async function downloadDeckExport(deckId, format, options) {
       const body = await res.json();
       if (body?.error) message = body.error;
     } catch {
-      // not JSON — keep the generic message
+      // not JSON â€” keep the generic message
     }
     throw new Error(message);
   }

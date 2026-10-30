@@ -224,12 +224,14 @@ export function TableBlock({ b, s, flow = false }) {
   );
 }
 
-function SlideView({ slide }) {
+function SlideView({ slide, canvasWidth = 960, canvasHeight = 540 }) {
   const blocks = slide.blocks || [];
   const s = legacyFitScale(blocks);
+  const bgStyle = slideBackgroundStyle(slide);
+  const sizeStyle = { width: canvasWidth, height: canvasHeight, maxWidth: 'none' };
 
   return (
-    <div className="stage-slide" style={slideBackgroundStyle(slide)}>
+    <div className="stage-slide" style={{ ...sizeStyle, ...bgStyle }}>
       {blocks.map((b) => {
         if (b.type === 'image' && b.imageUrl) {
           return (

@@ -7,7 +7,7 @@ import './editor.css';
 
 // Left zone: real thumbnails of every slide, in order. Arrow keys move
 // between slides; each thumbnail has its own actions menu.
-function SlideRail({ slides, activeIdx, peers, onSelect, onAdd, onDuplicate, onMove, onDelete, onRename, onToggleHidden }) {
+function SlideRail({ slides, activeIdx, peers, canvasWidth = 960, canvasHeight = 540, onSelect, onAdd, onDuplicate, onMove, onDelete, onRename, onToggleHidden }) {
   const listRef = useRef(null);
   const [renaming, setRenaming] = useState(null); // { idx, value }
 
@@ -64,7 +64,7 @@ function SlideRail({ slides, activeIdx, peers, onSelect, onAdd, onDuplicate, onM
                 tabIndex={active ? 0 : -1}
                 onClick={() => onSelect(i)}
               >
-                <ScaledSlide slide={slide} />
+                <ScaledSlide slide={slide} canvasWidth={canvasWidth} canvasHeight={canvasHeight} />
                 {renaming?.idx !== i && <span className="rail-title" aria-hidden="true" title={title}>{title}</span>}
                 {slide.notes?.trim() && <StickyNote className="rail-notes" aria-hidden="true" />}
                 {slide.hidden && <span className="rail-hidden" aria-hidden="true"><EyeOff /></span>}

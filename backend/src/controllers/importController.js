@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+﻿import mongoose from 'mongoose';
 import Deck from '../models/Deck.js';
 import ImportedDocument from '../models/ImportedDocument.js';
 import { detectFormat, extractImport, ImportParseError, unsupportedFormatError } from '../services/importService.js';
@@ -86,7 +86,9 @@ export async function analyzeImport(req, res) {
     header: extracted.header || [],
     footer: extracted.footer || [],
     images: extracted.images,
-    slides: extracted.slides
+    slides: extracted.slides,
+    canvasWidth:  extracted.canvasWidth  || 960,
+    canvasHeight: extracted.canvasHeight || 540
   });
 
   res.status(201).json(full(doc));
@@ -152,7 +154,13 @@ export async function createDeckFromImport(req, res) {
 
   const requested = typeof req.body.title === 'string' ? req.body.title.trim() : '';
   const title = (requested || doc.title).slice(0, MAX_TITLE_LENGTH);
-  const deck = await Deck.create({ title, ownerId: req.userId, slides });
+  const deck = await Deck.create({
+    title,
+    ownerId: req.userId,
+    slides,
+    canvasWidth:  mode === 'original' ? (doc.canvasWidth  || 960) : 960,
+    canvasHeight: mode === 'original' ? (doc.canvasHeight || 540) : 540
+  });
 
   doc.deckIds.push(deck._id);
   await doc.save();
