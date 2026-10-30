@@ -386,9 +386,9 @@ function makeTextExtractor({ theme, fontPx, emuToPx }) {
 
 // Maps EMU coordinates (after any group transforms) onto the editor canvas.
 function makeMapper(slideCx, slideCy) {
-  const scale = Math.min(TARGET_WIDTH / slideCx, TARGET_HEIGHT / slideCy);
-  const offsetX = (TARGET_WIDTH - slideCx * scale) / 2;
-  const offsetY = (TARGET_HEIGHT - slideCy * scale) / 2;
+  const scale = TARGET_WIDTH / slideCx; // canvas aspect == source aspect, fill exactly
+  const offsetX = 0;
+  const offsetY = 0;
   const round1 = (v) => Math.round(v * 10) / 10;
   return {
     box: ({ x, y, cx, cy }) => ({

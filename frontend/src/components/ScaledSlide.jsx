@@ -19,7 +19,7 @@ function ScaledSlide({ slide, className = '', label, canvasWidth = 960, canvasHe
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [canvasWidth]);
 
   return (
     <div

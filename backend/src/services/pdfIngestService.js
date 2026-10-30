@@ -71,10 +71,10 @@ async function renderPage(mod, page, viewport, { withText }) {
 
 // Encodes a slide-sized background (page centred on the letterbox) as a
 // JPEG no larger than `budget` bytes, trading resolution then quality.
-function encodeBackground(mod, pageCanvas, box, budget) {
+function encodeBackground(mod, pageCanvas, box, budget, canvasHeight) {
   for (const [scale, quality] of [[1, 82], [1, 70], [0.75, 70], [0.5, 65], [0.5, 50]]) {
     const w = Math.round(TARGET_WIDTH * RENDER_SCALE * scale);
-    const h = Math.round(TARGET_HEIGHT * RENDER_SCALE * scale);
+    const h = Math.round(canvasHeight * RENDER_SCALE * scale);
     const canvas = mod.createCanvas(w, h);
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = LETTERBOX;
@@ -397,10 +397,10 @@ export async function extractSlidesFromPdf(buffer, report = null) {
     for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
       const page = await pdfDocument.getPage(pageNum);
       const base = page.getViewport({ scale: 1 });
-      const fit = Math.min(TARGET_WIDTH / base.width, TARGET_HEIGHT / base.height);
+      const fit = TARGET_WIDTH / base.width; // canvas aspect == page aspect, fill exactly
       const pageBox = {
-        x: (TARGET_WIDTH - base.width * fit) / 2,
-        y: (TARGET_HEIGHT - base.height * fit) / 2,
+        x: 0,
+        y: 0,
         width: base.width * fit,
         height: base.height * fit
       };
@@ -431,7 +431,7 @@ export async function extractSlidesFromPdf(buffer, report = null) {
         if (!blocks.length) notes.scanned.push(pageNum);
         const remaining = pdfDocument.numPages - pageNum + 1;
         const budget = Math.min(MAX_PAGE_BACKGROUND_BYTES, (MAX_TOTAL_BACKGROUND_BYTES - backgroundBytes) / remaining);
-        const jpeg = budget > 20 * 1024 ? encodeBackground(mod, source, pageBox, budget) : null;
+        const jpeg = budget > 20 * 1024 ? encodeBackground(mod, source, pageBox, budget, canvasHeight) : null;
         if (jpeg) {
           backgroundBytes += jpeg.length;
           slide.backgroundImageUrl = toDataUrl(jpeg, 'image/jpeg');

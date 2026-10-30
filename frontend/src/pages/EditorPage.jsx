@@ -278,7 +278,7 @@ function EditorPage() {
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [CW, CH]);
 
   // --- Connect Yjs, hydrate slides, observe remote changes
   useEffect(() => {
