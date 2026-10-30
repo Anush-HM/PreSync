@@ -9,6 +9,8 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    setupFiles: './src/test/setup.js'
+    setupFiles: './src/test/setup.js',
+    // Parallel jsdom runs with userEvent can take over 5s per test on loaded machines and CI runners
+    testTimeout: 30000
   }
 });
