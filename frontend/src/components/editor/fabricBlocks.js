@@ -188,6 +188,8 @@ export function applyInteraction(obj, block, keepAspect) {
   if (obj.type === 'textbox' && obj.data?.kind === 'text') obj.set({ editable: !block.locked });
   const sides = !keepAspect;
   obj.setControlsVisibility?.({ ml: sides, mr: sides, mt: sides, mb: sides });
+  // Images always show all 4 side handles so users can resize individual edges
+  if (obj.type === 'image') obj.setControlsVisibility?.({ ml: true, mr: true, mt: true, mb: true });
   if (obj.type === 'textbox' && obj.data?.kind === 'text') obj.setControlsVisibility?.({ ml: true, mr: true, mt: false, mb: false });
 }
 

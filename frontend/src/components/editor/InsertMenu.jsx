@@ -14,7 +14,7 @@ const TABS = [
   { id: 'shapes', label: 'Shapes', icon: Shapes },
   { id: 'table', label: 'Table', icon: Table2 },
   { id: 'chart', label: 'Chart', icon: BarChart3 },
-  { id: 'media', label: 'Picture', icon: ImagePlus },
+  { id: 'media', label: 'Image', icon: ImagePlus },
   { id: 'slide', label: 'Slide', icon: LayoutTemplate }
 ];
 
@@ -159,8 +159,8 @@ function InsertMenu({ disabled, onText, onAsset, deckImages, onDeckImage, onShap
               )}
               {tab === 'media' && (
                 <div className="insert-list">
-                  <button type="button" className="btn btn-secondary" onClick={done(onImage)}><ImagePlus aria-hidden="true" />Upload a picture…</button>
-                  <p className="field-hint">PNG, JPEG or GIF up to 1.5 MB. You can also drag a picture onto the slide or paste one.</p>
+                  <button type="button" className="btn btn-secondary" onClick={done(onImage)}><ImagePlus aria-hidden="true" />Upload an image…</button>
+                  <p className="field-hint">PNG, JPEG or GIF up to 1.5 MB. You can also drag an image onto the slide or paste one.</p>
                 </div>
               )}
               {tab === 'slide' && (
