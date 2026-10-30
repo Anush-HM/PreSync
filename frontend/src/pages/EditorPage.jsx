@@ -1090,7 +1090,7 @@ function EditorPage() {
     const layout = layoutById(layoutId);
     if (!d || !layout) return;
     const at = activeSlideIdx + 1;
-    insertSlide(d, at, slideFromLayout(layout, at, theme));
+    insertSlide(d, at, slideFromLayout(layout, at, theme, { canvasWidth: CW, canvasHeight: CH }));
     setActiveSlideIdx(at);
   }
 
@@ -1099,7 +1099,7 @@ function EditorPage() {
     const layout = layoutById(layoutId);
     if (!d || !layout || !activeSlide) return;
     fabricRef.current?.discardActiveObject();
-    const { blocks, added, moved } = applyLayout(activeSlide, layout, theme);
+    const { blocks, added, moved } = applyLayout(activeSlide, layout, theme, { canvasWidth: CW, canvasHeight: CH });
     replaceSlideContent(d, activeSlideIdx, blocks, { layout: layout.id });
     toast.success?.(`${layout.name} layout applied${moved ? `: ${moved} element${moved === 1 ? '' : 's'} moved` : ''}${added ? `, ${added} placeholder${added === 1 ? '' : 's'} added` : ''}.`);
   }
@@ -1118,6 +1118,7 @@ function EditorPage() {
         replaceSlideContent(d, i, out.blocks, { backgroundColor: out.backgroundColor, backgroundGradient: out.backgroundGradient, theme: out.theme });
       });
     });
+    toast.success?.(`${next.name} theme applied.`);
   }
 
   function handleSlidePatch(patch, idx = activeSlideIdx) {
