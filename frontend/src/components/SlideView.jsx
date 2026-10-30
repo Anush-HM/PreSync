@@ -226,7 +226,7 @@ export function TableBlock({ b, s, flow = false }) {
 
 function SlideView({ slide, canvasWidth = 960, canvasHeight = 540 }) {
   const blocks = slide.blocks || [];
-  const s = legacyFitScale(blocks);
+  const s = legacyFitScale(blocks, canvasWidth, canvasHeight);
   const bgStyle = slideBackgroundStyle(slide);
   const sizeStyle = { width: canvasWidth, height: canvasHeight, maxWidth: 'none' };
 
