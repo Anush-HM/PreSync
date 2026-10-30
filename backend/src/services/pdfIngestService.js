@@ -1,4 +1,4 @@
-import { createRequire } from 'module';
+﻿import { createRequire } from 'module';
 import path from 'path';
 import { getDocument, OPS, Util } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { fontStack } from './drawingml.js';
@@ -18,11 +18,11 @@ import { loadCanvas, toDataUrl } from './imageProcessing.js';
 // background, so nothing is lost. Without the optional canvas module the
 // importer falls back to text only, and says so.
 
-// Outlines for the 14 standard PDF fonts (Helvetica, Times…), which
+// Outlines for the 14 standard PDF fonts (Helvetica, Timesâ€¦), which
 // PDFs may use without embedding them.
 const STANDARD_FONTS = `${path.join(path.dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json')), 'standard_fonts')}/`;
 
-// The editor canvas is 960×540 (16:9). Pages are fitted inside it,
+// The editor canvas is 960Ã—540 (16:9). Pages are fitted inside it,
 // keeping their aspect ratio, and centred.
 const TARGET_WIDTH = 960;
 const TARGET_HEIGHT = 540;
@@ -32,7 +32,7 @@ const LETTERBOX = '#e9ebe8'; // around pages that aren't 16:9
 // under Mongo's 16MB document limit.
 const MAX_TOTAL_BACKGROUND_BYTES = 10 * 1024 * 1024;
 const MAX_PAGE_BACKGROUND_BYTES = 700 * 1024;
-// Fabric draws a line's baseline at 0.879 × its font size below the
+// Fabric draws a line's baseline at 0.879 Ã— its font size below the
 // line's top (1.13 line box, 0.222 descent), so text boxes start there.
 const BASELINE = 0.879;
 const FABRIC_LINE = 1.13;
@@ -205,8 +205,8 @@ function pieces(textContent, page, pageBox, fit, pixels) {
 }
 
 const NBSP = '\u00a0';
-const MARKER = /^(?:[•▪▫‣◦●○■□◆❖➢➤✓–\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])$/i;
-const MARKER_LEAD = /^((?:[•▪▫‣◦●○■□◆❖➢➤✓–\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)]))( +)/i;
+const MARKER = /^(?:[â€¢â–ªâ–«â€£â—¦â—â—‹â– â–¡â—†â–âž¢âž¤âœ“â€“\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])$/i;
+const MARKER_LEAD = /^((?:[â€¢â–ªâ–«â€£â—¦â—â—‹â– â–¡â—†â–âž¢âž¤âœ“â€“\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)]))( +)/i;
 
 // Pieces on one baseline, close enough together, form a line; a wide
 // gap (a column gutter or table cell) starts a new line.
@@ -381,6 +381,14 @@ export async function extractSlidesFromPdf(buffer, report = null) {
     verbosity: 0
   }).promise;
   const mod = await loadCanvas();
+  // Detect canvas dimensions from page 1's aspect ratio.
+  const firstPage = await pdfDocument.getPage(1);
+  const firstBase = firstPage.getViewport({ scale: 1 });
+  const pdfAspect = firstBase.width / firstBase.height;
+  const canvasWidth  = TARGET_WIDTH;
+  const canvasHeight = Math.round(TARGET_WIDTH / pdfAspect);
+  firstPage.cleanup();
+
   const slides = [];
   const notes = { scanned: [], textOnly: !mod, noBackground: [] };
   let backgroundBytes = 0;
@@ -455,5 +463,5 @@ export async function extractSlidesFromPdf(buffer, report = null) {
     }
     report.warnings = warnings;
   }
-  return slides;
+  return { slides, canvasWidth, canvasHeight };
 }

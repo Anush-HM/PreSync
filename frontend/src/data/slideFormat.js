@@ -1,15 +1,26 @@
-// Shared defaults and option lists for slide/block formatting, used by
+﻿// Shared defaults and option lists for slide/block formatting, used by
 // the editor toolbar and by every read-only slide renderer so a block
 // looks the same in the editor, presenter view and viewer view.
 
 export const CANVAS_WIDTH = 960;
 export const CANVAS_HEIGHT = 540;
 
+// Common presentation aspect ratios. width/height are in the same
+// logical-pixel space as CANVAS_WIDTH / CANVAS_HEIGHT (960x540 baseline).
+export const ASPECT_RATIOS = [
+  { label: 'Widescreen 16:9 (Default)', width: 960,  height: 540 },
+  { label: 'Standard 4:3',              width: 960,  height: 720 },
+  { label: 'A4 Portrait',               width: 540,  height: 763 },
+  { label: 'A4 Landscape',              width: 960,  height: 680 },
+  { label: 'Square 1:1',                width: 720,  height: 720 },
+  { label: 'Vertical 9:16',             width: 540,  height: 960 },
+];
+
 export const DEFAULT_TEXT_COLOR = '#1a1a2e';
 export const DEFAULT_SLIDE_BACKGROUND = '#ffffff';
 export const DEFAULT_FONT_FAMILY = 'Public Sans, sans-serif';
 export const DEFAULT_LINE_HEIGHT = 1.16; // Fabric's Textbox default
-// Fabric spaces lines at fontSize × 1.13 × lineHeight; CSS at fontSize ×
+// Fabric spaces lines at fontSize Ã— 1.13 Ã— lineHeight; CSS at fontSize Ã—
 // line-height. Renderers multiply by this so both wrap and stack alike.
 export const FABRIC_LINE_MULT = 1.13;
 
@@ -47,7 +58,7 @@ export const TEXT_COLORS = ['#1a1a2e', '#e74c3c', '#2980b9', '#27ae60', '#f39c12
 export const SLIDE_BACKGROUNDS = ['#ffffff', '#f5f5f0', '#1a1a2e', '#0f3460', '#fdf2e9', '#eafaf1'];
 
 // Decks imported before PDF coordinates were normalized can have blocks
-// outside the 960×540 canvas. Returns the uniform scale that fits them.
+// outside the 960Ã—540 canvas. Returns the uniform scale that fits them.
 export function legacyFitScale(blocks) {
   if (!blocks?.length) return 1;
   let maxX = 0;
@@ -143,7 +154,7 @@ export function imageCropCss(b, s) {
 }
 
 // Splits text into runs by its `styles` ranges ([{ start, end, style }],
-// indices counting characters but not line breaks — Fabric's format).
+// indices counting characters but not line breaks â€” Fabric's format).
 // Returns [{ text, style }] where style is null for unstyled text and
 // line breaks stay inside the run text.
 export function styledRuns(text, styles) {
@@ -175,7 +186,7 @@ export function styledRuns(text, styles) {
 // A list marker at the start of a paragraph, as imported: optional
 // indent, a bullet or number, then non-breaking spaces up to the text.
 // Wrapped lines of such a paragraph hang under the text, not the marker.
-export const LIST_PREFIX = /^\u00a0*(?:[•▪▫➢➤➔➜➝✓■□●○◦◆◇❖❑♦◻–\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)])\u00a0+/u;
+export const LIST_PREFIX = /^\u00a0*(?:[â€¢â–ªâ–«âž¢âž¤âž”âžœâžâœ“â– â–¡â—â—‹â—¦â—†â—‡â–â‘â™¦â—»â€“\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,6})[.)])\u00a0+/u;
 
 // Runs split into hard lines (paragraphs), each [{ text, style }].
 export function paragraphRuns(text, styles) {

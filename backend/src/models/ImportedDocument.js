@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+﻿import mongoose from 'mongoose';
 
 // A file a user imported, kept after analysis so they can review the
 // extracted structure, edit the outline and create presentations from
@@ -26,6 +26,9 @@ const importedDocumentSchema = new mongoose.Schema(
     images: { type: [mongoose.Schema.Types.Mixed], default: [] },
     // PowerPoint / PDF: slides exactly as extracted, ready for a Deck.
     slides: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    // Slide canvas dimensions detected from the source file.
+    canvasWidth:  { type: Number, default: 960 },
+    canvasHeight: { type: Number, default: 540 },
     // Presentations created from this import.
     deckIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Deck' }]
   },

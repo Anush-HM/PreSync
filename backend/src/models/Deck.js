@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+﻿import mongoose from 'mongoose';
 import { slideSchema } from './slideSchema.js';
 
 const deckSchema = new mongoose.Schema(
@@ -8,7 +8,9 @@ const deckSchema = new mongoose.Schema(
     // Any authenticated user who can co-edit this deck (owner is implicitly one).
     collaboratorIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     sourcePdfUrl: { type: String },
-    slides: { type: [slideSchema], default: [] }
+    slides: { type: [slideSchema], default: [] },
+    canvasWidth:  { type: Number, default: 960 },
+    canvasHeight: { type: Number, default: 540 }
   },
   { timestamps: true }
 );
