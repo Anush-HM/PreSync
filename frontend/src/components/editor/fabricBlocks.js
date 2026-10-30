@@ -130,6 +130,12 @@ export class SlideTextbox extends fabric.Textbox {
   }
 }
 
+// Fabric's 'justify' also stretches each paragraph's last line, unlike
+// PowerPoint and CSS; 'justify-left' leaves it at the natural width.
+export function fabricTextAlign(align) {
+  return align === 'justify' ? 'justify-left' : align || 'left';
+}
+
 export function textboxProps(block, scale) {
   const text = block.text || '';
   const props = {
@@ -148,7 +154,7 @@ export function textboxProps(block, scale) {
     fontStyle: block.fontStyle || 'normal',
     underline: !!block.underline,
     linethrough: !!block.linethrough,
-    textAlign: block.textAlign || 'left',
+    textAlign: fabricTextAlign(block.textAlign),
     lineHeight: block.lineHeight || DEFAULT_LINE_HEIGHT,
     paragraphSpacing: (block.paragraphSpacing || 0) * scale,
     textBackgroundColor: block.textBackgroundColor || '',
@@ -340,7 +346,7 @@ function cellTextbox(cell, width, scale) {
     fontStyle: cell.fontStyle || 'normal',
     underline: !!cell.underline,
     linethrough: !!cell.linethrough,
-    textAlign: cell.textAlign || 'left',
+    textAlign: fabricTextAlign(cell.textAlign),
     lineHeight: cell.lineHeight || DEFAULT_LINE_HEIGHT,
     styles: fabric.util.stylesFromArray(scaleStyles(cell.styles, scale) || [], text),
     editable: false,
