@@ -118,11 +118,15 @@ function Onboarding({ onCreate, onImport, onTemplate }) {
 function NewDeckDialog({ onConfirm, onClose }) {
   const [selected, setSelected] = useState(ASPECT_RATIOS[0]);
   return (
-    <div className="dialog-overlay" role="dialog" aria-modal="true" aria-labelledby="new-deck-title">
-      <div className="dialog" style={{ maxWidth: 480 }}>
-        <h2 id="new-deck-title" style={{ marginBottom: 16 }}>New presentation</h2>
-        <p style={{ marginBottom: 12, color: 'var(--color-text-2, #555)' }}>Choose a slide size for your presentation.</p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
+    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="new-deck-title" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog dialog-md">
+        <div className="dialog-head">
+          <div>
+            <div className="dialog-title" id="new-deck-title">New presentation</div>
+            <div className="dialog-desc">Choose a slide size for your presentation.</div>
+          </div>
+        </div>
+        <div className="dialog-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {ASPECT_RATIOS.map((ratio) => (
             <label
               key={ratio.label}
@@ -134,7 +138,8 @@ function NewDeckDialog({ onConfirm, onClose }) {
                 borderRadius: 8,
                 border: `2px solid ${selected.label === ratio.label ? 'var(--color-primary, #5b6ef5)' : 'var(--color-border, #ddd)'}`,
                 cursor: 'pointer',
-                background: selected.label === ratio.label ? 'var(--color-primary-subtle, #eef0ff)' : 'transparent'
+                background: selected.label === ratio.label ? 'rgba(91,110,245,0.15)' : 'transparent',
+                color: 'var(--text-primary, inherit)'
               }}
             >
               <input
@@ -145,8 +150,8 @@ function NewDeckDialog({ onConfirm, onClose }) {
                 onChange={() => setSelected(ratio)}
               />
               <span style={{ display: 'flex', flexDirection: 'column' }}>
-                <strong style={{ fontSize: 14 }}>{ratio.label}</strong>
-                <span style={{ fontSize: 12, color: 'var(--color-text-2, #777)' }}>{ratio.width} × {ratio.height} px</span>
+                <strong style={{ fontSize: 14, color: 'inherit' }}>{ratio.label}</strong>
+                <span style={{ fontSize: 12, opacity: 0.65 }}>{ratio.width} × {ratio.height} px</span>
               </span>
               <span
                 aria-hidden="true"
@@ -163,11 +168,9 @@ function NewDeckDialog({ onConfirm, onClose }) {
             </label>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <div className="dialog-foot">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn btn-primary" onClick={() => onConfirm({ width: selected.width, height: selected.height })}>
-            Create
-          </button>
+          <button type="button" className="btn btn-primary" onClick={() => onConfirm({ width: selected.width, height: selected.height })}>Create</button>
         </div>
       </div>
     </div>
