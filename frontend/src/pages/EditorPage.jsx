@@ -27,6 +27,7 @@ import {
   shapeKey,
   slideBackgroundFill,
   stylesOf,
+  tableDividerAt,
   tableKey,
   textboxProps,
   updateShape
@@ -55,7 +56,7 @@ import { applyTheme, themeById } from '../data/themes.js';
 import { CLEAR_FORMAT_PATCH, formatOf, indentLines, linesInSelection, paintPatch, toggleList } from '../data/textOps.js';
 import { cropPatch, keepsAspect, replaceImagePatch, resetAspectPatch } from '../data/imageOps.js';
 import { defaultChart, setChartField } from '../data/chartOps.js';
-import { makeTable, tableSize, tableText } from '../data/tableOps.js';
+import { makeTable, setColumnWidth, setRowHeight, tableSize, tableText } from '../data/tableOps.js';
 import { shapeFields } from '../data/shapes.js';
 import { loadFont } from '../data/fonts.js';
 import { assetToBlock } from '../data/assetLibrary.js';
@@ -113,6 +114,8 @@ const requestedFonts = new Set();
 const MAX_ZOOM = 2;
 const SNAP_KEY = 'presync.snapToGuides';
 const GUIDE_COLOR = '#d6455d';
+// How close, in on-screen pixels, the pointer must be to grab a table border.
+const TABLE_DIVIDER_GRAB = 5;
 // Pictures offered again under Insert › Elements.
 const MAX_DECK_IMAGES = 24;
 
@@ -535,8 +538,134 @@ function EditorPage() {
       yjsRef.current?.awareness.setLocalStateField('cursor', null);
     });
 
+    // Inner table borders: hovering one shows a resize cursor and dragging
+    // it resizes that column or row. Fabric's handles still resize the whole
+    // table, so a handle under the pointer wins.
+    let tableDrag = null;
+    const upperCanvas = canvas.upperCanvasEl;
+
+    const dividerUnder = (e) => {
+      const active = canvas.getActiveObject();
+      if (active?.type === 'activeselection' || active?.findControl(canvas.getViewportPoint(e))) return null;
+      const point = canvas.getScenePoint(e);
+      const obj = [...canvas.getObjects()].reverse().find((o) => o.visible !== false && o.containsPoint(point));
+      const block = slidesRef.current[activeSlideIdxRef.current]?.blocks.find((b) => b.id === obj?.data?.blockId);
+      if (obj?.data?.kind !== 'table' || !block?.table || block.locked) return null;
+      const divider = tableDividerAt(obj, block.table, point, scaleRef.current, TABLE_DIVIDER_GRAB / (viewScaleRef.current || 1));
+      return divider && { ...divider, obj, block };
+    };
+
+    const dividerCursor = (axis) => (axis === 'col' ? 'col-resize' : 'row-resize');
+
+    canvas.on('mouse:move', (e) => {
+      if (tableDrag || e.e.buttons) return;
+      const divider = dividerUnder(e.e);
+      if (divider) canvas.setCursor(dividerCursor(divider.axis));
+    });
+
+    const writeTableDrag = () => {
+      const drag = tableDrag;
+      drag.frame = 0;
+      const doc = yjsRef.current?.doc;
+      const blocksArr = doc && getSlidesArray(doc).get(activeSlideIdxRef.current)?.get('blocks');
+      const blockMap = blocksArr?.toArray().find((m) => m.get('id') === drag.block.id);
+      if (!blockMap) return;
+      const { block, axis, index, size, amount, layoutHeight } = drag;
+      const table = axis === 'col' ? setColumnWidth(block.table, index, size + amount) : setRowHeight(block.table, index, size + amount);
+      const grown = (axis === 'col' ? table.columns[index] : table.rows[index].height) - size;
+      const dw = axis === 'col' ? grown : 0;
+      const dh = axis === 'row' ? grown : 0;
+      // Blocks turn about their centre, so a turned table is shifted to
+      // keep its top-left corner in place.
+      const shift = new fabric.Point(dw / 2, dh / 2).rotate(fabric.util.degreesToRadians(block.rotation || 0));
+      const round1 = (v) => Math.round(v * 10) / 10;
+      // Later writes join the first one's undo step, however slow the drag.
+      const undo = undoRef.current;
+      if (!drag.written) undo?.stopCapturing();
+      doc.transact(() => {
+        blockMap.set('table', table);
+        blockMap.set('x', round1((block.x || 0) + shift.x - dw / 2));
+        blockMap.set('y', round1((block.y || 0) + shift.y - dh / 2));
+        blockMap.set('width', tableSize(table).width);
+        blockMap.set('height', round1(layoutHeight + dh));
+      });
+      if (!drag.written && undo) {
+        drag.written = { undo, captureTimeout: undo.captureTimeout };
+        undo.captureTimeout = Infinity;
+      }
+    };
+
+    const onTableDragMove = (e) => {
+      const drag = tableDrag;
+      const at = canvas.getScenePoint(e).transform(drag.toLocal);
+      drag.amount = (drag.axis === 'col' ? at.x - drag.from.x : at.y - drag.from.y) / scaleRef.current;
+      if (!drag.frame) drag.frame = requestAnimationFrame(writeTableDrag);
+    };
+
+    const endTableDrag = (write) => {
+      const drag = tableDrag;
+      if (!drag) return;
+      if (drag.frame) {
+        cancelAnimationFrame(drag.frame);
+        if (write) writeTableDrag();
+      }
+      if (drag.written) {
+        drag.written.undo.captureTimeout = drag.written.captureTimeout;
+        drag.written.undo.stopCapturing();
+      }
+      tableDrag = null;
+      upperCanvas.removeEventListener('pointermove', onTableDragMove);
+      upperCanvas.removeEventListener('pointerup', onTableDragUp);
+      upperCanvas.removeEventListener('pointercancel', onTableDragUp);
+      canvas.setCursor(canvas.defaultCursor);
+    };
+    const onTableDragUp = () => endTableDrag(true);
+
+    const onTablePointerDown = (e) => {
+      if (e.button !== 0 || tableDrag) return;
+      const hit = dividerUnder(e);
+      if (!hit) return;
+      // Cancelling pointerdown holds back the mouse events Fabric listens to.
+      e.preventDefault();
+      const active = canvas.getActiveObject();
+      if (active?.isEditing) active.exitEditing();
+      // A grouped table would join a multi-selection, which freezes its layout.
+      if (!hit.block.groupId) canvas.setActiveObject(hit.obj);
+      canvas.requestRenderAll();
+      const { rowY, layoutHeight } = hit.obj.data;
+      const toLocal = fabric.util.invertTransform(hit.obj.calcTransformMatrix());
+      tableDrag = {
+        axis: hit.axis,
+        index: hit.index,
+        block: hit.block,
+        // A row can be taller than stored, having grown to fit its text.
+        size: hit.axis === 'col' ? hit.block.table.columns[hit.index] : rowY[hit.index + 1] - rowY[hit.index],
+        layoutHeight,
+        toLocal,
+        from: canvas.getScenePoint(e).transform(toLocal),
+        amount: 0,
+        frame: 0,
+        written: null
+      };
+      upperCanvas.setPointerCapture(e.pointerId);
+      upperCanvas.addEventListener('pointermove', onTableDragMove);
+      upperCanvas.addEventListener('pointerup', onTableDragUp);
+      upperCanvas.addEventListener('pointercancel', onTableDragUp);
+      canvas.setCursor(dividerCursor(hit.axis));
+    };
+    upperCanvas.addEventListener('pointerdown', onTablePointerDown);
+
+    // Touch reaches Fabric as touchstart, which pointerdown can't hold back.
+    const onTableTouchStart = (e) => {
+      if (tableDrag) e.stopPropagation();
+    };
+    canvas.wrapperEl.addEventListener('touchstart', onTableTouchStart, true);
+
     return () => {
       document.fonts?.removeEventListener?.('loadingdone', relayout);
+      endTableDrag(false);
+      upperCanvas.removeEventListener('pointerdown', onTablePointerDown);
+      canvas.wrapperEl.removeEventListener('touchstart', onTableTouchStart, true);
       canvas.dispose();
     };
   }, [deckId]);

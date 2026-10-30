@@ -7,6 +7,7 @@ import { SHAPE_GROUPS } from '../../data/shapes.js';
 import { CHART_KIND_LABELS, CHART_KINDS } from '../../data/chartLayout.js';
 import { LAYOUTS } from '../../data/layouts.js';
 import { TEXT_PRESETS } from '../../data/textPresets.js';
+import { MAX_TABLE_COLS, MAX_TABLE_ROWS } from '../../data/tableOps.js';
 
 const TABS = [
   { id: 'text', label: 'Text', icon: Type },
@@ -32,9 +33,13 @@ function ShapeIcon({ preset }) {
 
 const GRID_ROWS = 8;
 const GRID_COLS = 10;
+const tableCount = (value, max) => Math.max(1, Math.min(max, parseInt(value, 10) || 1));
 
 function TableSizePicker({ onPick }) {
   const [hover, setHover] = useState({ r: 2, c: 3 });
+  // Kept as typed, so a field can be cleared on the way to a new number.
+  const [customR, setCustomR] = useState('3');
+  const [customC, setCustomC] = useState('3');
   return (
     <div className="tablepick">
       <div
@@ -73,6 +78,32 @@ function TableSizePicker({ onPick }) {
         })}
       </div>
       <p className="tablepick-label mono" aria-live="polite">{hover.r + 1} rows × {hover.c + 1} columns</p>
+      <form
+        className="tablepick-custom"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onPick(tableCount(customR, MAX_TABLE_ROWS), tableCount(customC, MAX_TABLE_COLS));
+        }}
+      >
+        <label className="tablepick-custom-label">
+          <span>Rows</span>
+          <input
+            type="number" min="1" max={MAX_TABLE_ROWS} value={customR} className="tablepick-custom-input"
+            onChange={(e) => setCustomR(e.target.value)}
+            onBlur={() => setCustomR(String(tableCount(customR, MAX_TABLE_ROWS)))}
+          />
+        </label>
+        <span className="tablepick-custom-sep">×</span>
+        <label className="tablepick-custom-label">
+          <span>Cols</span>
+          <input
+            type="number" min="1" max={MAX_TABLE_COLS} value={customC} className="tablepick-custom-input"
+            onChange={(e) => setCustomC(e.target.value)}
+            onBlur={() => setCustomC(String(tableCount(customC, MAX_TABLE_COLS)))}
+          />
+        </label>
+        <button type="submit" className="btn btn-primary btn-sm tablepick-custom-btn">Insert</button>
+      </form>
     </div>
   );
 }

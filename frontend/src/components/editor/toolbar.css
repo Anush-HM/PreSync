@@ -101,6 +101,11 @@
 .tablepick-cell.is-on { background: var(--forest-tint-strong); border-color: var(--color-forest-light); }
 .tablepick-cell:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .tablepick-label { font-size: 12.5px; color: var(--text-secondary); text-align: center; }
+.tablepick-custom { display: flex; align-items: flex-end; justify-content: center; gap: 8px; padding: 4px 2px 2px; }
+.tablepick-custom-label { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--text-secondary); }
+.tablepick-custom-input { width: 56px; height: 32px; padding: 3px 5px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg-input, var(--bg-surface)); color: var(--text-primary); font-size: 13px; text-align: center; }
+.tablepick-custom-sep { font-size: 14px; line-height: 32px; color: var(--text-secondary); }
+.tablepick-custom-btn { padding: 3px 10px; font-size: 12px; }
 
 /* ── Layouts and themes ── */
 .popover.tb-layouts { width: 380px; }
