@@ -9,6 +9,7 @@ import {
   shadowColor
 } from '../../data/slideFormat.js';
 import { CHART_FONT, chartLayout } from '../../data/chartLayout.js';
+import { ownerOf } from '../../data/tableOps.js';
 
 // Slide blocks <-> Fabric.js objects for the editor canvas. Building an
 // object from a block, updating it in place, and reading its geometry
@@ -420,7 +421,10 @@ export function createTable(block, scale) {
     kind: 'table',
     key: tableKey(block),
     layoutWidth: colX[colX.length - 1] / scale,
-    layoutHeight: rowY[rowY.length - 1] / scale
+    layoutHeight: rowY[rowY.length - 1] / scale,
+    // Border positions as laid out, in slide units, for tableDividerAt.
+    colX: colX.map((x) => x / scale),
+    rowY: rowY.map((y) => y / scale)
   };
   const gw = colX[colX.length - 1];
   const gh = rowY[rowY.length - 1];
@@ -437,6 +441,33 @@ export function scaledTable(table, sx, sy) {
     columns: table.columns.map((w) => Math.round(w * sx * 10) / 10),
     rows: table.rows.map((r) => ({ ...r, height: Math.round((r.height || 0) * sy * 10) / 10 }))
   };
+}
+
+// The inner border of a table within `tolerance` canvas pixels of a scene
+// point: { axis: 'col' | 'row', index } of the column or row before it, or
+// null. Outer borders belong to Fabric's handles, and a merged cell has no
+// border running through it.
+export function tableDividerAt(group, table, point, scale, tolerance) {
+  const { colX, rowY } = group.data;
+  const local = point.transform(fabric.util.invertTransform(group.calcTransformMatrix()));
+  const x = local.x / scale + colX[colX.length - 1] / 2;
+  const y = local.y / scale + rowY[rowY.length - 1] / 2;
+  const reach = tolerance / scale;
+  const innerNear = (edges, v) => edges.findIndex((e, i) => i > 0 && i < edges.length - 1 && Math.abs(e - v) <= reach);
+  const spanAt = (edges, v) => Math.max(0, Math.min(edges.length - 2, edges.findIndex((e) => e > v) - 1));
+  const sameCell = (a, b) => a.r === b.r && a.c === b.c;
+
+  const c = innerNear(colX, x);
+  if (c > 0) {
+    const r = spanAt(rowY, y);
+    if (!sameCell(ownerOf(table, r, c - 1), ownerOf(table, r, c))) return { axis: 'col', index: c - 1 };
+  }
+  const r = innerNear(rowY, y);
+  if (r > 0) {
+    const col = spanAt(colX, x);
+    if (!sameCell(ownerOf(table, r - 1, col), ownerOf(table, r, col))) return { axis: 'row', index: r - 1 };
+  }
+  return null;
 }
 
 // --- charts -----------------------------------------------------------------
