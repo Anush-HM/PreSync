@@ -18,12 +18,11 @@ import { loadCanvas, toDataUrl } from './imageProcessing.js';
 // background, so nothing is lost. Without the optional canvas module the
 // importer falls back to text only, and says so.
 
-// Outlines for the 14 standard PDF fonts (Helvetica, Timesâ€¦), which
+// Outlines for the 14 standard PDF fonts (Helvetica, Times…), which
 // PDFs may use without embedding them.
 const STANDARD_FONTS = `${path.join(path.dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json')), 'standard_fonts')}/`;
 
-// The editor canvas is 960Ã—540 (16:9). Pages are fitted inside it,
-// keeping their aspect ratio, and centred.
+// The canvas is 960 wide and as tall as the PDF page's shape.
 const TARGET_WIDTH = 960;
 const TARGET_HEIGHT = 540;
 const RENDER_SCALE = 2; // background pictures at twice the canvas size
@@ -32,10 +31,14 @@ const LETTERBOX = '#e9ebe8'; // around pages that aren't 16:9
 // under Mongo's 16MB document limit.
 const MAX_TOTAL_BACKGROUND_BYTES = 10 * 1024 * 1024;
 const MAX_PAGE_BACKGROUND_BYTES = 700 * 1024;
-// Fabric draws a line's baseline at 0.879 Ã— its font size below the
+// Fabric draws a line's baseline at 0.879 × its font size below the
 // line's top (1.13 line box, 0.222 descent), so text boxes start there.
 const BASELINE = 0.879;
 const FABRIC_LINE = 1.13;
+// A text box has one line spacing and one font size per line height, so
+// lines that stray this far from an even rhythm get their own box.
+const EVEN_GAP = 0.08;
+const EVEN_SIZE = 0.05;
 
 // --- rendering ------------------------------------------------------------
 
@@ -205,8 +208,8 @@ function pieces(textContent, page, pageBox, fit, pixels) {
 }
 
 const NBSP = '\u00a0';
-const MARKER = /^(?:[â€¢â–ªâ–«â€£â—¦â—â—‹â– â–¡â—†â–âž¢âž¤âœ“â€“\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])$/i;
-const MARKER_LEAD = /^((?:[â€¢â–ªâ–«â€£â—¦â—â—‹â– â–¡â—†â–âž¢âž¤âœ“â€“\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)]))( +)/i;
+const MARKER = /^(?:[•▪▫‣◦●○■□◆❖➢➤✓–\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])$/i;
+const MARKER_LEAD = /^((?:[•▪▫‣◦●○■□◆❖➢➤✓–\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)]))( +)/i;
 
 // Pieces on one baseline, close enough together, form a line; a wide
 // gap (a column gutter or table cell) starts a new line.
@@ -291,6 +294,53 @@ function lineText(line) {
   return line.runs.map((r) => r.text).join('');
 }
 
+const spread = (v) => Math.max(...v) - Math.min(...v);
+const centerOf = (l) => (l.x + l.right) / 2;
+
+function alignOf(lines) {
+  const size = median(lines.map((l) => l.size));
+  if (lines.length > 1 && spread(lines.map((l) => l.x)) > size * 0.5) {
+    if (spread(lines.map(centerOf)) < size * 0.5) return 'center';
+    if (spread(lines.map((l) => l.right)) < size * 0.5) return 'right';
+  }
+  return 'left';
+}
+
+// Blocks sharing a centre line but not a left edge are a centred column
+// (table cells, usually), even when each holds a single line.
+function alignColumns(blocks) {
+  const flat = blocks.filter((b) => !b.angle);
+  flat.forEach((b) => { b.textAlign = alignOf(b.lines); });
+  const lefties = flat.filter((b) => b.textAlign === 'left');
+  for (const b of lefties) {
+    const size = b.lines[0].size;
+    const column = lefties.filter((o) => Math.abs(centerOf(o.lines[0]) - centerOf(b.lines[0])) < size * 0.5);
+    if (column.length >= 3 && spread(column.map((o) => o.lines[0].x)) > size) {
+      column.forEach((o) => { o.textAlign = 'center'; });
+    }
+  }
+  return blocks;
+}
+
+// Splits a block where its lines stop keeping an even rhythm, so every
+// line lands where the page had it instead of drifting away from it by
+// the difference from the block's single line spacing.
+function splitUneven(b) {
+  if (b.angle) return [b];
+  const parts = [{ ...b, lines: [b.lines[0]] }];
+  for (const line of b.lines.slice(1)) {
+    const part = parts[parts.length - 1];
+    const last = part.lines[part.lines.length - 1];
+    const gap = line.baseline - last.baseline;
+    const size = Math.max(line.size, last.size);
+    const prev = part.lines.length > 1 ? last.baseline - part.lines[part.lines.length - 2].baseline : gap;
+    if (Math.abs(gap - prev) > size * EVEN_GAP || Math.abs(line.size - last.size) > size * EVEN_SIZE) {
+      parts.push({ ...b, lines: [line] });
+    } else part.lines.push(line);
+  }
+  return parts;
+}
+
 function blockFromLines(b, id) {
   const lines = b.lines;
   const blockLeft = Math.min(...lines.map((l) => l.x));
@@ -298,15 +348,7 @@ function blockFromLines(b, id) {
   const size = median(sizes);
   const left = Math.min(...lines.map((l) => l.x));
   const right = Math.max(...lines.map((l) => l.right));
-  const lefts = lines.map((l) => l.x);
-  const rights = lines.map((l) => l.right);
-  const centers = lines.map((l) => (l.x + l.right) / 2);
-  const spread = (v) => Math.max(...v) - Math.min(...v);
-  let textAlign = 'left';
-  if (lines.length > 1 && spread(lefts) > size * 0.5) {
-    if (spread(centers) < size * 0.5) textAlign = 'center';
-    else if (spread(rights) < size * 0.5) textAlign = 'right';
-  }
+  const textAlign = b.textAlign || 'left';
   // Indents become leading non-breaking spaces, and a marker followed by
   // ordinary spaces is joined to its text the same way, so lists keep
   // their shape in the editor.
@@ -322,9 +364,12 @@ function blockFromLines(b, id) {
   const gaps = lines.slice(1).map((l, i) => l.baseline - lines[i].baseline);
   const lineHeight = gaps.length ? median(gaps) / (size * FABRIC_LINE) : 1;
   // Web fonts rarely match the PDF's metrics exactly: leave room so a
-  // line never wraps where the page didn't.
+  // line never wraps where the page didn't, which would push it into the
+  // text below. Centred and right-aligned boxes stay inside the page.
   const width = right - left;
-  const slack = Math.min(width * 0.12 + size, 80);
+  let slack = width * 0.2 + size;
+  if (textAlign === 'center') slack = Math.min(slack, left * 2);
+  if (textAlign === 'right') slack = Math.min(slack, left);
   let x = left;
   if (textAlign === 'center') x -= slack / 2;
   if (textAlign === 'right') x -= slack;
@@ -421,7 +466,7 @@ export async function extractSlidesFromPdf(buffer, report = null) {
       const textContent = await page.getTextContent();
       const ocrOnly = await onlyInvisibleText(page); // also loads fonts into commonObjs
       const items = ocrOnly ? [] : pieces(textContent, page, pageBox, fit, pixels);
-      const blocks = groupBlocks(groupLines(items)).map((b, i) => blockFromLines(b, `p${pageNum}-b${i}`));
+      const blocks = alignColumns(groupBlocks(groupLines(items))).flatMap(splitUneven).map((b, i) => blockFromLines(b, `p${pageNum}-b${i}`));
       markTitle(blocks);
 
       const slide = { id: `slide-${pageNum}`, order: pageNum - 1, blocks, notes: '', needsImageFallback: false };

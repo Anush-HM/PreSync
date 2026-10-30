@@ -4,7 +4,7 @@ import './review.css';
 
 // Slide-by-slide preview of a PowerPoint or PDF exactly as it will open
 // in the editor, with per-slide notes on content that was left out.
-function SlidesPreview({ slides, info }) {
+function SlidesPreview({ slides, info, canvasWidth, canvasHeight }) {
   return (
     <ol className="slides-preview" aria-label="Slide preview">
       {slides.map((slide, i) => {
@@ -12,7 +12,7 @@ function SlidesPreview({ slides, info }) {
         return (
           <li key={slide.id || i} className="slides-preview-item">
             <div className="slides-preview-frame">
-              <ScaledSlide slide={slide} label={`Slide ${i + 1}${meta.title ? `: ${meta.title}` : ''}`} />
+              <ScaledSlide slide={slide} canvasWidth={canvasWidth} canvasHeight={canvasHeight} label={`Slide ${i + 1}${meta.title ? `: ${meta.title}` : ''}`} />
             </div>
             <div className="slides-preview-meta">
               <span className="mono slides-preview-num">{i + 1}</span>

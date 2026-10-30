@@ -47,8 +47,8 @@ export function fabricGradient(g, width, height) {
   });
 }
 
-export function slideBackgroundFill(slide, fallback) {
-  return fabricGradient(slide.backgroundGradient, CANVAS_WIDTH, CANVAS_HEIGHT) || slide.backgroundColor || fallback;
+export function slideBackgroundFill(slide, fallback, width = CANVAS_WIDTH, height = CANVAS_HEIGHT) {
+  return fabricGradient(slide.backgroundGradient, width, height) || slide.backgroundColor || fallback;
 }
 
 // --- text ---------------------------------------------------------------

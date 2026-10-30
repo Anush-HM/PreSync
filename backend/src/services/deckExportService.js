@@ -6,7 +6,7 @@ import { CHART_COLORS, chartLayout, pointColor, seriesColor } from './chartLayou
 
 // Turns a deck's slides (the Deck model shape) back into files people
 // can take elsewhere: a .pptx with real, editable text boxes, or a PDF.
-// Both work from the 960×540 editor canvas, so positions carry over 1:1.
+// Both use the deck's own canvas size, so positions carry over 1:1.
 
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 540;
@@ -14,6 +14,10 @@ const DEFAULT_TEXT_COLOR = '#1a1a2e';
 const DEFAULT_LINE_HEIGHT = 1.16;
 
 // --- shared helpers -----------------------------------------------------
+
+function canvasSize(deck) {
+  return { width: deck.canvasWidth || CANVAS_WIDTH, height: deck.canvasHeight || CANVAS_HEIGHT };
+}
 
 function sortedSlides(deck) {
   return [...(deck.slides || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -98,7 +102,7 @@ export function exportFileName(title, ext) {
 
 // --- PPTX ---------------------------------------------------------------
 
-// 16:9 layout is 10in × 5.625in, so 96 canvas px = 1in and 1px = 0.75pt.
+// 96 canvas px = 1in and 1px = 0.75pt, whatever the deck's shape.
 const PX_PER_INCH = CANVAS_WIDTH / 10;
 const inch = (px) => px / PX_PER_INCH;
 const pt = (px) => Math.round(px * 0.75 * 10) / 10;
@@ -313,7 +317,9 @@ function pptxBackground(s) {
 
 export async function exportDeckToPptx(deck) {
   const pptx = new PptxGenJS();
-  pptx.layout = 'LAYOUT_16x9';
+  const { width, height } = canvasSize(deck);
+  pptx.defineLayout({ name: 'PRESYNC', width: inch(width), height: inch(height) });
+  pptx.layout = 'PRESYNC';
   pptx.title = deck.title || 'PreSync deck';
 
   for (const s of sortedSlides(deck)) {
@@ -470,18 +476,19 @@ function pdfGradient(doc, gradient, x, y, w, h) {
 }
 
 function drawPdfBackground(doc, s) {
-  if (s.backgroundGradient?.stops?.length) doc.rect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT).fill(pdfGradient(doc, s.backgroundGradient, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT));
-  else doc.rect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT).fill(pdfColor(s.backgroundColor, '#ffffff'));
+  const { width, height } = doc.page;
+  if (s.backgroundGradient?.stops?.length) doc.rect(0, 0, width, height).fill(pdfGradient(doc, s.backgroundGradient, 0, 0, width, height));
+  else doc.rect(0, 0, width, height).fill(pdfColor(s.backgroundColor, '#ffffff'));
   const img = decodeDataUrl(s.backgroundImageUrl);
   if (!img || !PDF_IMAGE.test(img.mime)) return;
   try {
     if (s.backgroundRepeat) {
       const tile = doc.openImage(img.buffer);
-      doc.save().rect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT).clip();
-      for (let y = 0; y < CANVAS_HEIGHT; y += tile.height) for (let x = 0; x < CANVAS_WIDTH; x += tile.width) doc.image(tile, x, y);
+      doc.save().rect(0, 0, width, height).clip();
+      for (let y = 0; y < height; y += tile.height) for (let x = 0; x < width; x += tile.width) doc.image(tile, x, y);
       doc.restore();
     } else {
-      doc.image(img.buffer, 0, 0, { width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
+      doc.image(img.buffer, 0, 0, { width, height });
     }
   } catch {
     // A corrupt background image leaves the colour behind it.
@@ -550,7 +557,7 @@ function drawPdfText(doc, b, box) {
   if (box.height && b.verticalAlign === 'middle') y += Math.max(0, (box.height - textHeight) / 2);
   if (box.height && b.verticalAlign === 'bottom') y += Math.max(0, box.height - textHeight);
   // Like PowerPoint, text may run past its box; table cells clip to theirs.
-  const bottom = box.clip ? Math.min(CANVAS_HEIGHT, box.y + Math.max(box.height, textHeight)) : CANVAS_HEIGHT;
+  const bottom = box.clip ? Math.min(doc.page.height, box.y + Math.max(box.height, textHeight)) : doc.page.height;
   const options = (size) => ({
     width: box.width,
     align: b.textAlign || 'left',
@@ -662,19 +669,21 @@ function drawPdfImage(doc, b, buffer) {
 
 function drawPdfNotesPage(doc, s, number) {
   doc.addPage();
-  doc.rect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT).fill('#ffffff');
+  const { width, height } = doc.page;
+  doc.rect(0, 0, width, height).fill('#ffffff');
   const head = `Speaker notes · Slide ${number}`;
   const bold = useFont(doc, { fontWeight: 'bold' });
-  doc.fillColor('#285c43').fontSize(14).text(bold ? head : pdfSafeText(head), 60, 48, { width: CANVAS_WIDTH - 120 });
+  doc.fillColor('#285c43').fontSize(14).text(bold ? head : pdfSafeText(head), 60, 48, { width: width - 120 });
   const body = useFont(doc, {});
-  doc.fillColor('#2b302d').fontSize(16).text(body ? String(s.notes) : pdfSafeText(String(s.notes)), 60, 84, { width: CANVAS_WIDTH - 120, height: CANVAS_HEIGHT - 120, ellipsis: true, lineGap: 4 });
+  doc.fillColor('#2b302d').fontSize(16).text(body ? String(s.notes) : pdfSafeText(String(s.notes)), 60, 84, { width: width - 120, height: height - 120, ellipsis: true, lineGap: 4 });
 }
 
 // Options: { includeHidden: false, notes: false }. With `notes`, a page
 // of speaker notes follows each slide that has some.
 export function exportDeckToPdf(deck, { includeHidden = false, notes = false } = {}) {
+  const { width, height } = canvasSize(deck);
   const doc = new PDFDocument({
-    size: [CANVAS_WIDTH, CANVAS_HEIGHT],
+    size: [width, height],
     margin: 0,
     autoFirstPage: false,
     info: { Title: deck.title || 'PreSync deck', Creator: 'PreSync' }

@@ -707,7 +707,7 @@ function EditorPage() {
       setSelectedIds([]);
     }
 
-    canvas.backgroundColor = slideBackgroundFill(slide, DEFAULT_SLIDE_BACKGROUND);
+    canvas.backgroundColor = slideBackgroundFill(slide, DEFAULT_SLIDE_BACKGROUND, CW, CH);
     if (slide.backgroundImageUrl) {
       if (canvas.backgroundImage?.data?.src !== slide.backgroundImageUrl) {
         const slideId = slide.id;
@@ -728,7 +728,7 @@ function EditorPage() {
       canvas.backgroundImage = undefined;
     }
 
-    const scale = legacyFitScale(slide.blocks);
+    const scale = legacyFitScale(slide.blocks, CW, CH);
     scaleRef.current = scale;
 
     const existing = new Map();
@@ -1630,7 +1630,7 @@ function EditorPage() {
   // Unresolved threads on this slide, one pin per element (or for the slide).
   const commentPins = (() => {
     if (!activeSlide) return [];
-    const s = legacyFitScale(activeSlide.blocks);
+    const s = legacyFitScale(activeSlide.blocks, CW, CH);
     const groups = new Map();
     for (const t of threads) {
       if (t.resolved || t.slideId !== activeSlide.id) continue;
@@ -2097,6 +2097,8 @@ function EditorPage() {
             ) : (
               <VersionHistoryPanel
                 deckId={deckId}
+                canvasWidth={CW}
+                canvasHeight={CH}
                 refreshKey={historyKey}
                 onRestore={handleRestoreVersion}
                 onClose={() => setSheet(null)}

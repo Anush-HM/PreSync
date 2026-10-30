@@ -34,7 +34,9 @@ function full(doc) {
     header: doc.header || [],
     footer: doc.footer || [],
     images: doc.images,
-    slides: doc.slides
+    slides: doc.slides,
+    canvasWidth: doc.canvasWidth || 960,
+    canvasHeight: doc.canvasHeight || 540
   };
 }
 

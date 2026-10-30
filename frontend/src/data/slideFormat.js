@@ -17,7 +17,7 @@ export const DEFAULT_TEXT_COLOR = '#1a1a2e';
 export const DEFAULT_SLIDE_BACKGROUND = '#ffffff';
 export const DEFAULT_FONT_FAMILY = 'Public Sans, sans-serif';
 export const DEFAULT_LINE_HEIGHT = 1.16; // Fabric's Textbox default
-// Fabric spaces lines at fontSize Ã— 1.13 Ã— lineHeight; CSS at fontSize Ã—
+// Fabric spaces lines at fontSize × 1.13 × lineHeight; CSS at fontSize ×
 // line-height. Renderers multiply by this so both wrap and stack alike.
 export const FABRIC_LINE_MULT = 1.13;
 
@@ -55,18 +55,20 @@ export const TEXT_COLORS = ['#1a1a2e', '#e74c3c', '#2980b9', '#27ae60', '#f39c12
 export const SLIDE_BACKGROUNDS = ['#ffffff', '#f5f5f0', '#1a1a2e', '#0f3460', '#fdf2e9', '#eafaf1'];
 
 // Decks imported before PDF coordinates were normalized can have blocks
-// outside the 960Ã—540 canvas. Returns the uniform scale that fits them.
-export function legacyFitScale(blocks) {
-  if (!blocks?.length) return 1;
+// that start outside the canvas. Returns the uniform scale that fits
+// them. A box merely running past the edge is no sign of that (imported
+// text boxes leave room to spare), and scaling it would pull the text
+// off the slide's background picture.
+export function legacyFitScale(blocks, canvasWidth = CANVAS_WIDTH, canvasHeight = CANVAS_HEIGHT) {
+  if (!blocks?.some((b) => (b.x || 0) >= canvasWidth || (b.y || 0) >= canvasHeight)) return 1;
   let maxX = 0;
   let maxY = 0;
   blocks.forEach((b) => {
     maxX = Math.max(maxX, (b.x || 0) + (b.width || 300));
     maxY = Math.max(maxY, (b.y || 0) + (b.fontSize || 16) * 2);
   });
-  if (maxX <= CANVAS_WIDTH && maxY <= CANVAS_HEIGHT) return 1;
-  const sx = maxX > CANVAS_WIDTH ? (CANVAS_WIDTH - 20) / maxX : 1;
-  const sy = maxY > CANVAS_HEIGHT ? (CANVAS_HEIGHT - 20) / maxY : 1;
+  const sx = maxX > canvasWidth ? (canvasWidth - 20) / maxX : 1;
+  const sy = maxY > canvasHeight ? (canvasHeight - 20) / maxY : 1;
   return Math.min(sx, sy);
 }
 
@@ -151,7 +153,7 @@ export function imageCropCss(b, s) {
 }
 
 // Splits text into runs by its `styles` ranges ([{ start, end, style }],
-// indices counting characters but not line breaks â€” Fabric's format).
+// indices counting characters but not line breaks — Fabric's format).
 // Returns [{ text, style }] where style is null for unstyled text and
 // line breaks stay inside the run text.
 export function styledRuns(text, styles) {

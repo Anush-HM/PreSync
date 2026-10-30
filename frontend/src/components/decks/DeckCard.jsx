@@ -34,7 +34,7 @@ function DeckCard({ deck, currentUserId, onRename, onDuplicate, onShare, onHisto
       <button type="button" className="deck-card-hit" onClick={open} aria-label={`Open ${deck.title}`} />
       <div className="deck-card-thumb">
         {deck.thumbnail ? (
-          <ScaledSlide slide={deck.thumbnail} />
+          <ScaledSlide slide={deck.thumbnail} canvasWidth={deck.canvasWidth} canvasHeight={deck.canvasHeight} />
         ) : (
           <div className="deck-card-thumb-empty">
             <Layers aria-hidden="true" />

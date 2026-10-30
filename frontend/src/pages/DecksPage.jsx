@@ -26,7 +26,7 @@ const VIEWS = {
 
 const SORTS = {
   recent: { label: 'Last edited', compare: (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0) },
-  title: { label: 'Name (Aâ€“Z)', compare: (a, b) => a.title.localeCompare(b.title) },
+  title: { label: 'Name (A–Z)', compare: (a, b) => a.title.localeCompare(b.title) },
   created: { label: 'Date created', compare: (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0) },
   slides: { label: 'Most slides', compare: (a, b) => b.slideCount - a.slideCount }
 };
@@ -243,7 +243,7 @@ function DecksPage({ view = 'home' }) {
     setBusyId(deck.id);
     try {
       const copy = await duplicateDeck(deck.id);
-      toast.success(`Created â€œ${copy.title}â€`);
+      toast.success(`Created “${copy.title}”`);
       await refreshDecks();
     } catch (err) {
       toast.error(err.message || 'Could not duplicate that presentation');
@@ -257,7 +257,7 @@ function DecksPage({ view = 'home' }) {
     await deleteDeck(target.id);
     setDecks((prev) => prev.filter((d) => d.id !== target.id));
     setDeleteTarget(null);
-    toast.success(`Deleted â€œ${target.title}â€`);
+    toast.success(`Deleted “${target.title}”`);
   }
 
   function handleRenamed(updated) {
@@ -324,7 +324,7 @@ function DecksPage({ view = 'home' }) {
               <LayoutTemplate /> Templates
             </button>
             <button type="button" className="btn btn-primary" onClick={handleCreate} disabled={creating}>
-              <Plus /> {creating ? 'Creatingâ€¦' : 'Create presentation'}
+              <Plus /> {creating ? 'Creating…' : 'Create presentation'}
             </button>
           </div>
         </header>
@@ -424,7 +424,7 @@ function DecksPage({ view = 'home' }) {
               <div className="dash-empty">
                 {query.trim() ? (
                   <>
-                    <h2>No matches for â€œ{query.trim()}â€</h2>
+                    <h2>No matches for “{query.trim()}”</h2>
                     <p>Try a different name, or clear the search.</p>
                     <button type="button" className="btn btn-ghost" onClick={() => setQuery('')}>Clear search</button>
                   </>
@@ -473,7 +473,7 @@ function DecksPage({ view = 'home' }) {
       {deleteTarget && (
         <ConfirmDialog
           title="Delete presentation?"
-          message={`â€œ${deleteTarget.title}â€ and its slides will be permanently deleted for you and every collaborator. This cannot be undone.`}
+          message={`“${deleteTarget.title}” and its slides will be permanently deleted for you and every collaborator. This cannot be undone.`}
           confirmLabel="Delete presentation"
           destructive
           onConfirm={confirmDelete}

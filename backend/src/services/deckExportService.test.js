@@ -150,3 +150,17 @@ describe('export of imported content', () => {
     expect(items).toMatch(/A.*B.*C/);
   });
 });
+
+describe('export size', () => {
+  const shaped = { ...deck, canvasWidth: 960, canvasHeight: 720 };
+
+  it('keeps a 4:3 deck 4:3 in PowerPoint', async () => {
+    const { canvasWidth, canvasHeight } = await extractSlidesFromPptx(await exportDeckToPptx(shaped));
+    expect([canvasWidth, canvasHeight]).toEqual([960, 720]);
+  });
+
+  it('keeps a 4:3 deck 4:3 in PDF', async () => {
+    const { canvasWidth, canvasHeight } = await extractSlidesFromPdf(await exportDeckToPdf(shaped));
+    expect([canvasWidth, canvasHeight]).toEqual([960, 720]);
+  });
+});

@@ -19,7 +19,7 @@ import { mimeForExt, processImage, toDataUrl, WEB_IMAGE_EXT } from './imageProce
 import { readChart } from './pptxCharts.js';
 
 // Extracts editable content from a .pptx (Office Open XML) deck onto the
-// 960Ã—540 editor canvas:
+// 960×540 editor canvas:
 //  - text keeps per-run formatting (font, size, weight, italic,
 //    underline, strike, colour), bullets and numbering, indents, line
 //    spacing, box margins, vertical anchoring and shrink-on-overflow,
@@ -47,8 +47,8 @@ const MAX_TOTAL_IMAGE_BYTES = 9 * 1024 * 1024;
 const DEFAULT_FONT_PT = 18;
 const ALIGN = { l: 'left', ctr: 'center', r: 'right', just: 'justify', dist: 'justify' };
 const ANCHOR = { t: 'top', ctr: 'middle', b: 'bottom', just: 'top', dist: 'top' };
-// PowerPoint's single line spacing is about 1.2Ã— the font size; Fabric's
-// is 1.13Ã—, so lineHeight values are scaled by this.
+// PowerPoint's single line spacing is about 1.2× the font size; Fabric's
+// is 1.13×, so lineHeight values are scaled by this.
 const LINE_SCALE = 1.2 / 1.13;
 
 export class PptxParseError extends Error {}
@@ -126,13 +126,13 @@ export function paragraphText(p) {
 // Symbol fonts store bullets as private code points; these are the
 // glyphs they draw.
 const SYMBOL_BULLETS = {
-  wingdings: { 'Ã˜': 'âž¢', 'Â§': 'â–ª', 'Ã¼': 'âœ“', 'q': 'â‘', 'v': 'â–', 'n': 'â– ', 'l': 'â—', 'Ãœ': 'âž¤', 'Ã°': 'âž”', 'Ã ': 'âž”', 'o': 'â–¡', 'p': 'â–¡', 'w': 'â—†', 'u': 'â—†', 'Âª': 'â–«', 'Â¨': 'â—»', 'Ã¨': 'âžœ', 'Ãž': 'âž' },
-  symbol: { 'Â·': 'â€¢', 'Ã˜': 'âž¢', 'Â¨': 'â™¦', 'ÃŸ': 'â‡', 'Ã ': 'â—Š', 'Ãž': 'â‡’' }
+  wingdings: { 'Ø': '➢', '§': '▪', 'ü': '✓', 'q': '❑', 'v': '❖', 'n': '■', 'l': '●', 'Ü': '➤', 'ð': '➔', 'à': '➔', 'o': '□', 'p': '□', 'w': '◆', 'u': '◆', 'ª': '▫', '¨': '◻', 'è': '➜', 'Þ': '➝' },
+  symbol: { '·': '•', 'Ø': '➢', '¨': '♦', 'ß': '⇐', 'à': '◊', 'Þ': '⇒' }
 };
 
 function bulletChar(char, font) {
   const key = (font || '').toLowerCase();
-  if (key.startsWith('wingdings')) return SYMBOL_BULLETS.wingdings[char] || 'â€¢';
+  if (key.startsWith('wingdings')) return SYMBOL_BULLETS.wingdings[char] || '•';
   if (key === 'symbol') return SYMBOL_BULLETS.symbol[char] || char;
   return char;
 }
@@ -231,7 +231,7 @@ function makeTextExtractor({ theme, fontPx, emuToPx }) {
     return { style, cap: firstAttr(rPrs, 'cap'), pt };
   }
 
-  // Returns text-block fields: { text, styles, fontSize, fontFamily, â€¦,
+  // Returns text-block fields: { text, styles, fontSize, fontFamily, …,
   // textAlign, lineHeight } for a txBody, or null when it has no text.
   return function textFields(txBody, { levelChain = () => [], overrides = {}, fallbackColor = null, autofit = null } = {}) {
     if (!txBody) return null;
@@ -297,12 +297,12 @@ function makeTextExtractor({ theme, fontPx, emuToPx }) {
       counters.length = Math.min(counters.length, lvl + 1);
       if (hasText && bulletNode && bulletNode.nodeName !== 'a:buNone') {
         const buFont = attr(firstChild(chain, 'a:buFont'), 'typeface');
-        if (bulletNode.nodeName === 'a:buChar') prefix = bulletChar(attr(bulletNode, 'char') || 'â€¢', buFont);
+        if (bulletNode.nodeName === 'a:buChar') prefix = bulletChar(attr(bulletNode, 'char') || '•', buFont);
         else if (bulletNode.nodeName === 'a:buAutoNum') {
           const start = num(bulletNode, 'startAt') || 1;
           counters[lvl] = counters[lvl] === undefined ? start : counters[lvl] + 1;
           prefix = autoNumber(attr(bulletNode, 'type'), counters[lvl]);
-        } else prefix = 'â€¢';
+        } else prefix = '•';
         const bulletStyle = { ...firstStyle };
         const buClr = firstChild(chain, 'a:buClr');
         if (buClr) bulletStyle.fill = colorFrom(buClr, theme) || bulletStyle.fill;
@@ -330,7 +330,7 @@ function makeTextExtractor({ theme, fontPx, emuToPx }) {
         const algn = ALIGN[firstAttr(chain, 'algn')] || 'left';
         aligns.set(algn, (aligns.get(algn) || 0) + plain.length);
       }
-      // Space before/after paragraphs: percentages are of the line (1.2Ã—
+      // Space before/after paragraphs: percentages are of the line (1.2×
       // the font size), points are absolute.
       const spacing = (tag) => {
         const node = firstChild(chain, tag);
@@ -814,7 +814,7 @@ async function extractSlide(zip, slidePath, slideIndex, ctx) {
       return placeholderBlock(box, 'SmartArt graphic\n(no saved layout to redraw)');
     }
     if (uri.endsWith('/ole') || descendant(data, 'p:oleObj')) {
-      // Embedded documents (Excel sheets, Visio drawingsâ€¦) carry a preview
+      // Embedded documents (Excel sheets, Visio drawings…) carry a preview
       // picture of themselves; show that in the object's frame.
       const pic = descendant(data, 'p:pic');
       if (pic) {

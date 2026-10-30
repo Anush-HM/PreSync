@@ -9,7 +9,7 @@ import { formatDateTime, plural } from '../../data/format.js';
 // Saved versions of the presentation, newest first. Picking one previews
 // its slides; Restore brings them back for everyone, after first saving
 // what is there now, and Undo reverses it.
-function VersionHistoryPanel({ deckId, onRestore, onClose, refreshKey }) {
+function VersionHistoryPanel({ deckId, canvasWidth, canvasHeight, onRestore, onClose, refreshKey }) {
   const toast = useToast();
   const [versions, setVersions] = useState(null);
   const [error, setError] = useState('');
@@ -85,7 +85,7 @@ function VersionHistoryPanel({ deckId, onRestore, onClose, refreshKey }) {
               <span className="field-hint">{formatDateTime(preview.createdAt)} · {plural(preview.slideCount, 'slide')}</span>
             </div>
             <div className="vh-strip">
-              {preview.slides.map((s, i) => <ScaledSlide key={s.id || i} slide={s} className="vh-strip-slide" label={`Slide ${i + 1}`} />)}
+              {preview.slides.map((s, i) => <ScaledSlide key={s.id || i} slide={s} className="vh-strip-slide" label={`Slide ${i + 1}`} canvasWidth={canvasWidth} canvasHeight={canvasHeight} />)}
             </div>
             <div className="vh-preview-actions">
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(null)}>Close preview</button>
@@ -101,7 +101,7 @@ function VersionHistoryPanel({ deckId, onRestore, onClose, refreshKey }) {
           {versions?.map((v) => (
             <li key={v.id}>
               <button type="button" className={`vh-item${preview?.id === v.id ? ' is-on' : ''}`} onClick={() => open(v)} aria-busy={loadingId === v.id || undefined}>
-                {v.thumbnail ? <ScaledSlide slide={v.thumbnail} className="vh-thumb" /> : <span className="vh-thumb is-empty" />}
+                {v.thumbnail ? <ScaledSlide slide={v.thumbnail} className="vh-thumb" canvasWidth={canvasWidth} canvasHeight={canvasHeight} /> : <span className="vh-thumb is-empty" />}
                 <span className="vh-meta">
                   <span className={`vh-name is-${v.kind}`}>{versionName(v)}</span>
                   <span className="field-hint">{formatDateTime(v.createdAt)}</span>
