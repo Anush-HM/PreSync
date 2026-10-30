@@ -33,7 +33,7 @@ export async function updateDeckSlides(deckId, slides) {
 // with an explanation, so it's offered in the picker too).
 export const IMPORT_ACCEPT = '.pdf,.pptx,.ppt,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
-// PDF / PPTX import â€” multipart, so apiFetch's JSON header logic backs
+// PDF / PPTX import — multipart, so apiFetch's JSON header logic backs
 // off automatically for FormData bodies.
 export async function importDeckFile(file) {
   const form = new FormData();
@@ -107,7 +107,7 @@ export async function downloadDeckExport(deckId, format, options) {
       const body = await res.json();
       if (body?.error) message = body.error;
     } catch {
-      // not JSON â€” keep the generic message
+      // not JSON — keep the generic message
     }
     throw new Error(message);
   }

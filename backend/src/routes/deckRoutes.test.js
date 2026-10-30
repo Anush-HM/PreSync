@@ -170,7 +170,7 @@ describe('POST /api/decks/:deckId/duplicate', () => {
 
   it('copies the slides into a new deck owned by the caller', async () => {
     const slides = [{ id: 's1', order: 0, blocks: [{ id: 'b1', type: 'textbox', text: 'Hi', x: 0, y: 0, width: 10 }] }];
-    Deck.findById.mockResolvedValue(makeDeck({ slides }));
+    Deck.findById.mockResolvedValue({ ...makeDeck({ slides }), canvasWidth: 960, canvasHeight: 720 });
     flushDoc.mockResolvedValue(false);
     Deck.create.mockImplementation(async (doc) => ({ _id: 'copy-1', ...doc }));
 
@@ -178,7 +178,7 @@ describe('POST /api/decks/:deckId/duplicate', () => {
 
     expect(res.status).toBe(201);
     expect(flushDoc).toHaveBeenCalledWith(DECK_ID);
-    expect(Deck.create).toHaveBeenCalledWith({ title: 'Quarterly review (copy)', ownerId: COLLAB_ID, slides });
+    expect(Deck.create).toHaveBeenCalledWith({ title: 'Quarterly review (copy)', ownerId: COLLAB_ID, slides, canvasWidth: 960, canvasHeight: 720 });
     expect(res.body).toEqual({ id: 'copy-1', title: 'Quarterly review (copy)', slideCount: 1 });
   });
 

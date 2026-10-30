@@ -707,7 +707,7 @@ function EditorPage() {
       setSelectedIds([]);
     }
 
-    canvas.backgroundColor = slideBackgroundFill(slide, DEFAULT_SLIDE_BACKGROUND);
+    canvas.backgroundColor = slideBackgroundFill(slide, DEFAULT_SLIDE_BACKGROUND, CW, CH);
     if (slide.backgroundImageUrl) {
       if (canvas.backgroundImage?.data?.src !== slide.backgroundImageUrl) {
         const slideId = slide.id;
@@ -2097,6 +2097,8 @@ function EditorPage() {
             ) : (
               <VersionHistoryPanel
                 deckId={deckId}
+                canvasWidth={CW}
+                canvasHeight={CH}
                 refreshKey={historyKey}
                 onRestore={handleRestoreVersion}
                 onClose={() => setSheet(null)}

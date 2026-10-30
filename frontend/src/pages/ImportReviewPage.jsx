@@ -228,7 +228,7 @@ function ImportReviewPage() {
                   footer={doc.footer}
                 />
               )}
-              {tab === 'slides' && <SlidesPreview slides={doc.slides} info={doc.analysis.slides} />}
+              {tab === 'slides' && <SlidesPreview slides={doc.slides} info={doc.analysis.slides} canvasWidth={doc.canvasWidth} canvasHeight={doc.canvasHeight} />}
             </div>
           </div>
 

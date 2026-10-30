@@ -85,8 +85,8 @@ function ViewerLivePage() {
       socket.emit('viewer:join', { code: roomCode, viewerId });
     });
 
-    socket.on('slide:sync', ({ slideId, blocks, backgroundImageUrl, backgroundColor }) => {
-      const slide = { id: slideId, slideId, blocks: blocks || [], backgroundImageUrl, backgroundColor };
+    socket.on('slide:sync', ({ slideId, blocks, backgroundImageUrl, backgroundColor, canvasWidth, canvasHeight }) => {
+      const slide = { id: slideId, slideId, blocks: blocks || [], backgroundImageUrl, backgroundColor, canvasWidth, canvasHeight };
       setLiveSlide(slide);
       setPinnedSlide((prev) => (prev ? prev : slide)); // first snapshot pins immediately
     });
@@ -230,7 +230,7 @@ function ViewerLivePage() {
 
           <div className="viewer-stage">
             {pinnedSlide ? (
-              <ScaledSlide slide={pinnedSlide} className="viewer-slide" label="Current slide" />
+              <ScaledSlide slide={pinnedSlide} className="viewer-slide" label="Current slide" canvasWidth={pinnedSlide.canvasWidth} canvasHeight={pinnedSlide.canvasHeight} />
             ) : (
               <div className="viewer-waiting" role="status">
                 {connState === 'connecting'

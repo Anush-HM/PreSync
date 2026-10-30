@@ -6,7 +6,7 @@ import Comment from '../models/Comment.js';
 import { autoSnapshot } from './versionController.js';
 import { flushDoc } from '../yjs/docManager.js';
 
-// Every handler here assumes requireAuth has already run â€” req.userId is
+// Every handler here assumes requireAuth has already run — req.userId is
 // a real editor. Access is scoped to decks the user owns or collaborates
 // on; nothing here is reachable by a viewer, since viewers never carry a
 // JWT in the first place.
@@ -35,7 +35,7 @@ async function serializeDeck(deck, userId) {
     owner: { id: plain.ownerId._id, email: plain.ownerId.email, name: plain.ownerId.name },
     collaborators: plain.collaboratorIds.map((c) => ({ id: c._id, email: c.email, name: c.name })),
     // Include slides so the PresenterPage can render content without a
-    // separate fetch â€” the presenter view is read-only so serving the
+    // separate fetch — the presenter view is read-only so serving the
     // full slide array here is safe and keeps the client simpler.
     slides: plain.slides || [],
     slideCount: (plain.slides || []).length
@@ -79,7 +79,7 @@ export async function listDecks(req, res) {
   const decks = await Deck.find({
     $or: [{ ownerId: req.userId }, { collaboratorIds: req.userId }]
   })
-    .select('title createdAt updatedAt slides ownerId collaboratorIds')
+    .select('title createdAt updatedAt slides ownerId collaboratorIds canvasWidth canvasHeight')
     .sort({ updatedAt: -1 })
     .populate([
       { path: 'ownerId', select: 'email name' },
@@ -96,7 +96,9 @@ export async function listDecks(req, res) {
       isOwner: idOf(d.ownerId) === req.userId,
       owner: personOf(d.ownerId),
       collaborators: (d.collaboratorIds || []).map(personOf).filter(Boolean),
-      thumbnail: thumbnailSlide(d.slides)
+      thumbnail: thumbnailSlide(d.slides),
+      canvasWidth: d.canvasWidth,
+      canvasHeight: d.canvasHeight
     }))
   );
 }
@@ -116,7 +118,7 @@ export async function duplicateDeck(req, res) {
 
   const slides = deck.slides.map((s) => (typeof s.toObject === 'function' ? s.toObject() : s));
   const title = `${deck.title.slice(0, MAX_TITLE_LENGTH - COPY_SUFFIX.length)}${COPY_SUFFIX}`;
-  const copy = await Deck.create({ title, ownerId: req.userId, slides });
+  const copy = await Deck.create({ title, ownerId: req.userId, slides, canvasWidth: deck.canvasWidth, canvasHeight: deck.canvasHeight });
 
   res.status(201).json({
     id: copy._id,
@@ -154,7 +156,7 @@ export async function getDeck(req, res) {
   res.json(await serializeDeck(deck, req.userId));
 }
 
-// Full-document replace of slides â€” the REST path for saving a deck.
+// Full-document replace of slides — the REST path for saving a deck.
 // Live collaborative edits themselves flow through the Yjs layer, not
 // this endpoint; this exists for periodic persistence and for clients
 // that aren't holding a live Yjs connection (e.g. initial load).
@@ -200,7 +202,7 @@ export async function saveDeck(req, res) {
 }
 
 // Owner-only: invite another user to co-edit this deck by email. This is
-// the piece that was missing â€” collaboratorIds existed on the model and
+// the piece that was missing — collaboratorIds existed on the model and
 // was already checked everywhere, but nothing could ever populate it.
 export async function addCollaborator(req, res) {
   const deck = await Deck.findById(req.params.deckId);

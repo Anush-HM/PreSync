@@ -141,7 +141,9 @@ export function registerSocketHandlers(io) {
             slideId: slide.id,
             blocks: slide.blocks,
             backgroundImageUrl: slide.backgroundImageUrl,
-            backgroundColor: slide.backgroundColor
+            backgroundColor: slide.backgroundColor,
+            canvasWidth: deck.canvasWidth,
+            canvasHeight: deck.canvasHeight
           });
         }
       }
@@ -176,7 +178,9 @@ export function registerSocketHandlers(io) {
         slideId: slide.id,
         blocks: slide.blocks,
         backgroundImageUrl: slide.backgroundImageUrl,
-        backgroundColor: slide.backgroundColor
+        backgroundColor: slide.backgroundColor,
+        canvasWidth: deck.canvasWidth,
+        canvasHeight: deck.canvasHeight
       });
     });
 

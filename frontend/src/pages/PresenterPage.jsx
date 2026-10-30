@@ -374,7 +374,7 @@ function PresenterPage() {
             <section className="pres-next" aria-labelledby="next-title">
               <div className="pres-card-head"><h2 id="next-title">Up next</h2></div>
               {nextSlide
-                ? <button type="button" className="pres-next-thumb" onClick={() => goTo(slideIdx + 1)} aria-label={`Go to slide ${slideIdx + 2}`}><ScaledSlide slide={nextSlide} /></button>
+                ? <button type="button" className="pres-next-thumb" onClick={() => goTo(slideIdx + 1)} aria-label={`Go to slide ${slideIdx + 2}`}><ScaledSlide slide={nextSlide} canvasWidth={canvasDims.width} canvasHeight={canvasDims.height} /></button>
                 : <p className="pres-empty">{slide ? 'This is the last slide.' : '–'}</p>}
             </section>
             <div className="pres-desktop-only">{notesPanel}</div>

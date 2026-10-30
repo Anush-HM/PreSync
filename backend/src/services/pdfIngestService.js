@@ -18,12 +18,11 @@ import { loadCanvas, toDataUrl } from './imageProcessing.js';
 // background, so nothing is lost. Without the optional canvas module the
 // importer falls back to text only, and says so.
 
-// Outlines for the 14 standard PDF fonts (Helvetica, Timesâ€¦), which
+// Outlines for the 14 standard PDF fonts (Helvetica, Times…), which
 // PDFs may use without embedding them.
 const STANDARD_FONTS = `${path.join(path.dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json')), 'standard_fonts')}/`;
 
-// The editor canvas is 960Ã—540 (16:9). Pages are fitted inside it,
-// keeping their aspect ratio, and centred.
+// The canvas is 960 wide and as tall as the PDF page's shape.
 const TARGET_WIDTH = 960;
 const TARGET_HEIGHT = 540;
 const RENDER_SCALE = 2; // background pictures at twice the canvas size
@@ -32,7 +31,7 @@ const LETTERBOX = '#e9ebe8'; // around pages that aren't 16:9
 // under Mongo's 16MB document limit.
 const MAX_TOTAL_BACKGROUND_BYTES = 10 * 1024 * 1024;
 const MAX_PAGE_BACKGROUND_BYTES = 700 * 1024;
-// Fabric draws a line's baseline at 0.879 Ã— its font size below the
+// Fabric draws a line's baseline at 0.879 × its font size below the
 // line's top (1.13 line box, 0.222 descent), so text boxes start there.
 const BASELINE = 0.879;
 const FABRIC_LINE = 1.13;
@@ -209,8 +208,8 @@ function pieces(textContent, page, pageBox, fit, pixels) {
 }
 
 const NBSP = '\u00a0';
-const MARKER = /^(?:[â€¢â–ªâ–«â€£â—¦â—â—‹â– â–¡â—†â–âž¢âž¤âœ“â€“\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])$/i;
-const MARKER_LEAD = /^((?:[â€¢â–ªâ–«â€£â—¦â—â—‹â– â–¡â—†â–âž¢âž¤âœ“â€“\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)]))( +)/i;
+const MARKER = /^(?:[•▪▫‣◦●○■□◆❖➢➤✓–\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])$/i;
+const MARKER_LEAD = /^((?:[•▪▫‣◦●○■□◆❖➢➤✓–\-*]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)]))( +)/i;
 
 // Pieces on one baseline, close enough together, form a line; a wide
 // gap (a column gutter or table cell) starts a new line.

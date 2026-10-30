@@ -17,7 +17,7 @@ export const DEFAULT_TEXT_COLOR = '#1a1a2e';
 export const DEFAULT_SLIDE_BACKGROUND = '#ffffff';
 export const DEFAULT_FONT_FAMILY = 'Public Sans, sans-serif';
 export const DEFAULT_LINE_HEIGHT = 1.16; // Fabric's Textbox default
-// Fabric spaces lines at fontSize Ã— 1.13 Ã— lineHeight; CSS at fontSize Ã—
+// Fabric spaces lines at fontSize × 1.13 × lineHeight; CSS at fontSize ×
 // line-height. Renderers multiply by this so both wrap and stack alike.
 export const FABRIC_LINE_MULT = 1.13;
 
@@ -153,7 +153,7 @@ export function imageCropCss(b, s) {
 }
 
 // Splits text into runs by its `styles` ranges ([{ start, end, style }],
-// indices counting characters but not line breaks â€” Fabric's format).
+// indices counting characters but not line breaks — Fabric's format).
 // Returns [{ text, style }] where style is null for unstyled text and
 // line breaks stay inside the run text.
 export function styledRuns(text, styles) {
