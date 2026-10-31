@@ -18,6 +18,7 @@ import { DEFAULT_FONT_FAMILY } from '../data/slideFormat.js';
 import './DocumentEditorPage.css';
 
 const AUTOSAVE_MS = 1200;
+const BORDER_CLEARANCE = 6;
 const PAGE_SIZES = [
   { id: 'letter', label: 'Letter', width: 816, height: 1056 },
   { id: 'a4', label: 'A4', width: 794, height: 1123 }
@@ -71,11 +72,14 @@ function DocumentSurface({ editor, page, layout, title, onLayoutChange }) {
 
   useEffect(() => {
     const { storage } = editor;
-    storage.pagination.geometry = { pageHeight: page.height, gap: PAGE_GAP, marginTop: page.margins.top, marginBottom: page.margins.bottom };
+    // Text stops short of a bottom border that sits inside the margin.
+    const border = layout.pageBorder;
+    const borderEdge = border?.sides.bottom ? (border.inset + border.width) * (96 / 72) + BORDER_CLEARANCE : 0;
+    storage.pagination.geometry = { pageHeight: page.height, gap: PAGE_GAP, marginTop: page.margins.top, marginBottom: Math.max(page.margins.bottom, borderEdge) };
     storage.pagination.onPages = setPages;
     storage.pagination.repaginate?.();
     return () => { storage.pagination.onPages = null; };
-  }, [editor, page]);
+  }, [editor, page, layout.pageBorder]);
 
   // The page holding the cursor, from where it sits on the sheets.
   function currentPage() {

@@ -245,6 +245,15 @@ describe('tabs and page borders from Word', () => {
     expect(cleanContent(content)).toEqual(content);
   });
 
+  it('evens out the left edge of column lines and list items, and shares their stops', async () => {
+    const stop = '<w:tabs><w:tab w:val="left" w:pos="5040"/></w:tabs>';
+    const parsed = await parseDocx(await buildDocx(line('Name: Asha', 'USN', stop) + `<w:p><w:r><w:t xml:space="preserve">  Name: Ravi</w:t></w:r>${tab}<w:r><w:t>USN</w:t></w:r></w:p>` + '<w:p><w:r><w:t xml:space="preserve">  kept</w:t></w:r></w:p>'));
+    const { content } = blocksToContent(parsed.blocks);
+    expect(content[1].content[0].text).toBe('Name: Ravi');
+    expect(content[1].attrs.tabStops).toEqual(content[0].attrs.tabStops);
+    expect(content[2].content[0].text).toBe('  kept');
+  });
+
   it('keeps Word tab stops, with their kind and leader', async () => {
     const stops = '<w:tabs><w:tab w:val="left" w:pos="5040"/><w:tab w:val="right" w:leader="dot" w:pos="9360"/></w:tabs>';
     const parsed = await parseDocx(await buildDocx(line('Name', 'USN', stops)));

@@ -13,6 +13,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
 const key = new PluginKey('pagination');
 const DELAY_MS = 80;
+const SAFETY_STEPS = [6, 24, 60];
 const NESTED = new Set(['bulletList', 'orderedList', 'listItem', 'blockquote']);
 
 // Blocks in reading order. `anchor` is where a spacer goes to move the
@@ -54,8 +55,9 @@ function spacerDom({ kind, height, target, columns }) {
   return row;
 }
 
-// Where a paragraph's first line past `limit` starts, or null if that is
-// its first line. Positions run down the page, so bisection finds it.
+// Where a paragraph's first line past `limit` starts, null if that is its
+// first line, or undefined if every line fits (its box can be taller than
+// its text). Positions run down the page, so bisection finds it.
 function firstLineBeyond(view, pos, node, from, limit, origin) {
   let lo = Math.max(from, pos + 1);
   let hi = pos + node.nodeSize - 1;
@@ -64,14 +66,15 @@ function firstLineBeyond(view, pos, node, from, limit, origin) {
     if (view.coordsAtPos(mid, 1).bottom - origin > limit) hi = mid;
     else lo = mid + 1;
   }
+  if (view.coordsAtPos(lo, 1).bottom - origin <= limit) return undefined;
   return lo <= pos + 1 ? null : lo;
 }
 
 // The spacers a document needs, and how many pages it fills.
-export function measureBreaks(view, { pageHeight, gap, marginTop, marginBottom }) {
+export function measureBreaks(view, { pageHeight, gap, marginTop, marginBottom, safety = 0 }) {
   const origin = view.dom.getBoundingClientRect().top;
   const pitch = pageHeight + gap;
-  const contentHeight = pageHeight - marginTop - marginBottom;
+  const contentHeight = pageHeight - marginTop - marginBottom - safety;
   const breaks = [];
   let page = 0;
   let shift = 0; // how far everything so far has been pushed down
@@ -108,6 +111,7 @@ export function measureBreaks(view, { pageHeight, gap, marginTop, marginBottom }
       let from = block.pos + 1;
       while (bottom + shift > pageEnd()) {
         const pos = firstLineBeyond(view, block.pos, block.node, from, pageEnd() - shift, origin);
+        if (pos === undefined) break;
         if (pos === null || pos <= from) {
           if (pos === null && from === block.pos + 1) breakAt(block.anchor, 'block', top);
           break;
@@ -187,16 +191,55 @@ function settle(view) {
   }
 }
 
+// Whether any line of text runs past the end of its page, as laid out.
+function overflows(view, { pageHeight, gap, marginTop, marginBottom }) {
+  const origin = view.dom.getBoundingClientRect().top;
+  const pitch = pageHeight + gap;
+  const contentHeight = pageHeight - marginTop - marginBottom;
+  const walker = document.createTreeWalker(view.dom, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  while (walker.nextNode()) {
+    range.selectNodeContents(walker.currentNode);
+    for (const rect of range.getClientRects()) {
+      const top = rect.top - origin;
+      if (rect.bottom - origin > Math.floor(top / pitch) * pitch + contentHeight + 1) return true;
+    }
+  }
+  return false;
+}
+
+// Older tables can be wider than the page. Columns keep their proportions.
+function fitTables(view) {
+  for (const table of view.dom.querySelectorAll('table')) {
+    const cols = [...table.querySelectorAll('col')];
+    const widths = cols.map((col) => (col.style.width.endsWith('px') ? parseFloat(col.style.width) : 0));
+    const total = widths.reduce((sum, w) => sum + w, 0);
+    if (widths.every(Boolean) && total > view.dom.clientWidth + 1) cols.forEach((col, i) => { col.style.width = `${(widths[i] / total) * 100}%`; });
+  }
+}
+
 function run(view, storage) {
   if (!storage.geometry || view.composing) return;
   const scroller = view.dom.closest('.doc-scroll');
   const scrollTop = scroller?.scrollTop;
-  view.dispatch(view.state.tr.setMeta(key, DecorationSet.empty).setMeta('addToHistory', false));
-  const tabs = tabDecorations(view);
-  if (tabs.length) view.dispatch(view.state.tr.setMeta(key, decorations(view.state.doc, tabs, [])).setMeta('addToHistory', false));
-  const { breaks, pages } = measureBreaks(view, storage.geometry);
-  view.dispatch(view.state.tr.setMeta(key, decorations(view.state.doc, tabs, breaks)).setMeta('addToHistory', false));
-  settle(view);
+  let pages = 1;
+  // Measured line boxes can differ a little from real ones, so check the
+  // result and leave more room at the page bottom until nothing crosses it.
+  for (const safety of SAFETY_STEPS) {
+    view.dispatch(view.state.tr.setMeta(key, DecorationSet.empty).setMeta('addToHistory', false));
+    fitTables(view);
+    const tabs = tabDecorations(view);
+    if (tabs.length) {
+      view.dispatch(view.state.tr.setMeta(key, decorations(view.state.doc, tabs, [])).setMeta('addToHistory', false));
+      fitTables(view);
+    }
+    const measured = measureBreaks(view, { ...storage.geometry, safety });
+    view.dispatch(view.state.tr.setMeta(key, decorations(view.state.doc, tabs, measured.breaks)).setMeta('addToHistory', false));
+    fitTables(view); // redrawing a table restores its pixel widths
+    settle(view);
+    pages = measured.pages;
+    if (!overflows(view, storage.geometry)) break;
+  }
   if (scroller) scroller.scrollTop = scrollTop;
   storage.onPages?.(pages);
 }

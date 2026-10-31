@@ -424,12 +424,28 @@ function chartNodes(chart) {
   return [caption, { type: 'table', content: [header, ...rows] }];
 }
 
+// Lines in a run of tabbed paragraphs form one set of columns, so a line
+// without stops of its own takes its neighbours'.
+function shareTabStops(blocks) {
+  const tabbed = (b) => b?.type === 'paragraph' && (b.runs || []).some((r) => r.text.includes('\t'));
+  const out = [...blocks];
+  for (let i = 0; i < out.length; i++) {
+    if (!tabbed(out[i])) continue;
+    let end = i;
+    while (tabbed(out[end + 1])) end += 1;
+    const tabs = out.slice(i, end + 1).find((b) => b.layout?.tabs)?.layout.tabs;
+    for (let k = i; tabs && k <= end; k++) if (!out[k].layout?.tabs) out[k] = { ...out[k], layout: { ...out[k].layout, tabs } };
+    i = end;
+  }
+  return out;
+}
+
 // The document tree for blocks from parseDocx.
 export function blocksToContent(blocks = [], images = []) {
   const byId = new Map(images.map((i) => [i.id, i]));
   const out = [];
   let quote = null;
-  for (const block of blocks) {
+  for (const block of shareTabStops(blocks)) {
     const isQuote = block.type === 'paragraph' && /quote/i.test(block.styleId || '');
     if (!isQuote) quote = null;
     switch (block.type) {

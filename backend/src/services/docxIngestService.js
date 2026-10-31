@@ -249,6 +249,16 @@ function cellText(tc, found) {
     .trim();
 }
 
+const COLUMN_LINE = /\t|\S[ \u00a0]{2,}\S/;
+
+function trimLeadingSpaces(runs) {
+  while (runs.length) {
+    runs[0].text = runs[0].text.replace(/^[ \u00a0]+/, '');
+    if (runs[0].text) break;
+    runs.shift();
+  }
+}
+
 const isBlank = (block) => block?.type === 'paragraph' && !block.text;
 
 const BORDER_STYLES = { single: 'solid', thick: 'solid', double: 'double', dashed: 'dashed', dashSmallGap: 'dashed', dotted: 'dotted', threeDEngrave: 'groove', threeDEmboss: 'groove' };
@@ -429,6 +439,8 @@ export async function parseDocx(buffer) {
     const para = paragraphContext(p, ctx);
     const layout = paragraphLayout(para);
     const { runs, pageBreak, breakBefore } = readRuns(p, para, ctx);
+    // A stray space would push a list item or column line out of line.
+    if (numPr || style.kind === 'list' || COLUMN_LINE.test(text)) trimLeadingSpaces(runs);
     const formatted = { runs, ...(Object.keys(layout).length ? { layout } : {}) };
     // Quote and caption paragraphs keep their style for the document editor.
     if (/^(quote|intensequote|caption)$/i.test(para.styleId || '')) formatted.styleId = para.styleId;

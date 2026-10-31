@@ -114,13 +114,13 @@
 .doc-prose hr { margin: 10pt 0; border: 0; border-top: 1px solid #b1bab3; }
 .doc-prose hr.ProseMirror-selectednode { outline: 2px solid #76c893; }
 
-.doc-prose table { width: 100%; margin: 0 0 9pt; border-collapse: collapse; table-layout: fixed; }
+.doc-prose table { width: 100% !important; min-width: 0 !important; max-width: 100% !important; margin: 0 0 9pt; border-collapse: collapse; table-layout: fixed !important; }
 .doc-prose td, .doc-prose th { position: relative; min-width: 24px; padding: 5px 7px; border: 1px solid #b1bab3; vertical-align: top; }
 .doc-prose th { background: #eef3ef; font-weight: 700; text-align: left; }
 .doc-prose td > p:last-child, .doc-prose th > p:last-child { margin-bottom: 0; }
 .doc-prose .selectedCell::after { content: ''; position: absolute; inset: 0; background: rgba(118, 200, 147, 0.25); pointer-events: none; }
 .doc-prose .column-resize-handle { position: absolute; top: 0; right: -2px; bottom: 0; width: 4px; background: #76c893; pointer-events: none; }
-.doc-prose .tableWrapper { overflow-x: auto; }
+.doc-prose .tableWrapper { overflow: visible !important; width: 100% !important; max-width: 100% !important; }
 .doc-prose.resize-cursor { cursor: col-resize; }
 
 /* The break takes no room: pagination.js starts the next sheet here. */
