@@ -37,6 +37,7 @@ export const TONES = ['info', 'success', 'warning', 'danger'];
 export const SHAPES = ['rect', 'roundRect', 'ellipse', 'triangle', 'diamond', 'hexagon', 'star5', 'rightArrow'];
 
 const BLOCK_ATTRS = {
+  indent: nullable(number(1, 8)),
   textAlign: nullable(oneOf('left', 'center', 'right', 'justify')),
   lineHeight: nullable(number(0.5, 5))
 };
@@ -338,8 +339,64 @@ export function expandTabs(runs, stops) {
   });
 }
 
+const COLUMN_GAP = /\S[ \u00a0]{2,}\S|\t/;
+const LABEL = /^[A-Za-z][\w .'-]{1,30}:/;
+const TEXT_WIDTH_PX = 624; // of a page with one-inch margins
+const SPACE_GAP = /[ \u00a0]{2,}/;
+
+// A line's runs with the gap between its columns as one tab run, and no
+// leading space to push the line along.
+function columnRuns(block) {
+  const out = [];
+  for (const run of block.runs?.length ? block.runs : [{ text: block.text }]) {
+    run.text.split(/(\t+|[ \u00a0]{2,})/).forEach((part) => {
+      if (!part) return;
+      const gap = part.includes('\t') || SPACE_GAP.test(part);
+      if (gap && !out.length) return;
+      if (!gap) out.push({ ...run, text: part });
+      else if (out[out.length - 1].text !== '\t') out.push({ ...run, text: '\t' });
+    });
+  }
+  return out;
+}
+
+const widthOf = (runs) => runs.reduce((sum, r) => sum + textWidth(r.text, r.style), 0);
+
+// Lines like "Student Name: Asha    USN: 1" centred one by one start at a
+// different place each. A run of them becomes one left-aligned block,
+// indented to sit about where the centring put it, with the second column
+// on one shared tab stop.
+function alignColumns(blocks) {
+  const isCentredLine = (b) => b.type === 'paragraph' && b.layout?.align === 'center' && (COLUMN_GAP.test(b.text) || LABEL.test(b.text));
+  const out = [...blocks];
+  for (let i = 0; i < out.length; i++) {
+    if (!isCentredLine(out[i])) continue;
+    let end = i;
+    while (end + 1 < out.length && isCentredLine(out[end + 1])) end += 1;
+    const lines = out.slice(i, end + 1);
+    if (lines.length > 1 || COLUMN_GAP.test(lines[0].text)) {
+      const split = lines.map(columnRuns);
+      const parts = split.map((runs) => {
+        const at = runs.findIndex((r) => r.text === '\t');
+        return at < 0 ? [widthOf(runs), 0] : [widthOf(runs.slice(0, at)), widthOf(runs.slice(at + 1))];
+      });
+      const left = Math.max(...parts.map((p) => p[0]));
+      const right = Math.max(...parts.map((p) => p[1]));
+      const stop = Math.ceil((left + 16) / GRID_PX) * GRID_PX;
+      const indent = Math.round((TEXT_WIDTH_PX - (right ? stop + right : left)) / 2 / GRID_PX);
+      lines.forEach((line, k) => {
+        const { align, ...layout } = line.layout;
+        out[i + k] = { ...line, runs: split[k], layout: { ...layout, tabs: layout.tabs || [{ pos: stop, type: 'left' }], indent: Math.max(0, Math.min(8, indent)) } };
+      });
+    }
+    i = end;
+  }
+  return out;
+}
+
 function blockAttrs(layout = {}, extra = {}) {
   const attrs = { ...extra };
+  if (layout.indent) attrs.indent = layout.indent;
   if (layout.align) attrs.textAlign = layout.align;
   if (Number.isFinite(layout.lineHeight)) attrs.lineHeight = Math.max(0.5, Math.min(5, layout.lineHeight));
   return attrs;
@@ -425,7 +482,7 @@ export function blocksToContent(blocks = [], images = []) {
   const byId = new Map(images.map((i) => [i.id, i]));
   const out = [];
   let quote = null;
-  for (const block of blocks) {
+  for (const block of alignColumns(blocks)) {
     const isQuote = block.type === 'paragraph' && /quote/i.test(block.styleId || '');
     if (!isQuote) quote = null;
     switch (block.type) {

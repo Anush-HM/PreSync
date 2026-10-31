@@ -249,6 +249,9 @@ function cellText(tc, found) {
     .trim();
 }
 
+const CONTENTS_TITLE = /^\s*table of contents\s*$/i;
+const isBlank = (block) => block?.type === 'paragraph' && !block.text;
+
 const BORDER_STYLES = { single: 'solid', thick: 'solid', double: 'double', dashed: 'dashed', dashSmallGap: 'dashed', dotted: 'dotted', threeDEngrave: 'groove', threeDEmboss: 'groove' };
 const BORDER_SCOPES = { allPages: 'all', firstPage: 'first', notFirstPage: 'exceptFirst' };
 const BORDER_WIDTHS = [0.5, 1, 1.5, 2.25, 3, 4.5, 6];
@@ -347,6 +350,7 @@ export async function parseDocx(buffer) {
   let imageBytes = 0;
   let lastList = null;
   let lastListNumId = null;
+  let inContents = false; // from the "Table of contents" title to the next page
 
   async function loadPicture(pic) {
     const target = rels.get(pic.rId)?.target;
@@ -411,6 +415,14 @@ export async function parseDocx(buffer) {
     return { marker, indentLeft: lvl.indentLeft, indentFirst: lvl.indentFirst };
   }
 
+  // One break per page turn. Blank lines just before a break only filled
+  // out the page, and here could spill over into a page of their own.
+  function pushPageBreak() {
+    while (isBlank(blocks[blocks.length - 1])) blocks.pop();
+    inContents = false;
+    if (blocks.length && blocks[blocks.length - 1].type !== 'pageBreak') blocks.push({ type: 'pageBreak' });
+  }
+
   async function readParagraph(p) {
     const styleId = attr(find(p, 'w:pPr', 'w:pStyle'), 'w:val');
     const style = (styleId && styles.get(styleId)) || { kind: null, level: null };
@@ -419,14 +431,15 @@ export async function parseDocx(buffer) {
     const { text, pictures, charts } = readParagraphContent(p, found);
     const para = paragraphContext(p, ctx);
     const layout = paragraphLayout(para);
-    const { runs, pageBreak } = readRuns(p, para, ctx);
-    // Tabbed columns only line up from the left, so centring that merely
-    // comes from a style is dropped; a paragraph's own w:jc is kept.
-    if (layout.align && runs.some((r) => r.text.includes('\t')) && !find(p, 'w:pPr', 'w:jc')) delete layout.align;
+    const { runs, pageBreak, breakBefore } = readRuns(p, para, ctx);
+    const isContents = CONTENTS_TITLE.test(text);
+    if (isContents) layout.align = 'center';
+    else if (inContents && layout.align === 'center') delete layout.align;
     const formatted = { runs, ...(Object.keys(layout).length ? { layout } : {}) };
     // Quote and caption paragraphs keep their style for the document editor.
     if (/^(quote|intensequote|caption)$/i.test(para.styleId || '')) formatted.styleId = para.styleId;
-    if (layout.pageBreakBefore) blocks.push({ type: 'pageBreak' });
+    if (layout.pageBreakBefore || breakBefore || (isContents && blocks.length)) pushPageBreak();
+    if (isContents) inContents = true;
 
     if (text) {
       if (style.kind === 'title') blocks.push({ type: 'title', text, ...formatted });
@@ -459,6 +472,9 @@ export async function parseDocx(buffer) {
       }
     }
 
+    // Blank lines are how many documents space a page out.
+    if (!text && !pictures.length && !charts.length && !pageBreak && !breakBefore) blocks.push({ type: 'paragraph', text: '', ...formatted });
+
     for (const pic of pictures) {
       const imageId = await loadPicture(pic);
       if (imageId) blocks.push({ type: 'image', imageId, ...(layout.align ? { layout: { align: layout.align } } : {}) });
@@ -476,7 +492,7 @@ export async function parseDocx(buffer) {
     }
     // An explicit page break, or the end of a section that starts a new page.
     const sectionType = attr(find(p, 'w:pPr', 'w:sectPr', 'w:type'), 'w:val');
-    if (pageBreak || (find(p, 'w:pPr', 'w:sectPr') && sectionType !== 'continuous')) blocks.push({ type: 'pageBreak' });
+    if (pageBreak || (find(p, 'w:pPr', 'w:sectPr') && sectionType !== 'continuous')) pushPageBreak();
   }
 
   const cellParagraphs = (tc, tableCtx) =>
@@ -508,8 +524,8 @@ export async function parseDocx(buffer) {
   }
 
   await readContainer(body);
-  // A break with nothing after it doesn't start a page.
-  while (blocks.length && blocks[blocks.length - 1].type === 'pageBreak') blocks.pop();
+  // A break or blank line with nothing after it doesn't start a page.
+  while (blocks.length && (blocks[blocks.length - 1].type === 'pageBreak' || isBlank(blocks[blocks.length - 1]))) blocks.pop();
 
   // Default header and footer of the last section, for the preview.
   async function headerFooter(tag) {

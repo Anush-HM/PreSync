@@ -176,6 +176,59 @@ describe('page layout rules', () => {
   });
 });
 
+// Close enough for the columns in these tests: the text is the same font.
+const textWidthOf = (text) => text.length * 7.2;
+
+describe('page breaks and blank lines from Word', () => {
+  const blanks = (n) => '<w:p/>'.repeat(n);
+  const types = (parsed) => parsed.blocks.map((b) => (isBlankBlock(b) ? 'blank' : b.type));
+  const isBlankBlock = (b) => b.type === 'paragraph' && !b.text;
+  const brThen = (text) => `<w:p><w:r><w:br w:type="page"/></w:r><w:r><w:t>${text}</w:t></w:r></w:p>`;
+  const rendered = (text) => `<w:p><w:r><w:lastRenderedPageBreak/><w:t>${text}</w:t></w:r></w:p>`;
+
+  it('keeps blank lines between text, but not at the end', async () => {
+    expect(types(await parseDocx(await buildDocx(p('a') + blanks(2) + p('b') + blanks(3))))).toEqual(['paragraph', 'blank', 'blank', 'paragraph']);
+  });
+
+  it('puts a break ahead of the text it comes before', async () => {
+    const parsed = await parseDocx(await buildDocx(p('cover') + brThen('next')));
+    expect(parsed.blocks.map((b) => b.type)).toEqual(['paragraph', 'pageBreak', 'paragraph']);
+    expect(parsed.blocks[2].text).toBe('next');
+  });
+
+  it('uses where Word last broke the page, only at a paragraph start', async () => {
+    const mid = '<w:p><w:r><w:t>one</w:t></w:r><w:r><w:lastRenderedPageBreak/><w:t>two</w:t></w:r></w:p>';
+    expect(types(await parseDocx(await buildDocx(p('a') + rendered('b'))))).toEqual(['paragraph', 'pageBreak', 'paragraph']);
+    expect(types(await parseDocx(await buildDocx(p('a') + mid)))).toEqual(['paragraph', 'paragraph']);
+  });
+
+  it('makes one break of several, dropping blank lines that filled the page', async () => {
+    const parsed = await parseDocx(await buildDocx(p('a') + blanks(4) + '<w:p><w:r><w:br w:type="page"/></w:r></w:p>' + blanks(1) + rendered('b')));
+    expect(types(parsed)).toEqual(['paragraph', 'pageBreak', 'paragraph']);
+  });
+
+  it('turns them into editor nodes', async () => {
+    const parsed = await parseDocx(await buildDocx(p('a') + blanks(1) + p('b') + brThen('c')));
+    const { content } = blocksToContent(parsed.blocks);
+    expect(content.map((n) => n.type)).toEqual(['paragraph', 'paragraph', 'paragraph', 'pageBreak', 'paragraph']);
+    expect(content[1].content).toBeUndefined();
+  });
+
+  it('starts the contents on a new page, title centred and items left', async () => {
+    const centre = (t) => `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>${t}</w:t></w:r></w:p>`;
+    const parsed = await parseDocx(await buildDocx(centre('Cover') + p('TABLE OF CONTENTS') + centre('1. Introduction') + centre('2. Meaning') + brThen('Body') + centre('Centred again')));
+    expect(parsed.blocks.map((b) => b.type)).toEqual(['paragraph', 'pageBreak', 'paragraph', 'paragraph', 'paragraph', 'pageBreak', 'paragraph', 'paragraph']);
+    expect(parsed.blocks[2].layout.align).toBe('center');
+    expect(parsed.blocks[3].layout?.align).toBeUndefined();
+    expect(parsed.blocks[4].layout?.align).toBeUndefined();
+    expect(parsed.blocks[7].layout.align).toBe('center');
+  });
+
+  it('adds no page ahead of contents that open the document', async () => {
+    expect((await parseDocx(await buildDocx(p('Table of Contents') + p('x')))).blocks[0].type).toBe('paragraph');
+  });
+});
+
 describe('tabs and page borders from Word', () => {
   const tab = '<w:r><w:tab/></w:r>';
   const line = (left, right, pPr = '') => `<w:p><w:pPr>${pPr}</w:pPr><w:r><w:t>${left}</w:t></w:r>${tab}<w:r><w:t>${right}</w:t></w:r></w:p>`;
@@ -186,12 +239,33 @@ describe('tabs and page borders from Word', () => {
     expect(text).toBe('Student Name:   Asha\tUSN: 1');
   });
 
-  it('drops centring from a style on tabbed lines, but not a line\'s own', async () => {
-    const styles = '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Mid"><w:name w:val="Mid"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style></w:styles>';
-    const body = line('a', 'b', '<w:pStyle w:val="Mid"/>') + line('c', 'd', '<w:jc w:val="center"/>');
-    const parsed = await parseDocx(await buildDocx(body, { extraFiles: { 'word/styles.xml': styles } }));
-    expect(parsed.blocks[0].layout?.align).toBeUndefined();
-    expect(parsed.blocks[1].layout.align).toBe('center');
+  it('turns centred column lines into one left block on a shared stop', () => {
+    const line = (text) => ({ type: 'paragraph', text, runs: [{ text, style: { fontSize: 14.7 } }], layout: { align: 'center' } });
+    const { content } = blocksToContent([line('Student Name: Amruth B     USN: 1'), line('Student Name: Yashwanth D     USN: 22'), line('Guide: Dr. M'), line('Plain centred line')]);
+    const [one, two, three, four] = content;
+    for (const n of [one, two, three]) {
+      expect(n.attrs.textAlign).toBeUndefined();
+      expect(n.attrs.indent).toBe(one.attrs.indent);
+    }
+    expect(one.attrs.indent).toBeGreaterThan(0);
+    expect(four.attrs.textAlign).toBe('center');
+    const texts = (n) => n.content.map((c) => c.text);
+    expect(texts(one)[0]).toBe('Student Name: Amruth B');
+    expect(texts(one)[2]).toBe('USN: 1');
+    expect(texts(one)[1]).toMatch(/^\t+$/);
+    expect(texts(two)[1]).toMatch(/^\t+$/);
+    const reach = (n) => Math.floor(textWidthOf(texts(n)[0]) / 48) + texts(n)[1].length;
+    expect(reach(one)).toBe(reach(two));
+  });
+
+  it('leaves a lone centred label alone', () => {
+    const { content } = blocksToContent([{ type: 'paragraph', text: 'Note: read this', runs: [{ text: 'Note: read this' }], layout: { align: 'center' } }]);
+    expect(content[0].attrs.textAlign).toBe('center');
+  });
+
+  it('survives validation with its indent', () => {
+    const content = { type: 'doc', content: [{ type: 'paragraph', attrs: { indent: 2 } }] };
+    expect(cleanContent(content)).toEqual(content);
   });
 
   it('lines columns up on a custom tab stop, whatever the left text', async () => {

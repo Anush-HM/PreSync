@@ -171,11 +171,20 @@ export function paragraphLayout(para) {
 }
 
 // Runs of a paragraph: [{ text, style, extra?, field? }], plus whether
-// it contains a page break. `onNode` sees every other element (pictures,
+// it contains a page break: `breakBefore` when the break comes ahead of
+// its text, so the text starts the new page, else `pageBreak`. Word's
+// note of where it last broke the page only counts at a paragraph's
+// start; inside one, the paragraph simply runs across the two pages. `onNode` sees every other element (pictures,
 // tracked changes…) so the caller can keep its own bookkeeping.
 export function readRuns(p, para, ctx, onNode = () => {}) {
   const runs = [];
   let pageBreak = false;
+  let breakBefore = false;
+  const noTextYet = () => !runs.some((r) => r.text.trim());
+  const markBreak = () => {
+    if (noTextYet()) breakBefore = true;
+    else pageBreak = true;
+  };
   let field = null; // complex field being read: { instr, result }
   const push = (text, r) => {
     const { style, extra } = runStyle(runPropertyChain(r, para, ctx), ctx);
@@ -197,8 +206,11 @@ export function readRuns(p, para, ctx, onNode = () => {}) {
           break;
         case 'w:br':
         case 'w:cr':
-          if (attr(c, 'w:type') === 'page') pageBreak = true;
+          if (attr(c, 'w:type') === 'page') markBreak();
           else push('\n', r);
+          break;
+        case 'w:lastRenderedPageBreak':
+          if (noTextYet()) breakBefore = true;
           break;
         case 'w:noBreakHyphen':
           push('‑', r);
@@ -243,7 +255,7 @@ export function readRuns(p, para, ctx, onNode = () => {}) {
   walk(p);
   // Trailing whitespace adds nothing visible.
   while (runs.length && !runs[runs.length - 1].text.trim() && runs[runs.length - 1].text !== '\n') runs.pop();
-  return { runs, pageBreak };
+  return { runs, pageBreak, breakBefore };
 }
 
 // --- tables -------------------------------------------------------------------
