@@ -201,7 +201,7 @@ describe('DocumentEditorPage', () => {
   it('draws a page with its header, and edits it on double click', async () => {
     const user = await open();
     expect(screen.getByRole('region', { name: 'Page 1 of 1' })).toHaveTextContent('Annual plan');
-    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    fireEvent.doubleClick(document.querySelector('.doc-zone.is-header'));
     const left = await screen.findByLabelText('Header left');
     await user.clear(left);
     await user.type(left, 'Cover');
@@ -214,7 +214,7 @@ describe('DocumentEditorPage', () => {
 
   it('applies header and footer presets, and removes them', async () => {
     const user = await open();
-    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    fireEvent.doubleClick(document.querySelector('.doc-zone.is-header'));
     await user.click(await screen.findByRole('button', { name: 'Header styles' }));
     await user.click(screen.getByRole('menuitem', { name: 'Three-column (academic)' }));
     expect(screen.getByLabelText('Header centre')).toHaveValue('Department / College Name');
@@ -231,7 +231,7 @@ describe('DocumentEditorPage', () => {
 
   it('inserts page numbers and dates at the cursor', async () => {
     const user = await open();
-    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    fireEvent.doubleClick(document.querySelector('.doc-zone.is-header'));
     await user.click(await screen.findByLabelText('Footer right'));
     await user.click(screen.getByRole('button', { name: 'Insert Page Number' }));
     await user.click(screen.getByRole('menuitem', { name: 'Page 1 of 5' }));
@@ -257,9 +257,21 @@ describe('DocumentEditorPage', () => {
     expect(prose().querySelector('ul').style.listStyleType).toContain('➔');
   });
 
+  it('opens header and footer editing from a double click on the zone or the margin', async () => {
+    await open();
+    expect(document.querySelector('.doc-zone.is-footer')).toHaveAttribute('title', 'Double-click to edit Footer');
+    fireEvent.doubleClick(document.querySelector('.doc-zone.is-footer'));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Footer left')));
+    fireEvent.mouseDown(document.querySelector('.doc-header'));
+    await waitFor(() => expect(screen.queryByLabelText('Footer left')).not.toBeInTheDocument());
+    fireEvent.doubleClick(document.querySelector('.doc-margin-hit.is-header'));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Header left')));
+    expect(screen.getByText('Page 1')).toBeInTheDocument();
+  });
+
   it('shows header navigation, with nothing to link on the first page', async () => {
     await open();
-    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    fireEvent.doubleClick(document.querySelector('.doc-zone.is-header'));
     await screen.findByLabelText('Header left');
     for (const name of ['Previous', 'Next', 'Link to Previous']) expect(screen.getByRole('button', { name })).toBeDisabled();
     expect(screen.queryByText('[ Same as Previous ]')).not.toBeInTheDocument();
@@ -304,7 +316,7 @@ describe('DocumentEditorPage', () => {
 
   it('closes header editing on a click outside', async () => {
     await open();
-    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    fireEvent.doubleClick(document.querySelector('.doc-zone.is-header'));
     await screen.findByLabelText('Footer right');
     fireEvent.mouseDown(document.querySelector('.doc-header'));
     await waitFor(() => expect(screen.queryByLabelText('Footer right')).not.toBeInTheDocument());

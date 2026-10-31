@@ -34,24 +34,39 @@
 .doc-page-spacer { display: block; user-select: none; }
 .doc-page-spacer-row td { padding: 0 !important; border: 0 !important; background: transparent; }
 
-.doc-zone { position: absolute; left: var(--zone-left); width: var(--zone-width); z-index: 3; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9pt; line-height: 1.3; color: #5b625d; pointer-events: none; font-family: var(--font-sans, sans-serif); }
+.doc-zone { position: absolute; left: var(--zone-left); width: var(--zone-width); z-index: 3; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9pt; line-height: 1.3; color: #5b625d; cursor: pointer; font-family: var(--font-sans, sans-serif); }
 .doc-zone.has-rule.is-header { padding-bottom: 4px; border-bottom: 1.5px solid #285c43; }
 .doc-zone.has-rule.is-footer { padding-top: 4px; border-top: 1.5px solid #285c43; }
 .doc-zone-slot { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .doc-zone-slot.is-center, .doc-zone-input.is-center { text-align: center; }
 .doc-zone-slot.is-right, .doc-zone-input.is-right { text-align: right; }
-.doc-zone.is-editing { pointer-events: auto; z-index: 4; }
+.doc-zone.is-editing { z-index: 4; cursor: default; }
+.doc-margin-hit { position: absolute; left: 0; right: 0; z-index: 3; cursor: default; }
+.doc-margin-hit.is-header { top: 0; }
+.doc-margin-hit.is-footer { bottom: 0; }
 .doc-zone-input { min-width: 0; padding: 3px 6px; border: 1px dashed #8a8f88; border-radius: 3px; background: #fff; color: #171a19; font: inherit; }
 .doc-zone-input:focus { outline: 2px solid #76c893; border-color: transparent; }
-.doc-zone-bar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); font-size: 13px; flex-wrap: wrap; }
-.doc-zone-distance { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-secondary); }
-.doc-zone-distance .input { width: 62px; height: 28px; padding: 0 6px; font-size: 12.5px; }
+.doc-zone-bar { display: flex; flex-direction: column; flex: none; padding: 2px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); font-size: 13px; white-space: nowrap; }
+.doc-zone-row { display: flex; align-items: center; gap: 2px 8px; min-height: 44px; flex-wrap: wrap; }
+.doc-zone-row + .doc-zone-row { border-top: 1px solid var(--border-subtle); }
+.doc-zone-group { display: flex; align-items: center; gap: 4px; flex: none; min-height: 40px; }
+@media (max-width: 1240px) {
+  .doc-zone-row .tb-sep { display: none; }
+}
+.doc-zone-group .btn { height: 32px; }
+.doc-zone-group .doc-check { margin-right: 8px; }
+.doc-zone-close { margin-left: auto; height: 32px; flex: none; }
+.doc-zone-distance { display: inline-flex; align-items: center; gap: 6px; margin-right: 8px; font-size: 13px; color: var(--text-secondary); }
+.doc-zone-unit { display: inline-flex; align-items: center; width: 74px; height: 32px; padding-right: 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-input, var(--bg-surface)); color: var(--text-secondary); }
+.doc-zone-unit:focus-within { border-color: var(--border-active); box-shadow: var(--focus-ring); }
+.doc-zone-unit input { flex: 1; min-width: 0; height: 100%; padding: 0 2px 0 8px; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; -moz-appearance: textfield; appearance: textfield; }
+.doc-zone-unit input::-webkit-inner-spin-button, .doc-zone-unit input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .doc-list-trigger { padding: 0 4px; gap: 1px; }
 .doc-list-trigger.is-active { background: var(--forest-tint); color: var(--color-forest-light); }
 .doc-list-sample { display: inline-block; width: 62px; color: var(--text-secondary); }
 .doc-zone-tag { position: absolute; left: 0; bottom: 100%; margin-bottom: 2px; font-size: 8pt; color: #285c43; white-space: nowrap; }
 .doc-zone.is-footer .doc-zone-tag { bottom: auto; top: 100%; margin: 2px 0 0; }
-.doc-zone-where { font-size: 12px; color: var(--text-secondary); }
+.doc-zone-where { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--forest-tint); color: var(--color-forest-light); font-size: 12px; font-weight: 600; }
 .doc-zone-bar .btn[aria-pressed='true'] { background: var(--forest-tint); color: var(--color-forest-light); }
 .doc-page-pills { display: flex; flex-wrap: wrap; gap: 4px; max-height: 96px; overflow-y: auto; }
 .doc-radio-group { display: grid; grid-template-columns: auto 80px; align-items: center; gap: 8px 10px; margin: 0; padding: 0; border: 0; }

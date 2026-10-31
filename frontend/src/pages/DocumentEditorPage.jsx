@@ -106,7 +106,8 @@ function DocumentSurface({ editor, page, layout, title, onLayoutChange }) {
     } catch {
       // No layout to ask: fall through to the end of the text.
     }
-    editor.commands.focus(at ? at.pos : 'end');
+    // Without scrolling: the page must stay put for a second click to land.
+    editor.commands.focus(at ? at.pos : 'end', { scrollIntoView: false });
   }
 
   return (

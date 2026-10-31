@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Hash, Link2, PanelBottom, PanelTop, Type } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Hash, Link2, PanelBottom, PanelTop, Type, X } from 'lucide-react';
 import Menu from '../ui/Menu.jsx';
 import {
   DEFAULT_ZONE_INCHES, FOOTER_PRESETS, HEADER_PRESETS, PAGE_GAP, PAGE_NUMBER_TOKENS, borderOnPage, borderStyle, dateTexts, fillTokens,
@@ -11,9 +11,11 @@ const SIDE_NAMES = { left: 'left', center: 'centre', right: 'right' };
 
 const zonePlace = (layout, zone) => ({ [zone === 'header' ? 'top' : 'bottom']: zoneDistance(layout, zone) });
 
-function Zone({ zone, texts, values, rule, place }) {
+const zoneHint = (zone) => `Double-click to edit ${zone === 'header' ? 'Header' : 'Footer'}`;
+
+function Zone({ zone, texts, values, rule, place, onOpen }) {
   return (
-    <div className={`doc-zone is-${zone}${rule ? ' has-rule' : ''}`} style={place} aria-hidden="true">
+    <div className={`doc-zone is-${zone}${rule ? ' has-rule' : ''}`} style={place} aria-hidden="true" title={zoneHint(zone)} onDoubleClick={onOpen}>
       {SIDES.map((side) => <span key={side} className={`doc-zone-slot is-${side}`}>{texts[side] ? fillTokens(texts[side], values) : ''}</span>)}
     </div>
   );
@@ -44,64 +46,78 @@ function ZoneInputs({ zone, slots, onChange, onFocusSlot, autoFocus, rule, place
 function Distance({ label, value, onChange }) {
   return (
     <label className="doc-zone-distance">
-      {label}
-      <input
-        key={value}
-        className="input"
-        type="number"
-        min="0.1"
-        max="1.5"
-        step="0.05"
-        defaultValue={value}
-        onBlur={(e) => {
-          const n = Number(e.target.value);
-          if (Number.isFinite(n) && n > 0) onChange(Math.max(0.1, Math.min(1.5, n)));
-        }}
-      />
-      in
+      <span>{label}</span>
+      <span className="doc-zone-unit">
+        <input
+          key={value}
+          type="number"
+          min="0.1"
+          max="1.5"
+          step="0.05"
+          defaultValue={value}
+          onBlur={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n) && n > 0) onChange(Math.max(0.1, Math.min(1.5, n)));
+          }}
+        />
+        <span aria-hidden="true">in</span>
+      </span>
     </label>
   );
 }
 
-// The controls shown while headers and footers are open.
+const Sep = () => <span className="tb-sep" aria-hidden="true" />;
+
+// The controls shown while headers and footers are open, as two fixed
+// rows of groups so nothing wraps on its own.
 function ZoneBar({ layout, nav, onChange, onPreset, onInsert, onRemove, onClose }) {
   const insertItems = (list) => list.map((t) => ({ label: t.label, onSelect: () => onInsert(t.text) }));
   const presetItems = (zone, list) => list.map((p) => ({ label: p.label, onSelect: () => onPreset(zone, p) }));
   return (
     <div className="doc-zone-bar" role="toolbar" aria-label="Header and footer">
-      <strong>Header &amp; footer</strong>
-      <span className="mono doc-zone-where">Page {nav.page}</span>
-      <button type="button" className="btn btn-ghost btn-sm" disabled={!nav.onPrevious} onClick={nav.onPrevious}><ChevronLeft aria-hidden="true" />Previous</button>
-      <button type="button" className="btn btn-ghost btn-sm" disabled={!nav.onNext} onClick={nav.onNext}>Next<ChevronRight aria-hidden="true" /></button>
-      <button type="button" className="btn btn-ghost btn-sm" aria-pressed={nav.linked} disabled={!nav.onToggleLink} data-tip={`Applies to the ${nav.zone}`} onClick={nav.onToggleLink}><Link2 aria-hidden="true" />Link to Previous</button>
-      <span className="tb-sep" aria-hidden="true" />
-      <Menu label="Header styles" icon={PanelTop} text="Header styles" align="start" triggerClassName="btn btn-ghost btn-sm" items={presetItems('header', HEADER_PRESETS)} />
-      <Menu label="Footer styles" icon={PanelBottom} text="Footer styles" align="start" triggerClassName="btn btn-ghost btn-sm" items={presetItems('footer', FOOTER_PRESETS)} />
-      <span className="tb-sep" aria-hidden="true" />
-      <Menu label="Insert Page Number" icon={Hash} text="Page number" align="start" triggerClassName="btn btn-ghost btn-sm" items={insertItems(PAGE_NUMBER_TOKENS)} />
-      <Menu label="Insert Date" icon={CalendarDays} text="Date" align="start" triggerClassName="btn btn-ghost btn-sm" items={insertItems(dateTexts())} />
-      <button type="button" className="btn btn-ghost btn-sm" onMouseDown={(e) => e.preventDefault()} onClick={() => onInsert('{title}')}><Type aria-hidden="true" />Title</button>
-      <span className="tb-sep" aria-hidden="true" />
-      <label className="doc-check">
-        <input type="checkbox" checked={layout.differentFirstPage} onChange={(e) => onChange({ differentFirstPage: e.target.checked })} />
-        Different first page
-      </label>
-      <label className="doc-check">
-        <input
-          type="checkbox"
-          checked={!!layout.differentOddEven}
-          onChange={(e) => onChange({ differentOddEven: e.target.checked, even: layout.even || { header: layout.header, footer: layout.footer } })}
-        />
-        Different odd &amp; even pages
-      </label>
-      <span className="tb-sep" aria-hidden="true" />
-      <Distance label="Header from top" value={layout.headerDistance ?? DEFAULT_ZONE_INCHES} onChange={(headerDistance) => onChange({ headerDistance })} />
-      <Distance label="Footer from bottom" value={layout.footerDistance ?? DEFAULT_ZONE_INCHES} onChange={(footerDistance) => onChange({ footerDistance })} />
-      <span className="tb-sep" aria-hidden="true" />
-      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRemove('header')}>Remove Header</button>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRemove('footer')}>Remove Footer</button>
-      <span className="doc-header-spacer" />
-      <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Close Header &amp; Footer</button>
+      <div className="doc-zone-row">
+        <div className="doc-zone-group" role="group" aria-label="Navigation">
+          <span className="doc-zone-where">Page {nav.page}</span>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={!nav.onPrevious} onClick={nav.onPrevious}><ChevronLeft aria-hidden="true" />Previous</button>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={!nav.onNext} onClick={nav.onNext}>Next<ChevronRight aria-hidden="true" /></button>
+          <button type="button" className="btn btn-ghost btn-sm doc-zone-link" aria-pressed={nav.linked} disabled={!nav.onToggleLink} data-tip={`Applies to the ${nav.zone}`} onClick={nav.onToggleLink}><Link2 aria-hidden="true" />Link to Previous</button>
+        </div>
+        <Sep />
+        <div className="doc-zone-group" role="group" aria-label="Insert and styles">
+          <Menu label="Header styles" icon={PanelTop} text="Header styles" align="start" triggerClassName="btn btn-ghost btn-sm" items={presetItems('header', HEADER_PRESETS)} />
+          <Menu label="Footer styles" icon={PanelBottom} text="Footer styles" align="start" triggerClassName="btn btn-ghost btn-sm" items={presetItems('footer', FOOTER_PRESETS)} />
+          <Menu label="Insert Page Number" icon={Hash} text="Page number" align="start" triggerClassName="btn btn-ghost btn-sm" items={insertItems(PAGE_NUMBER_TOKENS)} />
+          <Menu label="Insert Date" icon={CalendarDays} text="Date" align="start" triggerClassName="btn btn-ghost btn-sm" items={insertItems(dateTexts())} />
+          <button type="button" className="btn btn-ghost btn-sm" onMouseDown={(e) => e.preventDefault()} onClick={() => onInsert('{title}')}><Type aria-hidden="true" />Title</button>
+        </div>
+      </div>
+      <div className="doc-zone-row">
+        <div className="doc-zone-group" role="group" aria-label="Options">
+          <label className="doc-check">
+            <input type="checkbox" checked={layout.differentFirstPage} onChange={(e) => onChange({ differentFirstPage: e.target.checked })} />
+            Different first page
+          </label>
+          <label className="doc-check">
+            <input
+              type="checkbox"
+              checked={!!layout.differentOddEven}
+              onChange={(e) => onChange({ differentOddEven: e.target.checked, even: layout.even || { header: layout.header, footer: layout.footer } })}
+            />
+            Different odd &amp; even pages
+          </label>
+        </div>
+        <Sep />
+        <div className="doc-zone-group" role="group" aria-label="Position">
+          <Distance label="Header from Top" value={layout.headerDistance ?? DEFAULT_ZONE_INCHES} onChange={(headerDistance) => onChange({ headerDistance })} />
+          <Distance label="Footer from Bottom" value={layout.footerDistance ?? DEFAULT_ZONE_INCHES} onChange={(footerDistance) => onChange({ footerDistance })} />
+        </div>
+        <Sep />
+        <div className="doc-zone-group" role="group" aria-label="Remove">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRemove('header')}>Remove Header</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRemove('footer')}>Remove Footer</button>
+        </div>
+        <button type="button" className="btn btn-secondary btn-sm doc-zone-close" onClick={onClose}><X aria-hidden="true" />Close Header &amp; Footer</button>
+      </div>
     </div>
   );
 }
@@ -112,12 +128,10 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
   const m = page.margins;
   const pitch = page.height + PAGE_GAP;
   const contentWidth = page.width - m.left - m.right;
-  const rootRef = useRef(null);
   const slotRef = useRef(null);
   const [activeZone, setActiveZone] = useState('header');
   const editing = editingPage !== null;
-  // A cover page has no header of its own, so edit on the next page.
-  const target = layout.differentFirstPage && editingPage === 0 && pages > 1 ? 1 : editingPage;
+  const target = editingPage;
 
   useEffect(() => {
     if (!editing) return undefined;
@@ -133,12 +147,9 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
     };
   }, [editing, onEditPage]);
 
-  function openZones(e) {
-    if (editing || !rootRef.current) return;
-    const y = e.clientY - rootRef.current.getBoundingClientRect().top;
-    const index = Math.floor(y / pitch);
-    const inPage = y - index * pitch;
-    if (index < pages && (inPage < m.top || inPage > page.height - m.bottom)) onEditPage(index);
+  function openZone(pageIndex, zone) {
+    setActiveZone(zone);
+    onEditPage(pageIndex);
   }
 
   // Fields edit the odd or even set, whichever the open page shows.
@@ -176,17 +187,18 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
     });
   }
 
-  // A cover page has no header of its own, so it can't be stepped onto.
-  const firstEditable = layout.differentFirstPage && pages > 1 ? 1 : 0;
   const nav = editing && {
     page: target + 1,
     zone: activeZone,
     linked: target > 0 && isLinked(layout, activeZone, target),
-    onPrevious: target > firstEditable ? () => onEditPage(target - 1) : undefined,
+    onPrevious: target > 0 ? () => onEditPage(target - 1) : undefined,
     onNext: target < pages - 1 ? () => onEditPage(target + 1) : undefined,
     onToggleLink: target > 0 ? () => onLayoutChange(setLinked(layout, activeZone, target, !isLinked(layout, activeZone, target))) : undefined
   };
-  const linkTag = (zone) => (target > 0 ? (isLinked(layout, zone, target) ? '[ Same as Previous ]' : '[ Section / Unlinked ]') : null);
+  const linkTag = (zone) => {
+    if (target === 0) return layout.differentFirstPage ? '[ Hidden on first page ]' : null;
+    return isLinked(layout, zone, target) ? '[ Same as Previous ]' : '[ Section / Unlinked ]';
+  };
   const focusSlot = (slot) => {
     slotRef.current = slot;
     setActiveZone(slot.zone);
@@ -225,10 +237,8 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
       )}
       <div className="doc-scroll" onMouseDown={editing ? undefined : onSurfaceDown}>
         <div
-          ref={rootRef}
           className={`doc-sheets${editing ? ' is-editing-zones' : ''}`}
           style={{ width: page.width, height: pages * pitch - PAGE_GAP }}
-          onDoubleClick={openZones}
         >
           {Array.from({ length: pages }, (_, i) => {
             const values = { page: i + 1, pages, title, numbers: layout.pageNumbers };
@@ -236,6 +246,9 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
             return (
               <section key={i} className="doc-sheet" aria-label={`Page ${i + 1} of ${pages}`} style={{ top: i * pitch, height: page.height, '--zone-left': `${m.left}px`, '--zone-right': `${m.right}px`, '--zone-width': `${contentWidth}px` }}>
                 {borderOnPage(layout.pageBorder, i) && <div className="doc-sheet-border" style={borderStyle(layout.pageBorder)} />}
+                {/* Above the text flow, whose spacers cover the margins of later pages. */}
+                <div className="doc-margin-hit is-header" style={{ height: m.top }} title={zoneHint('header')} onDoubleClick={() => openZone(i, 'header')} />
+                <div className="doc-margin-hit is-footer" style={{ height: m.bottom }} title={zoneHint('footer')} onDoubleClick={() => openZone(i, 'footer')} />
                 {target === i ? (
                   <>
                     <ZoneInputs {...zoneProps('header')} zone="header" tag={linkTag('header')} slots={zoneSlots(layout, 'header', i)} onChange={setSlot} onFocusSlot={focusSlot} autoFocus={activeZone === 'header'} />
@@ -243,8 +256,8 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
                   </>
                 ) : (
                   <>
-                    <Zone {...zoneProps('header')} zone="header" texts={zoneTexts(layout, 'header', i)} values={values} />
-                    <Zone {...zoneProps('footer')} zone="footer" texts={zoneTexts(layout, 'footer', i)} values={values} />
+                    <Zone {...zoneProps('header')} zone="header" texts={zoneTexts(layout, 'header', i)} values={values} onOpen={() => openZone(i, 'header')} />
+                    <Zone {...zoneProps('footer')} zone="footer" texts={zoneTexts(layout, 'footer', i)} values={values} onOpen={() => openZone(i, 'footer')} />
                   </>
                 )}
               </section>
