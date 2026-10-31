@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import path from 'path';
 import { attr, child, children, find, num, readRels, readXml } from './ooxml.js';
-import { paragraphContext, paragraphLayout, readRuns, readTable, readWordStyles, twipsToPx } from './docxFormatting.js';
+import { paragraphContext, paragraphLayout, readRuns, readTable, readWordStyles, runStyle, twipsToPx } from './docxFormatting.js';
 import { processImage } from './imageProcessing.js';
 import { readChart } from './pptxCharts.js';
 
@@ -466,7 +466,11 @@ export async function parseDocx(buffer) {
     }
 
     // Blank lines are how many documents space a page out.
-    if (!text && !pictures.length && !charts.length && !pageBreak && !breakBefore) blocks.push({ type: 'paragraph', text: '', ...formatted });
+    if (!text && !pictures.length && !charts.length && !pageBreak && !breakBefore) {
+      // Its height comes from the formatting of its paragraph mark.
+      const mark = [child(child(p, 'w:pPr'), 'w:rPr'), ...para.styleNodes.map((n) => child(n, 'w:rPr')), ctx.styles.rPrDefault].filter(Boolean);
+      blocks.push({ type: 'paragraph', text: '', ...formatted, markStyle: runStyle(mark, ctx).style });
+    }
 
     for (const pic of pictures) {
       const imageId = await loadPicture(pic);

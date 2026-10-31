@@ -92,6 +92,8 @@
 /* Word's default tab stops: every half inch, from the paragraph's start. */
 .doc-prose, .doc-prose p, .doc-prose h1, .doc-prose h2, .doc-prose h3, .doc-prose h4, .doc-prose h5, .doc-prose h6 { white-space: pre-wrap; tab-size: 36pt; overflow-wrap: break-word; }
 .doc-prose p { margin: 0 0 6pt; }
+.doc-tab { display: inline-block; height: 1em; overflow: hidden; white-space: pre; tab-size: 0; vertical-align: baseline; }
+.doc-tab.has-leader { border-bottom: 1px dotted currentColor; }
 .doc-prose p[data-block-style='title'] { margin-bottom: 12pt; font-size: 26pt; font-weight: 700; }
 .doc-prose p[data-block-style='subtitle'] { margin-bottom: 8pt; font-size: 14pt; color: #5b625d; }
 .doc-prose p[data-block-style='caption'] { font-size: 9pt; font-style: italic; color: #5b625d; }

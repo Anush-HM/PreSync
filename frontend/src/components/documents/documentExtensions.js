@@ -19,6 +19,16 @@ export const CALLOUT_TONES = [
   { id: 'danger', label: 'Important' }
 ];
 
+// A length kept as a number, shown as this CSS property.
+const pxAttr = (name, css) => ({
+  default: null,
+  parseHTML: (el) => {
+    const value = el.getAttribute(`data-${name}`);
+    return value === null ? null : Number(value);
+  },
+  renderHTML: (attrs) => (attrs[name] === null || attrs[name] === undefined ? {} : { [`data-${name}`]: attrs[name], style: `${css}: ${attrs[name]}px` })
+});
+
 const INDENT_PX = 48; // half an inch
 const MAX_INDENT = 8;
 
@@ -47,8 +57,16 @@ const BlockFormat = Extension.create({
           lineHeight: {
             default: null,
             parseHTML: (el) => Number(el.style.lineHeight) || null,
-            renderHTML: (attrs) => (attrs.lineHeight ? { style: `line-height: ${attrs.lineHeight}` } : {})
+            renderHTML: (attrs) => (attrs.lineHeight ? { style: `line-height: ${attrs.lineHeight * (attrs.lineScale || 1)}` } : {})
           },
+          // Set on import: Word's own line height for the font, as a multiple.
+          lineScale: { default: null, rendered: false },
+          indentLeft: pxAttr('indentLeft', 'margin-left'),
+          indentRight: pxAttr('indentRight', 'margin-right'),
+          firstLine: pxAttr('firstLine', 'text-indent'),
+          spaceBefore: pxAttr('spaceBefore', 'margin-top'),
+          spaceAfter: pxAttr('spaceAfter', 'margin-bottom'),
+          tabStops: { default: null, rendered: false },
           indent: {
             default: null,
             parseHTML: (el) => Number(el.getAttribute('data-indent')) || null,

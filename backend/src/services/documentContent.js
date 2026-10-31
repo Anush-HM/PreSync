@@ -1,4 +1,3 @@
-import PDFDocument from 'pdfkit';
 import { textLines } from './deckExportService.js';
 
 // The stored form of a Word document: the editor's JSON tree.
@@ -36,8 +35,18 @@ const anything = () => true;
 export const TONES = ['info', 'success', 'warning', 'danger'];
 export const SHAPES = ['rect', 'roundRect', 'ellipse', 'triangle', 'diamond', 'hexagon', 'star5', 'rightArrow'];
 
+const TAB_TYPES = ['left', 'start', 'center', 'right', 'end', 'decimal', 'bar', 'num'];
+const validTab = (t) => number(0, 4000)(t?.pos) && TAB_TYPES.includes(t?.type) && typeof t?.leader === 'string' && t.leader.length < 20;
+
 const BLOCK_ATTRS = {
   indent: nullable(number(1, 8)),
+  lineScale: nullable(number(0.2, 12)),
+  indentLeft: nullable(number(-2000, 2000)),
+  indentRight: nullable(number(-2000, 2000)),
+  firstLine: nullable(number(-2000, 2000)),
+  spaceBefore: nullable(number(0, 500)),
+  spaceAfter: nullable(number(0, 500)),
+  tabStops: nullable((v) => Array.isArray(v) && v.length <= 64 && v.every(validTab)),
   textAlign: nullable(oneOf('left', 'center', 'right', 'justify')),
   lineHeight: nullable(number(0.5, 5))
 };
@@ -303,105 +312,46 @@ function inlineNodes(runs) {
   return out;
 }
 
-// The editor has one tab grid, every half inch. Word's custom tab stops
-// are met by choosing how many grid tabs reach them, from an estimate of
-// the text's width, so columns land on the same stop line after line.
-const GRID_PX = 48;
-const FONT_SCALE = [[/calibri|carlito/i, 0.9], [/times|tinos|cambria|caladea/i, 0.92]];
-let metrics = null;
-
-// Helvetica's metrics, scaled towards the run's font.
-function textWidth(text, style = {}) {
-  metrics ||= new PDFDocument({ autoFirstPage: false }).font('Helvetica').fontSize(1);
-  const scale = FONT_SCALE.find(([re]) => re.test(style.fontFamily || ''))?.[1] || 1;
-  return metrics.widthOfString(text) * (style.fontSize || 14.7) * scale;
-}
-
-export function expandTabs(runs, stops) {
-  if (!stops?.length) return runs;
-  let x = 0;
-  return runs.map((run, index) => {
-    if (run.text !== '\t') {
-      x += textWidth(run.text, run.style);
-      return run;
-    }
-    const stop = stops.find((t) => t.pos > x + 1);
-    if (!stop) {
-      x = (Math.floor(x / GRID_PX) + 1) * GRID_PX;
-      return run;
-    }
-    let after = 0;
-    for (let i = index + 1; i < runs.length && runs[i].text !== '\t'; i++) after += textWidth(runs[i].text, runs[i].style);
-    const start = stop.type === 'right' ? stop.pos - after : stop.type === 'center' ? stop.pos - after / 2 : stop.pos;
-    const count = Math.max(1, Math.round(start / GRID_PX) - Math.floor(x / GRID_PX));
-    x = (Math.floor(x / GRID_PX) + count) * GRID_PX;
-    return { ...run, text: '\t'.repeat(count) };
-  });
-}
-
-const COLUMN_GAP = /\S[ \u00a0]{2,}\S|\t/;
-const TEXT_WIDTH_PX = 624; // of a page with one-inch margins
-const SPACE_GAP = /[ \u00a0]{2,}/;
-
-// A line's runs with the gap between its columns as one tab run, and no
-// leading space to push the line along.
-function columnRuns(block) {
-  const out = [];
-  for (const run of block.runs?.length ? block.runs : [{ text: block.text }]) {
-    run.text.split(/(\t+|[ \u00a0]{2,})/).forEach((part) => {
-      if (!part) return;
-      const gap = part.includes('\t') || SPACE_GAP.test(part);
-      if (gap && !out.length) return;
-      if (!gap) out.push({ ...run, text: part });
-      else if (out[out.length - 1].text !== '\t') out.push({ ...run, text: '\t' });
-    });
-  }
-  return out;
-}
-
-const widthOf = (runs) => runs.reduce((sum, r) => sum + textWidth(r.text, r.style), 0);
-
-// Column lines (two items split by a tab or several spaces) centred one
-// by one start at a different place each. A run of them becomes one left-aligned block,
-// indented to sit about where the centring put it, with the second column
-// on one shared tab stop.
-function alignColumns(blocks) {
-  const isCentredLine = (b) => b.type === 'paragraph' && b.layout?.align === 'center' && COLUMN_GAP.test(b.text);
-  const out = [...blocks];
-  for (let i = 0; i < out.length; i++) {
-    if (!isCentredLine(out[i])) continue;
-    let end = i;
-    while (end + 1 < out.length && isCentredLine(out[end + 1])) end += 1;
-    const lines = out.slice(i, end + 1);
-    const split = lines.map(columnRuns);
-    const parts = split.map((runs) => {
-      const at = runs.findIndex((r) => r.text === '\t');
-      return at < 0 ? [widthOf(runs), 0] : [widthOf(runs.slice(0, at)), widthOf(runs.slice(at + 1))];
-    });
-    const left = Math.max(...parts.map((p) => p[0]));
-    const right = Math.max(...parts.map((p) => p[1]));
-    const stop = Math.ceil((left + 16) / GRID_PX) * GRID_PX;
-    const indent = Math.round((TEXT_WIDTH_PX - (right ? stop + right : left)) / 2 / GRID_PX);
-    lines.forEach((line, k) => {
-      const { align, ...layout } = line.layout;
-      out[i + k] = { ...line, runs: split[k], layout: { ...layout, tabs: layout.tabs || [{ pos: stop, type: 'left' }], indent: Math.max(0, Math.min(8, indent)) } };
-    });
-    i = end;
-  }
-  return out;
-}
+// Word's "single" line is the font's own line height, taller than the
+// font size that CSS multiplies by.
+const NATURAL_LINE = [[/calibri|carlito/i, 1.22], [/cambria|caladea/i, 1.17]];
+const BODY_SIZE_PX = 14.67; // the editor's 11pt
+const px = (v) => Math.round(v * 10) / 10;
 
 function blockAttrs(layout = {}, extra = {}) {
   const attrs = { ...extra };
-  if (layout.indent) attrs.indent = layout.indent;
   if (layout.align) attrs.textAlign = layout.align;
   if (Number.isFinite(layout.lineHeight)) attrs.lineHeight = Math.max(0.5, Math.min(5, layout.lineHeight));
   return attrs;
 }
 
-function textBlock(type, block, extra) {
-  const attrs = blockAttrs(block.layout, extra);
-  const content = block.runs?.length ? inlineNodes(expandTabs(block.runs, block.layout?.tabs)) : block.text ? [{ type: 'text', text: block.text }] : [];
+// A paragraph's full layout. Word stores all of it, so nothing is left to
+// the editor's defaults. `style` is the text's, for line heights.
+function paragraphAttrs(layout = {}, extra = {}, style = {}, { list = false, blank = false } = {}) {
+  const attrs = blockAttrs({ lineHeight: 1, ...layout }, extra);
+  const size = style.fontSize || BODY_SIZE_PX;
+  if (Number.isFinite(layout.lineHeightPx)) {
+    attrs.lineHeight = Math.max(0.5, Math.min(5, layout.lineHeightPx / size));
+    attrs.lineScale = blank ? size / BODY_SIZE_PX : 1;
+  } else {
+    const natural = NATURAL_LINE.find(([re]) => re.test(style.fontFamily || ''))?.[1] || 1.15;
+    attrs.lineScale = Math.round(natural * (blank ? size / BODY_SIZE_PX : 1) * 1000) / 1000;
+  }
+  attrs.spaceBefore = px(Math.min(500, layout.spaceBefore || 0));
+  attrs.spaceAfter = px(Math.min(500, layout.spaceAfter || 0));
+  if (!list) {
+    if (layout.indentLeft) attrs.indentLeft = px(layout.indentLeft);
+    if (layout.indentRight) attrs.indentRight = px(layout.indentRight);
+    if (layout.indentFirst) attrs.firstLine = px(layout.indentFirst);
+  }
+  if (layout.tabs?.length) attrs.tabStops = layout.tabs;
+  return attrs;
+}
+
+function textBlock(type, block, extra, options) {
+  const style = block.markStyle || block.runs?.[0]?.style;
+  const attrs = block.layout || block.markStyle ? paragraphAttrs(block.layout, extra, style, { ...options, blank: !!block.markStyle }) : { ...extra };
+  const content = block.runs?.length ? inlineNodes(block.runs) : block.text ? [{ type: 'text', text: block.text }] : [];
   return { type, ...(Object.keys(attrs).length ? { attrs } : {}), ...(content.length ? { content } : {}) };
 }
 
@@ -424,13 +374,13 @@ function nestList(items) {
       open.pop();
       newList(item, top.siblings);
     }
-    open[open.length - 1].list.content.push({ type: 'listItem', content: [textBlock('paragraph', item)] });
+    open[open.length - 1].list.content.push({ type: 'listItem', content: [textBlock('paragraph', item, undefined, { list: true })] });
   }
   return root;
 }
 
 function cellContent(cell) {
-  const attrs = blockAttrs({ align: cell.textAlign });
+  const attrs = blockAttrs({ align: cell.textAlign }, { spaceAfter: 0 });
   return textLines(cell).map((runs) => {
     const content = inlineNodes(runs);
     return { type: 'paragraph', ...(Object.keys(attrs).length ? { attrs } : {}), ...(content.length ? { content } : {}) };
@@ -479,7 +429,7 @@ export function blocksToContent(blocks = [], images = []) {
   const byId = new Map(images.map((i) => [i.id, i]));
   const out = [];
   let quote = null;
-  for (const block of alignColumns(blocks)) {
+  for (const block of blocks) {
     const isQuote = block.type === 'paragraph' && /quote/i.test(block.styleId || '');
     if (!isQuote) quote = null;
     switch (block.type) {

@@ -123,9 +123,55 @@ export function measureBreaks(view, { pageHeight, gap, marginTop, marginBottom }
   return { breaks, pages: page + 1 };
 }
 
-function decorations(doc, breaks) {
-  return DecorationSet.create(doc, breaks.map((b, i) =>
-    Decoration.widget(b.pos, () => spacerDom(b), { side: -1, ignoreSelection: true, key: `page-${i}-${b.height}` })));
+const TAB_GRID = 48; // Word's default stops, every half inch
+
+// CSS has only evenly spaced tab stops, so tabs in a paragraph with Word
+// stops are sized one by one: each is set to reach its stop, measured
+// from the text around it. Stops count from the column's left edge.
+function tabDecorations(view) {
+  const out = [];
+  view.state.doc.descendants((node, pos) => {
+    const stops = node.attrs?.tabStops;
+    if (!node.isTextblock) return true;
+    if (!stops?.length || !node.textContent.includes('\t')) return false;
+    const dom = view.nodeDOM(pos);
+    if (!(dom instanceof Element)) return false;
+    const left = dom.getBoundingClientRect().left - parseFloat(getComputedStyle(dom).marginLeft || 0);
+    const tabs = [];
+    node.descendants((child, offset) => {
+      if (!child.isText) return;
+      [...child.text].forEach((ch, i) => { if (ch === '\t') tabs.push(pos + 1 + offset + i); });
+    });
+    const end = pos + node.nodeSize - 1;
+    let x = null;
+    let lineTop = null;
+    tabs.forEach((tab, i) => {
+      const at = view.coordsAtPos(tab, 1);
+      if (x === null || Math.abs(at.top - lineTop) > 2) x = at.left - left;
+      lineTop = at.top;
+      const after = view.coordsAtPos(tab + 1, -1);
+      const nextEdge = view.coordsAtPos(tabs[i + 1] ?? end, -1);
+      const text = Math.abs(nextEdge.top - after.top) > 2 ? 0 : Math.max(0, nextEdge.left - after.left);
+      const stop = stops.find((t) => t.pos > x + 1);
+      let width = stop ? stop.pos - x : (Math.floor(x / TAB_GRID) + 1) * TAB_GRID - x;
+      // A pixel short of the stop: text ending on the margin would wrap.
+      if (stop?.type === 'right' || stop?.type === 'end' || stop?.type === 'decimal') width -= text + 1;
+      else if (stop?.type === 'center') width -= text / 2;
+      width = Math.max(1, width);
+      const leader = stop?.leader && stop.leader !== 'none' ? ' has-leader' : '';
+      out.push(Decoration.inline(tab, tab + 1, { class: `doc-tab${leader}`, style: `width: ${width}px` }));
+      x += width + text;
+    });
+    return false;
+  });
+  return out;
+}
+
+function decorations(doc, tabs, breaks) {
+  return DecorationSet.create(doc, [
+    ...tabs,
+    ...breaks.map((b, i) => Decoration.widget(b.pos, () => spacerDom(b), { side: -1, ignoreSelection: true, key: `page-${i}-${b.height}` }))
+  ]);
 }
 
 // Margins between blocks collapse differently around a spacer, so each is
@@ -146,8 +192,10 @@ function run(view, storage) {
   const scroller = view.dom.closest('.doc-scroll');
   const scrollTop = scroller?.scrollTop;
   view.dispatch(view.state.tr.setMeta(key, DecorationSet.empty).setMeta('addToHistory', false));
+  const tabs = tabDecorations(view);
+  if (tabs.length) view.dispatch(view.state.tr.setMeta(key, decorations(view.state.doc, tabs, [])).setMeta('addToHistory', false));
   const { breaks, pages } = measureBreaks(view, storage.geometry);
-  view.dispatch(view.state.tr.setMeta(key, decorations(view.state.doc, breaks)).setMeta('addToHistory', false));
+  view.dispatch(view.state.tr.setMeta(key, decorations(view.state.doc, tabs, breaks)).setMeta('addToHistory', false));
   settle(view);
   if (scroller) scroller.scrollTop = scrollTop;
   storage.onPages?.(pages);

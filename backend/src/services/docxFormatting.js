@@ -138,8 +138,8 @@ export function paragraphLayout(para) {
   };
   const before = sp('w:before');
   const after = sp('w:after');
-  if (before) out.spaceBefore = twipsToPx(before);
-  if (after) out.spaceAfter = twipsToPx(after);
+  if (before !== null) out.spaceBefore = twipsToPx(before);
+  if (after !== null) out.spaceAfter = twipsToPx(after);
   const line = sp('w:line');
   const rule = spacing.map((s) => attr(s, 'w:lineRule')).find(Boolean) || 'auto';
   if (line) {
@@ -161,7 +161,7 @@ export function paragraphLayout(para) {
   else if (firstLine) out.indentFirst = twipsToPx(firstLine);
   const tabs = pPrs.flatMap((n) => children(child(n, 'w:tabs'), 'w:tab'))
     .filter((t) => attr(t, 'w:val') !== 'clear')
-    .map((t) => ({ pos: twipsToPx(attr(t, 'w:pos')), type: attr(t, 'w:val') || 'left' }))
+    .map((t) => ({ pos: twipsToPx(attr(t, 'w:pos')), type: attr(t, 'w:val') || 'left', leader: attr(t, 'w:leader') || 'none' }))
     .sort((a, b) => a.pos - b.pos);
   if (tabs.length) out.tabs = tabs;
   if (on(firstOf(pPrs, 'w:pageBreakBefore'))) out.pageBreakBefore = true;

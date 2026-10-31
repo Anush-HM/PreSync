@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
-  blocksToContent, borderOnPage, cleanBorder, cleanContent, countWords, expandTabs, defaultPage, importNotes, parsePageRanges, slotsFromWord, zoneTexts
+  blocksToContent, borderOnPage, cleanBorder, cleanContent, countWords, defaultPage, importNotes, parsePageRanges, slotsFromWord, zoneTexts
 } from './documentContent.js';
 import { exportDocumentToDocx } from './docxExportService.js';
 import { exportDocumentToPdf } from './documentPdfService.js';
@@ -176,9 +176,6 @@ describe('page layout rules', () => {
   });
 });
 
-// Close enough for the columns in these tests: the text is the same font.
-const textWidthOf = (text) => text.length * 7.2;
-
 describe('page breaks and blank lines from Word', () => {
   const blanks = (n) => '<w:p/>'.repeat(n);
   const types = (parsed) => parsed.blocks.map((b) => (isBlankBlock(b) ? 'blank' : b.type));
@@ -243,50 +240,36 @@ describe('tabs and page borders from Word', () => {
     expect(text).toBe('Student Name:   Asha\tUSN: 1');
   });
 
-  it('turns centred column lines into one left block on a shared stop', () => {
-    const line = (text) => ({ type: 'paragraph', text, runs: [{ text, style: { fontSize: 14.7 } }], layout: { align: 'center' } });
-    const { content } = blocksToContent([line('Student Name: Amruth B     USN: 1'), line('Student Name: Yashwanth D     USN: 22'), line('Plain centred line')]);
-    const [one, two, three] = content;
-    for (const n of [one, two]) {
-      expect(n.attrs.textAlign).toBeUndefined();
-      expect(n.attrs.indent).toBe(one.attrs.indent);
-    }
-    expect(one.attrs.indent).toBeGreaterThan(0);
-    expect(three.attrs.textAlign).toBe('center');
-    const texts = (n) => n.content.map((c) => c.text);
-    expect(texts(one)[0]).toBe('Student Name: Amruth B');
-    expect(texts(one)[2]).toBe('USN: 1');
-    expect(texts(one)[1]).toMatch(/^\t+$/);
-    expect(texts(two)[1]).toMatch(/^\t+$/);
-    const reach = (n) => Math.floor(textWidthOf(texts(n)[0]) / 48) + texts(n)[1].length;
-    expect(reach(one)).toBe(reach(two));
-  });
-
-  it('keeps a centred line with a label centred, whatever it says', () => {
-    const { content } = blocksToContent([{ type: 'paragraph', text: 'Note: read this', runs: [{ text: 'Note: read this' }], layout: { align: 'center' } }]);
-    expect(content[0].attrs.textAlign).toBe('center');
-  });
-
   it('survives validation with its indent', () => {
     const content = { type: 'doc', content: [{ type: 'paragraph', attrs: { indent: 2 } }] };
     expect(cleanContent(content)).toEqual(content);
   });
 
-  it('lines columns up on a custom tab stop, whatever the left text', async () => {
-    const stop = '<w:tabs><w:tab w:val="left" w:pos="5040"/></w:tabs>';
-    const parsed = await parseDocx(await buildDocx(line('Name: Asha', 'USN', stop) + line('Department of Computer', 'Sem', stop)));
-    expect(parsed.blocks[0].layout.tabs).toEqual([{ pos: 336, type: 'left' }]);
-    const reach = (block) => {
-      const text = blocksToContent([block]).content[0].content.map((n) => n.text).join('');
-      const [left, tabs] = text.split(/(\t+)/);
-      return Math.floor((left.length * 8) / 48) + tabs.length;
-    };
-    expect(reach(parsed.blocks[0])).toBe(reach(parsed.blocks[1]));
+  it('keeps Word tab stops, with their kind and leader', async () => {
+    const stops = '<w:tabs><w:tab w:val="left" w:pos="5040"/><w:tab w:val="right" w:leader="dot" w:pos="9360"/></w:tabs>';
+    const parsed = await parseDocx(await buildDocx(line('Name', 'USN', stops)));
+    const node = blocksToContent(parsed.blocks).content[0];
+    expect(node.attrs.tabStops).toEqual([{ pos: 336, type: 'left', leader: 'none' }, { pos: 624, type: 'right', leader: 'dot' }]);
+    expect(node.content.map((n) => n.text).join('')).toBe('Name\tUSN');
+    expect(cleanContent({ type: 'doc', content: [node] }).content[0].attrs.tabStops).toHaveLength(2);
   });
 
-  it('leaves text alone without custom stops', () => {
-    const runs = [{ text: 'a' }, { text: '\t' }, { text: 'b' }];
-    expect(expandTabs(runs, undefined)).toBe(runs);
+  it('keeps indents, spacing and line height as Word sets them', async () => {
+    const pPr = '<w:spacing w:before="120" w:after="0" w:line="360" w:lineRule="auto"/><w:ind w:left="720" w:hanging="360" w:right="240"/>';
+    const parsed = await parseDocx(await buildDocx(line('a', 'b', pPr)));
+    expect(blocksToContent(parsed.blocks).content[0].attrs).toMatchObject({ spaceBefore: 8, spaceAfter: 0, lineHeight: 1.5, indentLeft: 48, indentRight: 16, firstLine: -24 });
+  });
+
+  it('sizes a blank line from its paragraph mark', async () => {
+    const blank = '<w:p><w:pPr><w:rPr><w:sz w:val="44"/></w:rPr></w:pPr></w:p>';
+    const parsed = await parseDocx(await buildDocx(p('a') + blank + p('b')));
+    const attrs = blocksToContent(parsed.blocks).content[1].attrs;
+    expect(attrs.lineScale).toBeGreaterThan(2);
+  });
+
+  it('does not indent list items twice', async () => {
+    const { content } = blocksToContent([{ type: 'list', items: [{ text: 'a', level: 0, runs: [{ text: 'a' }], layout: { indentLeft: 48 } }] }]);
+    expect(content[0].content[0].content[0].attrs.indentLeft).toBeUndefined();
   });
 
   it('reads a page border, measured from the page', async () => {
