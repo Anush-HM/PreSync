@@ -76,7 +76,26 @@ export function zoneSource(layout, pageIndex) {
   return layout.differentOddEven && pageIndex % 2 === 1 ? 'even' : 'main';
 }
 
+// The unlinked page that a page takes this header or footer from, or
+// null when it still follows the document's own. Pages count from 0.
+export function zoneOwner(layout, zone, pageIndex) {
+  const owners = Object.keys(layout.sections?.[zone] || {}).map(Number).filter((k) => k <= pageIndex);
+  return owners.length ? Math.max(...owners) : null;
+}
+
+export const isLinked = (layout, zone, pageIndex) => zoneOwner(layout, zone, pageIndex) !== pageIndex;
+
+// Unlinking starts from the page's current texts; relinking drops them.
+export function setLinked(layout, zone, pageIndex, linked) {
+  const current = { ...(layout.sections?.[zone] || {}) };
+  if (linked) delete current[pageIndex];
+  else current[pageIndex] = { ...zoneSlots(layout, zone, pageIndex) };
+  return { ...layout, sections: { ...layout.sections, [zone]: current } };
+}
+
 export function zoneSlots(layout, zone, pageIndex) {
+  const owner = zoneOwner(layout, zone, pageIndex);
+  if (owner !== null) return layout.sections[zone][owner];
   const source = zoneSource(layout, pageIndex) === 'even' ? layout.even : layout;
   return source?.[zone] || EMPTY_SLOTS;
 }
@@ -100,7 +119,7 @@ export function zoneTexts(layout, zone, pageIndex) {
   const first = pageIndex === 0;
   const out = first && layout.differentFirstPage ? { ...EMPTY_SLOTS } : { ...zoneSlots(layout, zone, pageIndex) };
   const n = layout.pageNumbers;
-  if (n && !(first && (n.hideOnFirst || layout.differentFirstPage))) {
+  if (n && pageIndex + 1 >= (n.startPage || 1) && !(first && (n.hideOnFirst || layout.differentFirstPage))) {
     const [at, side] = n.position.split('-');
     if ((at === 'top') === (zone === 'header')) {
       const number = n.format === 'pageOf' ? 'Page {page} of {pages}' : '{page}';
@@ -110,10 +129,47 @@ export function zoneTexts(layout, zone, pageIndex) {
   return out;
 }
 
+export function toRoman(value) {
+  const table = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']];
+  let left = value;
+  let out = '';
+  for (const [n, text] of table) {
+    while (left >= n) {
+      out += text;
+      left -= n;
+    }
+  }
+  return out || String(value);
+}
+
+// The number a physical page shows. Numbering can restart at a chosen
+// value from its start page; earlier pages keep their physical number.
+export function displayNumber(numbers, page) {
+  const start = numbers?.startPage || 1;
+  const shown = numbers?.restartAt && page >= start ? numbers.restartAt + (page - start) : page;
+  return numbers?.format === 'roman' ? toRoman(shown) : String(shown);
+}
+
 const today = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
-export function fillTokens(text, { page, pages, title }) {
-  return text.replace(/\{(page|pages|title|date)\}/g, (_, t) => ({ page, pages, title, date: today() })[t]);
+// `page` is the physical page, from 1. A restart makes "of Y" count the
+// numbered pages only.
+export function fillTokens(text, { page, pages, title, numbers }) {
+  const total = numbers?.restartAt ? numbers.restartAt + pages - (numbers.startPage || 1) : pages;
+  const values = { page: displayNumber(numbers, page), pages: total, title, date: today() };
+  return text.replace(/\{(page|pages|title|date)\}/g, (_, t) => values[t]);
+}
+
+// A set of page numbers back as "1, 3, 5-7".
+export function formatPageRanges(pages) {
+  const sorted = [...pages].sort((a, b) => a - b);
+  const parts = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const from = sorted[i];
+    while (sorted[i + 1] === sorted[i] + 1) i += 1;
+    parts.push(from === sorted[i] ? String(from) : `${from}-${sorted[i]}`);
+  }
+  return parts.join(', ');
 }
 
 // The border as CSS for a box over the page.

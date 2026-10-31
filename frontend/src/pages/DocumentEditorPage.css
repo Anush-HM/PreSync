@@ -49,6 +49,15 @@
 .doc-list-trigger { padding: 0 4px; gap: 1px; }
 .doc-list-trigger.is-active { background: var(--forest-tint); color: var(--color-forest-light); }
 .doc-list-sample { display: inline-block; width: 62px; color: var(--text-secondary); }
+.doc-zone-tag { position: absolute; left: 0; bottom: 100%; margin-bottom: 2px; font-size: 8pt; color: #285c43; white-space: nowrap; }
+.doc-zone.is-footer .doc-zone-tag { bottom: auto; top: 100%; margin: 2px 0 0; }
+.doc-zone-where { font-size: 12px; color: var(--text-secondary); }
+.doc-zone-bar .btn[aria-pressed='true'] { background: var(--forest-tint); color: var(--color-forest-light); }
+.doc-page-pills { display: flex; flex-wrap: wrap; gap: 4px; max-height: 96px; overflow-y: auto; }
+.doc-radio-group { display: grid; grid-template-columns: auto 80px; align-items: center; gap: 8px 10px; margin: 0; padding: 0; border: 0; }
+.doc-radio-group legend { margin-bottom: 6px; padding: 0; }
+.doc-radio-group label:first-of-type { grid-column: 1 / -1; }
+.doc-radio-number { height: 30px; }
 .doc-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-primary); cursor: pointer; }
 .doc-word-count { position: fixed; right: 88px; bottom: 5px; margin: 0; font-size: 12px; color: var(--text-secondary); }
 .doc-footer { padding: 4px 14px; min-height: 18px; border-top: 1px solid var(--border-subtle); background: var(--bg-surface); font-size: 12px; color: var(--text-secondary); text-align: right; }

@@ -77,6 +77,14 @@ function DocumentSurface({ editor, page, layout, title, onLayoutChange }) {
     return () => { storage.pagination.onPages = null; };
   }, [editor, page]);
 
+  // The page holding the cursor, from where it sits on the sheets.
+  function currentPage() {
+    const sheets = editor.view.dom.closest('.doc-sheets')?.getBoundingClientRect();
+    if (!sheets) return 1;
+    const top = editor.view.coordsAtPos(editor.state.selection.from).top - sheets.top;
+    return Math.max(1, Math.min(pages, Math.floor(top / (page.height + PAGE_GAP)) + 1));
+  }
+
   // Header and footer fields take the keyboard while they are open.
   useEffect(() => {
     editor.setEditable(editingPage === null, false);
@@ -126,6 +134,7 @@ function DocumentSurface({ editor, page, layout, title, onLayoutChange }) {
       {dialog === 'numbers' && (
         <PageNumbersDialog
           numbers={layout.pageNumbers}
+          pages={pages}
           onClose={() => setDialog(null)}
           onApply={(pageNumbers) => { onLayoutChange({ ...layout, pageNumbers }); setDialog(null); }}
         />
@@ -133,6 +142,8 @@ function DocumentSurface({ editor, page, layout, title, onLayoutChange }) {
       {dialog === 'border' && (
         <PageBorderDialog
           border={layout.pageBorder}
+          pages={pages}
+          currentPage={currentPage()}
           onClose={() => setDialog(null)}
           onApply={(pageBorder) => { onLayoutChange({ ...layout, pageBorder }); setDialog(null); }}
         />

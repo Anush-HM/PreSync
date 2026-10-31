@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Dialog from '../ui/Dialog.jsx';
-import { BORDER_COLORS, BORDER_STYLES, BORDER_WIDTHS, borderStyle, MAX_BORDER_INSET, NUMBER_POSITIONS } from './pageLayout.js';
+import { BORDER_COLORS, BORDER_STYLES, BORDER_WIDTHS, borderStyle, formatPageRanges, MAX_BORDER_INSET, NUMBER_POSITIONS, parsePageRanges } from './pageLayout.js';
 
 const ALL_SIDES = { top: true, right: true, bottom: true, left: true };
 const SETTINGS = [
@@ -13,6 +13,7 @@ const SCOPES = [
   { id: 'all', label: 'Entire document' },
   { id: 'first', label: 'First page only' },
   { id: 'exceptFirst', label: 'All except first page' },
+  { id: 'current', label: 'Current page only' },
   { id: 'pages', label: 'Specific pages' }
 ];
 
@@ -24,7 +25,7 @@ function settingOf(border) {
   return 'custom';
 }
 
-export function PageBorderDialog({ border, onApply, onClose }) {
+export function PageBorderDialog({ border, pages: pageCount = 1, currentPage = 1, onApply, onClose }) {
   const [setting, setSetting] = useState(settingOf(border));
   const [sides, setSides] = useState(border?.sides || ALL_SIDES);
   const [style, setStyle] = useState(border?.style || 'solid');
@@ -37,9 +38,20 @@ export function PageBorderDialog({ border, onApply, onClose }) {
   const chosenSides = setting === 'box' ? ALL_SIDES : setting === 'topBottom' ? { top: true, right: false, bottom: true, left: false } : sides;
   const preview = { sides: chosenSides, style, width, color, inset: inset / 3 };
 
+  const selected = parsePageRanges(pages);
+  function togglePage(n) {
+    const next = new Set(selected);
+    if (!next.delete(n)) next.add(n);
+    setPages(formatPageRanges(next));
+  }
+
   function apply() {
     if (setting === 'none' || !Object.values(chosenSides).some(Boolean)) onApply(null);
-    else onApply({ sides: chosenSides, style, width, color, inset: Math.max(0, Math.min(MAX_BORDER_INSET, Number(inset) || 0)), scope, pages });
+    else {
+      // The current page is saved as what it is: one chosen page.
+      const chosen = scope === 'current' ? { scope: 'pages', pages: String(currentPage) } : { scope, pages };
+      onApply({ sides: chosenSides, style, width, color, inset: Math.max(0, Math.min(MAX_BORDER_INSET, Number(inset) || 0)), ...chosen });
+    }
   }
 
   return (
@@ -98,11 +110,18 @@ export function PageBorderDialog({ border, onApply, onClose }) {
               </label>
             </div>
             {scope === 'pages' && (
-              <label className="field">
-                <span className="field-label">Pages</span>
-                <input className="input" value={pages} placeholder="e.g. 1, 3-5" onChange={(e) => setPages(e.target.value)} />
+              <div className="field">
+                <label className="field">
+                  <span className="field-label">Pages</span>
+                  <input className="input" value={pages} placeholder="e.g. 1, 3, 5-7" onChange={(e) => setPages(e.target.value)} />
+                </label>
+                <span className="doc-page-pills" role="group" aria-label="Choose pages">
+                  {Array.from({ length: pageCount }, (_, i) => (
+                    <button key={i} type="button" className="chip" aria-label={`Page ${i + 1}`} aria-pressed={selected.has(i + 1)} onClick={(e) => { e.preventDefault(); togglePage(i + 1); }}>{i + 1}</button>
+                  ))}
+                </span>
                 <span className="field-hint">Shown exactly in the editor and PDF. Word cannot border chosen pages, so a .docx puts it on every page.</span>
-              </label>
+              </div>
             )}
             <div className="field">
               <span className="field-label">Colour</span>
@@ -124,10 +143,14 @@ export function PageBorderDialog({ border, onApply, onClose }) {
   );
 }
 
-export function PageNumbersDialog({ numbers, onApply, onClose }) {
+export function PageNumbersDialog({ numbers, pages = 1, onApply, onClose }) {
   const [position, setPosition] = useState(numbers?.position || 'bottom-center');
   const [format, setFormat] = useState(numbers?.format || 'plain');
   const [hideOnFirst, setHideOnFirst] = useState(!!numbers?.hideOnFirst);
+  const [startPage, setStartPage] = useState(numbers?.startPage || 1);
+  const [restart, setRestart] = useState(!!numbers?.restartAt);
+  const [restartAt, setRestartAt] = useState(numbers?.restartAt || 1);
+  const whole = (value) => Math.max(1, Math.floor(Number(value)) || 1);
   return (
     <Dialog
       title="Page numbers"
@@ -136,7 +159,7 @@ export function PageNumbersDialog({ numbers, onApply, onClose }) {
         <>
           {numbers && <button type="button" className="btn btn-ghost" onClick={() => onApply(null)}>Remove numbers</button>}
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn btn-primary" onClick={() => onApply({ position, format, hideOnFirst })}>Apply</button>
+          <button type="button" className="btn btn-primary" onClick={() => onApply({ position, format, hideOnFirst, startPage: whole(startPage), restartAt: restart ? whole(restartAt) : null })}>Apply</button>
         </>
       }
     >
@@ -152,8 +175,26 @@ export function PageNumbersDialog({ numbers, onApply, onClose }) {
           <div className="segmented" role="group" aria-label="Number format">
             <button type="button" className="segmented-item" aria-pressed={format === 'plain'} onClick={() => setFormat('plain')}>1, 2, 3</button>
             <button type="button" className="segmented-item" aria-pressed={format === 'pageOf'} onClick={() => setFormat('pageOf')}>Page 1 of 5</button>
+            <button type="button" className="segmented-item" aria-pressed={format === 'roman'} onClick={() => setFormat('roman')}>i, ii, iii</button>
           </div>
         </div>
+        <label className="field">
+          <span className="field-label">Start at page</span>
+          <input className="input" type="number" min="1" max={Math.max(pages, startPage)} value={startPage} onChange={(e) => setStartPage(e.target.value)} />
+        </label>
+        <p className="field-hint">Pages before the start page show no number.</p>
+        <fieldset className="doc-radio-group">
+          <legend className="field-label">Start numbering at</legend>
+          <label className="doc-check">
+            <input type="radio" name="numbering" checked={!restart} onChange={() => setRestart(false)} />
+            Continue from previous
+          </label>
+          <label className="doc-check">
+            <input type="radio" name="numbering" checked={restart} onChange={() => setRestart(true)} />
+            Start at
+          </label>
+          <input className="input doc-radio-number" type="number" min="1" aria-label="First number" value={restartAt} disabled={!restart} onChange={(e) => setRestartAt(e.target.value)} />
+        </fieldset>
         <label className="doc-check">
           <input type="checkbox" checked={hideOnFirst} onChange={(e) => setHideOnFirst(e.target.checked)} />
           Hide on the first page

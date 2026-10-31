@@ -190,7 +190,7 @@ function DocumentInsertMenu({ editor, onPageNumbers, onHeaderFooter }) {
                 {tab === 'image' && (
                   <div className="insert-list">
                     <button type="button" className="btn btn-secondary" onClick={done(() => fileRef.current?.click())}><ImagePlus aria-hidden="true" />Upload image…</button>
-                    <p className="field-hint">PNG, JPEG or GIF up to 1.5 MB. Select an image to resize or align it. You can also paste or drop one onto the page.</p>
+                    <p className="field-hint">PNG, JPEG or GIF up to 1.5 MB. Select an image to resize or align it.</p>
                   </div>
                 )}
                 {tab === 'elements' && (

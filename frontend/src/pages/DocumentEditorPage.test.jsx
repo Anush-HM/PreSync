@@ -257,6 +257,51 @@ describe('DocumentEditorPage', () => {
     expect(prose().querySelector('ul').style.listStyleType).toContain('➔');
   });
 
+  it('shows header navigation, with nothing to link on the first page', async () => {
+    await open();
+    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    await screen.findByLabelText('Header left');
+    for (const name of ['Previous', 'Next', 'Link to Previous']) expect(screen.getByRole('button', { name })).toBeDisabled();
+    expect(screen.queryByText('[ Same as Previous ]')).not.toBeInTheDocument();
+  });
+
+  it('sets where numbering starts and how it reads', async () => {
+    const user = await open();
+    await user.click(screen.getByRole('button', { name: 'Insert' }));
+    await user.click(screen.getByRole('tab', { name: 'Page' }));
+    await user.click(screen.getByRole('button', { name: /Page numbers/ }));
+    const start = screen.getByLabelText('Start at page');
+    await user.clear(start);
+    await user.type(start, '3');
+    await user.click(screen.getByRole('button', { name: 'i, ii, iii' }));
+    await user.click(screen.getByLabelText('Start at'));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateDocument.mock.calls.at(-1)[1].layout.pageNumbers).toMatchObject({ startPage: 3, restartAt: 1, format: 'roman' }));
+    expect(screen.getByRole('region', { name: 'Page 1 of 1' })).not.toHaveTextContent('i');
+  });
+
+  it('saves "current page only" as that one page', async () => {
+    const user = await open();
+    await user.click(screen.getByRole('button', { name: 'Page border' }));
+    await user.click(screen.getByRole('button', { name: 'Box' }));
+    await user.selectOptions(screen.getByLabelText('Apply to'), 'current');
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateDocument.mock.calls.at(-1)[1].layout.pageBorder).toMatchObject({ scope: 'pages', pages: '1' }));
+  });
+
+  it('picks border pages with pills and keeps the typed list in step', async () => {
+    const user = await open();
+    await user.click(screen.getByRole('button', { name: 'Page border' }));
+    await user.click(screen.getByRole('button', { name: 'Box' }));
+    await user.selectOptions(screen.getByLabelText('Apply to'), 'pages');
+    await user.click(screen.getByRole('button', { name: 'Page 1' }));
+    expect(screen.getByLabelText('Pages')).toHaveValue('1');
+    await user.click(screen.getByRole('button', { name: 'Page 1' }));
+    expect(screen.getByLabelText('Pages')).toHaveValue('');
+  });
+
   it('closes header editing on a click outside', async () => {
     await open();
     fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });

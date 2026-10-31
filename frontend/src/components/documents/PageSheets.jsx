@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react';
-import { CalendarDays, Hash, PanelBottom, PanelTop, Type } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { CalendarDays, ChevronLeft, ChevronRight, Hash, Link2, PanelBottom, PanelTop, Type } from 'lucide-react';
 import Menu from '../ui/Menu.jsx';
 import {
   DEFAULT_ZONE_INCHES, FOOTER_PRESETS, HEADER_PRESETS, PAGE_GAP, PAGE_NUMBER_TOKENS, borderOnPage, borderStyle, dateTexts, fillTokens,
-  zoneDistance, zoneRule, zoneSlots, zoneSource, zoneTexts
+  isLinked, setLinked, zoneDistance, zoneOwner, zoneRule, zoneSlots, zoneSource, zoneTexts
 } from './pageLayout.js';
 
 const SIDES = ['left', 'center', 'right'];
@@ -19,10 +19,11 @@ function Zone({ zone, texts, values, rule, place }) {
   );
 }
 
-function ZoneInputs({ zone, slots, onChange, onFocusSlot, autoFocus, rule, place }) {
+function ZoneInputs({ zone, slots, onChange, onFocusSlot, autoFocus, rule, place, tag }) {
   const name = zone === 'header' ? 'Header' : 'Footer';
   return (
     <div className={`doc-zone is-${zone} is-editing${rule ? ' has-rule' : ''}`} style={place}>
+      {tag && <span className="doc-zone-tag">{tag}</span>}
       {SIDES.map((side) => (
         <input
           key={side}
@@ -63,12 +64,17 @@ function Distance({ label, value, onChange }) {
 }
 
 // The controls shown while headers and footers are open.
-function ZoneBar({ layout, onChange, onPreset, onInsert, onRemove, onClose }) {
+function ZoneBar({ layout, nav, onChange, onPreset, onInsert, onRemove, onClose }) {
   const insertItems = (list) => list.map((t) => ({ label: t.label, onSelect: () => onInsert(t.text) }));
   const presetItems = (zone, list) => list.map((p) => ({ label: p.label, onSelect: () => onPreset(zone, p) }));
   return (
     <div className="doc-zone-bar" role="toolbar" aria-label="Header and footer">
       <strong>Header &amp; footer</strong>
+      <span className="mono doc-zone-where">Page {nav.page}</span>
+      <button type="button" className="btn btn-ghost btn-sm" disabled={!nav.onPrevious} onClick={nav.onPrevious}><ChevronLeft aria-hidden="true" />Previous</button>
+      <button type="button" className="btn btn-ghost btn-sm" disabled={!nav.onNext} onClick={nav.onNext}>Next<ChevronRight aria-hidden="true" /></button>
+      <button type="button" className="btn btn-ghost btn-sm" aria-pressed={nav.linked} disabled={!nav.onToggleLink} data-tip={`Applies to the ${nav.zone}`} onClick={nav.onToggleLink}><Link2 aria-hidden="true" />Link to Previous</button>
+      <span className="tb-sep" aria-hidden="true" />
       <Menu label="Header styles" icon={PanelTop} text="Header styles" align="start" triggerClassName="btn btn-ghost btn-sm" items={presetItems('header', HEADER_PRESETS)} />
       <Menu label="Footer styles" icon={PanelBottom} text="Footer styles" align="start" triggerClassName="btn btn-ghost btn-sm" items={presetItems('footer', FOOTER_PRESETS)} />
       <span className="tb-sep" aria-hidden="true" />
@@ -108,6 +114,7 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
   const contentWidth = page.width - m.left - m.right;
   const rootRef = useRef(null);
   const slotRef = useRef(null);
+  const [activeZone, setActiveZone] = useState('header');
   const editing = editingPage !== null;
   // A cover page has no header of its own, so edit on the next page.
   const target = layout.differentFirstPage && editingPage === 0 && pages > 1 ? 1 : editingPage;
@@ -137,9 +144,15 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
   // Fields edit the odd or even set, whichever the open page shows.
   const editsEven = target !== null && zoneSource(layout, target) === 'even';
 
+  // The patch that sets a zone's texts wherever the open page takes them from.
+  function zonePatch(zone, next) {
+    const owner = zoneOwner(layout, zone, target);
+    if (owner !== null) return { sections: { ...layout.sections, [zone]: { ...layout.sections[zone], [owner]: next } } };
+    return editsEven ? { even: { ...layout.even, [zone]: next } } : { [zone]: next };
+  }
+
   function setZone(zone, next) {
-    if (!editsEven) onLayoutChange({ ...layout, [zone]: next });
-    else onLayoutChange({ ...layout, even: { ...layout.even, [zone]: next } });
+    onLayoutChange({ ...layout, ...zonePatch(zone, next) });
   }
 
   function setSlot(zone, side, value) {
@@ -147,9 +160,7 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
   }
 
   function applyPreset(zone, preset) {
-    const rule = { [`${zone}Rule`]: preset.rule };
-    if (!editsEven) onLayoutChange({ ...layout, ...rule, [zone]: preset.slots });
-    else onLayoutChange({ ...layout, ...rule, even: { ...layout.even, [zone]: preset.slots } });
+    onLayoutChange({ ...layout, [`${zone}Rule`]: preset.rule, ...zonePatch(zone, preset.slots) });
   }
 
   function removeZone(zone) {
@@ -159,10 +170,27 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
       ...layout,
       [zone]: empty,
       [`${zone}Rule`]: false,
+      sections: { ...layout.sections, [zone]: {} },
       ...(layout.even ? { even: { ...layout.even, [zone]: empty } } : {}),
       ...(inZone ? { pageNumbers: null } : {})
     });
   }
+
+  // A cover page has no header of its own, so it can't be stepped onto.
+  const firstEditable = layout.differentFirstPage && pages > 1 ? 1 : 0;
+  const nav = editing && {
+    page: target + 1,
+    zone: activeZone,
+    linked: target > 0 && isLinked(layout, activeZone, target),
+    onPrevious: target > firstEditable ? () => onEditPage(target - 1) : undefined,
+    onNext: target < pages - 1 ? () => onEditPage(target + 1) : undefined,
+    onToggleLink: target > 0 ? () => onLayoutChange(setLinked(layout, activeZone, target, !isLinked(layout, activeZone, target))) : undefined
+  };
+  const linkTag = (zone) => (target > 0 ? (isLinked(layout, zone, target) ? '[ Same as Previous ]' : '[ Section / Unlinked ]') : null);
+  const focusSlot = (slot) => {
+    slotRef.current = slot;
+    setActiveZone(slot.zone);
+  };
 
   // Goes in at the cursor of the last field used, else after the header's left text.
   function insertText(text) {
@@ -187,6 +215,7 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
       {editing && (
         <ZoneBar
           layout={layout}
+          nav={nav}
           onChange={(patch) => onLayoutChange({ ...layout, ...patch })}
           onPreset={applyPreset}
           onInsert={insertText}
@@ -202,15 +231,15 @@ function PageSheets({ page, pages, layout, title, editingPage, onEditPage, onLay
           onDoubleClick={openZones}
         >
           {Array.from({ length: pages }, (_, i) => {
-            const values = { page: i + 1, pages, title };
+            const values = { page: i + 1, pages, title, numbers: layout.pageNumbers };
             const zoneProps = (zone) => ({ rule: zoneRule(layout, zone, i), place: zonePlace(layout, zone) });
             return (
               <section key={i} className="doc-sheet" aria-label={`Page ${i + 1} of ${pages}`} style={{ top: i * pitch, height: page.height, '--zone-left': `${m.left}px`, '--zone-right': `${m.right}px`, '--zone-width': `${contentWidth}px` }}>
                 {borderOnPage(layout.pageBorder, i) && <div className="doc-sheet-border" style={borderStyle(layout.pageBorder)} />}
                 {target === i ? (
                   <>
-                    <ZoneInputs {...zoneProps('header')} zone="header" slots={zoneSlots(layout, 'header', i)} onChange={setSlot} onFocusSlot={(s) => { slotRef.current = s; }} autoFocus />
-                    <ZoneInputs {...zoneProps('footer')} zone="footer" slots={zoneSlots(layout, 'footer', i)} onChange={setSlot} onFocusSlot={(s) => { slotRef.current = s; }} />
+                    <ZoneInputs {...zoneProps('header')} zone="header" tag={linkTag('header')} slots={zoneSlots(layout, 'header', i)} onChange={setSlot} onFocusSlot={focusSlot} autoFocus={activeZone === 'header'} />
+                    <ZoneInputs {...zoneProps('footer')} zone="footer" tag={linkTag('footer')} slots={zoneSlots(layout, 'footer', i)} onChange={setSlot} onFocusSlot={focusSlot} autoFocus={activeZone === 'footer'} />
                   </>
                 ) : (
                   <>

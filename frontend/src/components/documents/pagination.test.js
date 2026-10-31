@@ -3,7 +3,9 @@ import { getSchema } from '@tiptap/core';
 import { Node } from '@tiptap/pm/model';
 import { documentExtensions } from './documentExtensions.js';
 import { layoutBlocks } from './pagination.js';
-import { borderOnPage, dateTexts, fillTokens, parsePageRanges, zoneTexts } from './pageLayout.js';
+import {
+  borderOnPage, dateTexts, displayNumber, fillTokens, formatPageRanges, isLinked, parsePageRanges, setLinked, toRoman, zoneOwner, zoneSlots, zoneTexts
+} from './pageLayout.js';
 
 const schema = getSchema(documentExtensions);
 const para = (t) => ({ type: 'paragraph', content: [{ type: 'text', text: t }] });
@@ -51,6 +53,44 @@ describe('pageLayout', () => {
     const [short, long] = dateTexts(new Date(2026, 9, 5));
     expect(short.text).toBe('05/10/2026');
     expect(long.text).toBe('October 05, 2026');
+  });
+
+  it('numbers from a start page, with an offset and in roman numerals', () => {
+    const numbers = { position: 'bottom-center', format: 'plain', startPage: 3, restartAt: 1 };
+    const on = { ...layout, pageNumbers: numbers };
+    expect(zoneTexts(on, 'footer', 1).center).toBe('');
+    expect(zoneTexts(on, 'footer', 2).center).toBe('{page}');
+    expect(displayNumber(numbers, 3)).toBe('1');
+    expect(displayNumber(numbers, 5)).toBe('3');
+    expect(displayNumber({ ...numbers, restartAt: null }, 5)).toBe('5');
+    expect(displayNumber({ ...numbers, format: 'roman' }, 6)).toBe('iv');
+    expect(toRoman(49)).toBe('xlix');
+    expect(fillTokens('Page {page} of {pages}', { page: 4, pages: 7, title: '', numbers })).toBe('Page 2 of 5');
+  });
+
+  it('keeps an unlinked page and the pages after it apart from earlier ones', () => {
+    const base = { ...layout, pageNumbers: null, header: { left: 'Shared', center: '', right: '' } };
+    expect(isLinked(base, 'header', 2)).toBe(true);
+    const split = setLinked(base, 'header', 2, false);
+    expect(zoneOwner(split, 'header', 1)).toBeNull();
+    expect(zoneOwner(split, 'header', 4)).toBe(2);
+    const edited = { ...split, sections: { header: { 2: { left: 'Own', center: '', right: '' } } } };
+    expect(zoneSlots(edited, 'header', 1).left).toBe('Shared');
+    expect(zoneSlots(edited, 'header', 2).left).toBe('Own');
+    expect(zoneSlots(edited, 'header', 3).left).toBe('Own');
+    expect(isLinked(edited, 'header', 2)).toBe(false);
+    expect(isLinked(edited, 'header', 3)).toBe(true);
+    expect(zoneSlots({ ...edited, header: { left: 'Changed', center: '', right: '' } }, 'header', 2).left).toBe('Own');
+    expect(zoneSlots(setLinked(edited, 'header', 2, true), 'header', 2).left).toBe('Shared');
+  });
+
+  it('limits a border to its scope', () => {
+    const on = (scope, pages = '') => [0, 1, 2, 3].map((i) => borderOnPage({ scope, pages }, i));
+    expect(on('all')).toEqual([true, true, true, true]);
+    expect(on('first')).toEqual([true, false, false, false]);
+    expect(on('exceptFirst')).toEqual([false, true, true, true]);
+    expect(on('pages', '1, 3-4')).toEqual([true, false, true, true]);
+    expect(formatPageRanges(new Set([7, 1, 3, 5, 6]))).toBe('1, 3, 5-7');
   });
 
   it('reads page ranges', () => {
