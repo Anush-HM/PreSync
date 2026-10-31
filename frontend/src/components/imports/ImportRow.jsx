@@ -9,7 +9,7 @@ import './imports.css';
 function ImportRow({ item, onDelete }) {
   const Icon = FORMAT_ICON[item.format];
   const size = item.format === 'docx'
-    ? [item.pageCount && plural(item.pageCount, 'page'), item.suggestedSlides && `${plural(item.suggestedSlides, 'suggested slide')}`]
+    ? [item.pageCount && plural(item.pageCount, 'page')]
     : [item.slideCount && plural(item.slideCount, item.format === 'pdf' ? 'page' : 'slide')];
   return (
     <li className="import-row">

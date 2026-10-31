@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router-dom';
 import ImportReviewPage from './ImportReviewPage.jsx';
 import { createDeckFromImport, getImport } from '../data/importsApi.js';
+import { createDocumentFromImport } from '../data/documentsApi.js';
 import { renderAt } from '../test/renderAt.jsx';
 
 vi.mock('../data/importsApi.js', () => ({
@@ -11,6 +12,8 @@ vi.mock('../data/importsApi.js', () => ({
   saveImportOutline: vi.fn(),
   createDeckFromImport: vi.fn()
 }));
+
+vi.mock('../data/documentsApi.js', () => ({ createDocumentFromImport: vi.fn() }));
 
 const DOCX = {
   id: 'imp-1', format: 'docx', fileName: 'plan.docx', fileSize: 2048, title: 'Annual plan', createdAt: '2026-05-01T00:00:00Z', deckIds: [],
@@ -49,29 +52,25 @@ function renderReview(id) {
 beforeEach(() => vi.clearAllMocks());
 
 describe('ImportReviewPage', () => {
-  it('shows the Word analysis, outline and conversion notes', async () => {
+  it('shows a Word import without any way to make slides from it', async () => {
     getImport.mockResolvedValue(DOCX);
     renderReview('imp-1');
     expect(await screen.findByRole('heading', { level: 1, name: 'Annual plan' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Slide 2 title')).toHaveValue('Goals');
+    expect(screen.queryByLabelText('Slide 2 title')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Generate/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Review outline/ })).not.toBeInTheDocument();
     const analysis = screen.getByRole('complementary', { name: 'Structure analysis' });
     expect(within(analysis).getByText(/1 table was converted/)).toBeInTheDocument();
-    expect(within(analysis).getByText('Grow revenue.')).toBeInTheDocument();
   });
 
-  it('generates a presentation from the edited outline and opens the editor', async () => {
+  it('opens a stored Word import in the document editor', async () => {
     getImport.mockResolvedValue(DOCX);
-    createDeckFromImport.mockResolvedValue({ id: 'deck-9', title: 'Annual plan', slideCount: 2 });
+    createDocumentFromImport.mockResolvedValue({ id: 'doc-9' });
     const user = renderReview('imp-1');
-    const title = await screen.findByLabelText('Slide 2 title');
-    await user.clear(title);
-    await user.type(title, 'Our goals');
-    await user.click(screen.getByRole('button', { name: /Generate presentation/ }));
-
-    expect(createDeckFromImport).toHaveBeenCalledWith('imp-1', expect.objectContaining({ mode: 'outline' }));
-    const sent = createDeckFromImport.mock.calls[0][1].outline;
-    expect(sent[1].title).toBe('Our goals');
-    expect(await screen.findByTestId('location')).toHaveTextContent('/editor/deck-9');
+    await user.click(await screen.findByRole('button', { name: /Open in document editor/ }));
+    expect(createDocumentFromImport).toHaveBeenCalledWith('imp-1');
+    expect(createDeckFromImport).not.toHaveBeenCalled();
+    expect(await screen.findByTestId('location')).toHaveTextContent('/documents/doc-9');
   });
 
   it('previews PowerPoint slides with what was not imported, and opens them as-is', async () => {

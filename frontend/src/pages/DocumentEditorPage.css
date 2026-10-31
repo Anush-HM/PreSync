@@ -1,0 +1,95 @@
+/* The app chrome follows the site theme; the page itself is always paper. */
+.doc-editor { display: flex; flex-direction: column; height: 100dvh; background: var(--bg-base, var(--bg-surface)); color: var(--text-primary); }
+.doc-editor-message { align-items: center; justify-content: center; gap: 12px; padding: 24px; }
+.doc-editor-message-actions { display: flex; gap: 8px; }
+
+.doc-header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); flex-wrap: wrap; }
+.doc-header-spacer { flex: 1 1 8px; }
+.doc-title { min-width: 120px; width: 32ch; max-width: 100%; padding: 5px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-primary); font: inherit; font-size: 15px; font-weight: 600; }
+.doc-title:hover { border-color: var(--border-subtle); }
+.doc-title:focus { outline: none; border-color: var(--border-active); box-shadow: var(--focus-ring); }
+.doc-status { font-size: 12.5px; color: var(--text-secondary); white-space: nowrap; }
+.doc-status.is-error { color: var(--color-crimson-light, #f08a98); }
+.doc-page-size .select { height: 32px; padding-block: 0; font-size: 13px; }
+
+.doc-toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); flex-wrap: wrap; }
+.doc-table-tools { display: flex; align-items: center; gap: 2px; padding: 4px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); flex-wrap: wrap; }
+.doc-table-label { padding: 0 8px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.doc-menu-gap { display: inline-block; width: 16px; }
+.doc-shape-grid { display: grid; grid-template-columns: repeat(4, 44px); gap: 6px; }
+.doc-shape-grid .shape-btn { width: 44px; height: 44px; padding: 9px; color: var(--text-secondary); }
+.doc-element-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.doc-element-btn { border: 0; cursor: pointer; font: inherit; font-size: 12px; }
+.doc-element-card { width: 100%; margin: 0; border: 0; cursor: pointer; font: inherit; font-size: 13px; text-align: left; }
+
+.doc-import-notes { display: flex; justify-content: space-between; gap: 12px; margin: 10px 14px 0; font-size: 13px; }
+.doc-import-notes ul { margin: 4px 0 0; padding-left: 18px; }
+
+.doc-scroll { flex: 1; overflow: auto; padding: 24px 16px 48px; }
+.doc-page { box-sizing: border-box; max-width: 100%; margin: 0 auto; background: #fff; color: #171a19; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.18); cursor: text; }
+.doc-footer { padding: 4px 14px; border-top: 1px solid var(--border-subtle); background: var(--bg-surface); font-size: 12px; color: var(--text-secondary); text-align: right; }
+
+/* Keep sizes in step with STYLES in backend documentPdfService.js and DOC_STYLES in docxExportService.js. */
+.doc-prose { min-height: 100%; outline: none; font-size: 11pt; line-height: 1.15; overflow-wrap: anywhere; }
+.doc-prose p { margin: 0 0 6pt; }
+.doc-prose p[data-block-style='title'] { margin-bottom: 12pt; font-size: 26pt; font-weight: 700; }
+.doc-prose p[data-block-style='subtitle'] { margin-bottom: 8pt; font-size: 14pt; color: #5b625d; }
+.doc-prose p[data-block-style='caption'] { font-size: 9pt; font-style: italic; color: #5b625d; }
+.doc-prose h1, .doc-prose h2, .doc-prose h3, .doc-prose h4, .doc-prose h5, .doc-prose h6 { font-family: inherit; line-height: inherit; letter-spacing: normal; }
+.doc-prose h1 { margin: 16pt 0 6pt; font-size: 20pt; font-weight: 700; color: #1d4532; }
+.doc-prose h2 { margin: 14pt 0 5pt; font-size: 16pt; font-weight: 700; color: #285c43; }
+.doc-prose h3 { margin: 12pt 0 4pt; font-size: 13pt; font-weight: 700; color: #347653; }
+.doc-prose h4 { margin: 10pt 0 4pt; font-size: 12pt; font-weight: 700; color: inherit; }
+.doc-prose h5 { margin: 10pt 0 3pt; font-size: 11pt; font-weight: 700; color: inherit; }
+.doc-prose h6 { margin: 10pt 0 3pt; font-size: 11pt; font-weight: 700; font-style: italic; color: inherit; }
+.doc-prose ul, .doc-prose ol { margin: 0 0 6pt; padding-left: 24px; }
+.doc-prose ul { list-style: disc; }
+.doc-prose ul ul { list-style: circle; }
+.doc-prose ol { list-style: decimal; }
+.doc-prose ol ol { list-style: lower-alpha; }
+.doc-prose li > p { margin-bottom: 2pt; }
+.doc-prose blockquote { margin: 0 0 6pt; padding-left: 14px; border-left: 3px solid #a3d4b2; font-style: italic; color: #3a4540; }
+.doc-prose hr { margin: 10pt 0; border: 0; border-top: 1px solid #b1bab3; }
+.doc-prose hr.ProseMirror-selectednode { outline: 2px solid #76c893; }
+
+.doc-prose table { width: 100%; margin: 0 0 9pt; border-collapse: collapse; table-layout: fixed; }
+.doc-prose td, .doc-prose th { position: relative; min-width: 24px; padding: 5px 7px; border: 1px solid #b1bab3; vertical-align: top; }
+.doc-prose th { background: #eef3ef; font-weight: 700; text-align: left; }
+.doc-prose td > p:last-child, .doc-prose th > p:last-child { margin-bottom: 0; }
+.doc-prose .selectedCell::after { content: ''; position: absolute; inset: 0; background: rgba(118, 200, 147, 0.25); pointer-events: none; }
+.doc-prose .column-resize-handle { position: absolute; top: 0; right: -2px; bottom: 0; width: 4px; background: #76c893; pointer-events: none; }
+.doc-prose .tableWrapper { overflow-x: auto; }
+.doc-prose.resize-cursor { cursor: col-resize; }
+
+.doc-page-break { position: relative; height: 18px; margin: 8pt 0; border-top: 1px dashed #8a8f88; }
+.doc-page-break::after { content: 'Page break'; position: absolute; top: -8px; left: 50%; transform: translateX(-50%); padding: 0 8px; background: #fff; font-family: var(--font-sans, sans-serif); font-size: 10px; color: #5b625d; }
+.doc-page-break.ProseMirror-selectednode { border-top-color: #285c43; }
+
+.doc-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-weight: 700; }
+.doc-badge[data-tone='info'] { background: #e3eef8; color: #16324f; }
+.doc-badge[data-tone='success'] { background: #e3f2e8; color: #1d4532; }
+.doc-badge[data-tone='warning'] { background: #fbf0da; color: #6b4e12; }
+.doc-badge[data-tone='danger'] { background: #f9e3e6; color: #5e1823; }
+
+.doc-callout { margin: 0 0 9pt; padding: 10pt 13pt; border-left: 4px solid; border-radius: 4px; }
+.doc-callout > p:last-child { margin-bottom: 0; }
+.doc-callout[data-tone='info'] { background: #e3eef8; border-color: #2f6f9f; color: #16324f; }
+.doc-callout[data-tone='success'] { background: #e3f2e8; border-color: #347653; color: #1d4532; }
+.doc-callout[data-tone='warning'] { background: #fbf0da; border-color: #c89b3c; color: #6b4e12; }
+.doc-callout[data-tone='danger'] { background: #f9e3e6; border-color: #ac3045; color: #5e1823; }
+
+.doc-figure { display: flex; margin: 0 0 6pt; }
+.doc-figure.is-center { justify-content: center; }
+.doc-figure.is-right { justify-content: flex-end; }
+.doc-figure-box { position: relative; max-width: 100%; line-height: 0; }
+.doc-figure-box img { display: block; width: 100%; height: auto; }
+.doc-figure.is-selected .doc-figure-box { outline: 2px solid #285c43; outline-offset: 1px; }
+.doc-figure-handle { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; border: 2px solid #fff; border-radius: 50%; background: #285c43; cursor: nwse-resize; touch-action: none; }
+.doc-figure-tools { position: absolute; top: -40px; left: 0; z-index: 3; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--bg-surface); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3); line-height: 1; }
+.doc-figure-swatch { width: 18px; height: 18px; margin: 0 1px; }
+
+@media (max-width: 720px) {
+  .doc-title { width: 100%; order: 3; }
+  .doc-page { padding: 32px 20px !important; min-height: 70dvh !important; }
+  .doc-scroll { padding: 12px 8px 32px; }
+}

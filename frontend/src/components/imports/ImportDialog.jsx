@@ -4,6 +4,7 @@ import { UploadCloud, FileText, Presentation, FileType2, RotateCcw, X, CheckCirc
 import Dialog from '../ui/Dialog.jsx';
 import { formatBytes } from '../../data/format.js';
 import { IMPORT_ACCEPT_ALL, MAX_IMPORT_MB, uploadImport, validateImportFile } from '../../data/importsApi.js';
+import { uploadDocx } from '../../data/documentsApi.js';
 import { FORMAT_ICON } from './formatIcons.js';
 import './imports.css';
 
@@ -13,8 +14,15 @@ const TITLES = {
   pptx: 'Import a PowerPoint'
 };
 
-// Drag-and-drop upload with progress, cancel and retry. On success the
-// user lands on the review screen for the analysed file.
+const DESCRIPTIONS = {
+  any: 'Word documents open in the document editor. PowerPoint and PDF files are analysed so you can review them before anything is created.',
+  docx: 'The document opens in the document editor, ready to edit and download.',
+  pptx: 'PreSync reads the file’s structure and shows you what it found before anything is created.'
+};
+
+// Drag-and-drop upload with progress, cancel and retry. On success a
+// Word file opens in the document editor, and anything else on the
+// review screen for the analysed file.
 // phase: idle → uploading → analyzing → (navigate) | error
 function ImportDialog({ kind = 'any', onClose }) {
   const navigate = useNavigate();
@@ -42,14 +50,15 @@ function ImportDialog({ kind = 'any', onClose }) {
       return;
     }
     setFormat(result.format);
-    start(f);
+    start(f, result.format);
   }
 
-  function start(f = file) {
+  function start(f = file, fileFormat = format) {
     setError('');
     setPhase('uploading');
     setProgress(0);
-    const upload = uploadImport(f, {
+    const isWord = fileFormat === 'docx';
+    const upload = (isWord ? uploadDocx : uploadImport)(f, {
       onProgress: setProgress,
       onUploaded: () => setPhase('analyzing')
     });
@@ -58,7 +67,7 @@ function ImportDialog({ kind = 'any', onClose }) {
       .then((result) => {
         uploadRef.current = null;
         setPhase('done');
-        navigate(`/imports/${result.id}`);
+        navigate(isWord ? `/documents/${result.id}` : `/imports/${result.id}`);
       })
       .catch((err) => {
         uploadRef.current = null;
@@ -90,7 +99,7 @@ function ImportDialog({ kind = 'any', onClose }) {
   return (
     <Dialog
       title={TITLES[kind] || TITLES.any}
-      description="PreSync reads the file’s structure and shows you what it found before anything is created."
+      description={DESCRIPTIONS[kind] || DESCRIPTIONS.any}
       onClose={busy ? undefined : onClose}
       dismissible={!busy}
       footer={
@@ -157,8 +166,8 @@ function ImportDialog({ kind = 'any', onClose }) {
               </div>
               <p className="upload-step">
                 {phase === 'uploading' && <>Uploading… <span className="mono">{pct}%</span></>}
-                {phase === 'analyzing' && 'Analysing structure: headings, lists, tables, pictures and slides…'}
-                {phase === 'done' && 'Analysis complete. Opening the review…'}
+                {phase === 'analyzing' && (format === 'docx' ? 'Reading the document: headings, lists, tables and pictures…' : 'Analysing structure: headings, lists, tables, pictures and slides…')}
+                {phase === 'done' && (format === 'docx' ? 'Done. Opening the document…' : 'Analysis complete. Opening the review…')}
               </p>
             </div>
           )}

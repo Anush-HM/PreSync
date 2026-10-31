@@ -14,7 +14,7 @@ vi.mock('../services/deckExportService.js', () => ({
   exportDeckToPptx: vi.fn(),
   exportFileName: (title, ext) => `${title}.${ext}`
 }));
-vi.mock('../services/docxExportService.js', () => ({ exportDeckToDocx: vi.fn() }));
+vi.mock('../services/docxExportService.js', () => ({ exportDeckToDocx: vi.fn(), exportDocumentToDocx: vi.fn() }));
 vi.mock('../yjs/docManager.js', () => ({ flushDoc: vi.fn() }));
 
 const { default: Deck } = await import('../models/Deck.js');
@@ -578,16 +578,16 @@ describe('GET /api/decks/:deckId/export', () => {
 });
 
 describe('POST /api/decks/import (Word)', () => {
-  it('creates a deck straight from a .docx using the suggested outline', async () => {
+  it('refuses a .docx: Word documents do not become slides', async () => {
     const { buildDocx, p } = await import('../test/buildDocx.js');
-    Deck.create.mockImplementation(async (doc) => ({ _id: DECK_ID, ...doc }));
     const buf = await buildDocx([p('Report', 'Title'), p('Findings', 'Heading1'), p('It works.')].join(''));
     const form = new FormData();
     form.append('file', new Blob([buf]), 'Report.docx');
 
     const res = await server.request('POST', '/api/decks/import', { token: tokenFor(OWNER_ID), body: form });
 
-    expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ title: 'Report', format: 'docx', slideCount: 2 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/document editor/);
+    expect(Deck.create).not.toHaveBeenCalled();
   });
 });

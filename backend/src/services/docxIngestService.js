@@ -393,6 +393,8 @@ export async function parseDocx(buffer) {
     const layout = paragraphLayout(para);
     const { runs, pageBreak } = readRuns(p, para, ctx);
     const formatted = { runs, ...(Object.keys(layout).length ? { layout } : {}) };
+    // Quote and caption paragraphs keep their style for the document editor.
+    if (/^(quote|intensequote|caption)$/i.test(para.styleId || '')) formatted.styleId = para.styleId;
     if (layout.pageBreakBefore) blocks.push({ type: 'pageBreak' });
 
     if (text) {
