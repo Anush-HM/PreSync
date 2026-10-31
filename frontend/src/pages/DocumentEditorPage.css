@@ -88,9 +88,10 @@
 .doc-border-preview { position: relative; align-self: center; width: 126px; height: 178px; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
 
 /* Keep sizes in step with STYLES in backend documentPdfService.js and DOC_STYLES in docxExportService.js. */
+.doc-prose { outline: none; font-size: 11pt; line-height: 1.15; }
 /* Word's default tab stops: every half inch, from the paragraph's start. */
-.doc-prose { outline: none; font-size: 11pt; line-height: 1.15; overflow-wrap: anywhere; white-space: pre-wrap; tab-size: 48px; }
-.doc-prose p { margin: 0 0 6pt; white-space: pre-wrap; tab-size: 36pt; }
+.doc-prose, .doc-prose p, .doc-prose h1, .doc-prose h2, .doc-prose h3, .doc-prose h4, .doc-prose h5, .doc-prose h6 { white-space: pre-wrap; tab-size: 36pt; overflow-wrap: break-word; }
+.doc-prose p { margin: 0 0 6pt; }
 .doc-prose p[data-block-style='title'] { margin-bottom: 12pt; font-size: 26pt; font-weight: 700; }
 .doc-prose p[data-block-style='subtitle'] { margin-bottom: 8pt; font-size: 14pt; color: #5b625d; }
 .doc-prose p[data-block-style='caption'] { font-size: 9pt; font-style: italic; color: #5b625d; }

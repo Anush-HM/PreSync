@@ -340,7 +340,6 @@ export function expandTabs(runs, stops) {
 }
 
 const COLUMN_GAP = /\S[ \u00a0]{2,}\S|\t/;
-const LABEL = /^[A-Za-z][\w .'-]{1,30}:/;
 const TEXT_WIDTH_PX = 624; // of a page with one-inch margins
 const SPACE_GAP = /[ \u00a0]{2,}/;
 
@@ -362,33 +361,31 @@ function columnRuns(block) {
 
 const widthOf = (runs) => runs.reduce((sum, r) => sum + textWidth(r.text, r.style), 0);
 
-// Lines like "Student Name: Asha    USN: 1" centred one by one start at a
-// different place each. A run of them becomes one left-aligned block,
+// Column lines (two items split by a tab or several spaces) centred one
+// by one start at a different place each. A run of them becomes one left-aligned block,
 // indented to sit about where the centring put it, with the second column
 // on one shared tab stop.
 function alignColumns(blocks) {
-  const isCentredLine = (b) => b.type === 'paragraph' && b.layout?.align === 'center' && (COLUMN_GAP.test(b.text) || LABEL.test(b.text));
+  const isCentredLine = (b) => b.type === 'paragraph' && b.layout?.align === 'center' && COLUMN_GAP.test(b.text);
   const out = [...blocks];
   for (let i = 0; i < out.length; i++) {
     if (!isCentredLine(out[i])) continue;
     let end = i;
     while (end + 1 < out.length && isCentredLine(out[end + 1])) end += 1;
     const lines = out.slice(i, end + 1);
-    if (lines.length > 1 || COLUMN_GAP.test(lines[0].text)) {
-      const split = lines.map(columnRuns);
-      const parts = split.map((runs) => {
-        const at = runs.findIndex((r) => r.text === '\t');
-        return at < 0 ? [widthOf(runs), 0] : [widthOf(runs.slice(0, at)), widthOf(runs.slice(at + 1))];
-      });
-      const left = Math.max(...parts.map((p) => p[0]));
-      const right = Math.max(...parts.map((p) => p[1]));
-      const stop = Math.ceil((left + 16) / GRID_PX) * GRID_PX;
-      const indent = Math.round((TEXT_WIDTH_PX - (right ? stop + right : left)) / 2 / GRID_PX);
-      lines.forEach((line, k) => {
-        const { align, ...layout } = line.layout;
-        out[i + k] = { ...line, runs: split[k], layout: { ...layout, tabs: layout.tabs || [{ pos: stop, type: 'left' }], indent: Math.max(0, Math.min(8, indent)) } };
-      });
-    }
+    const split = lines.map(columnRuns);
+    const parts = split.map((runs) => {
+      const at = runs.findIndex((r) => r.text === '\t');
+      return at < 0 ? [widthOf(runs), 0] : [widthOf(runs.slice(0, at)), widthOf(runs.slice(at + 1))];
+    });
+    const left = Math.max(...parts.map((p) => p[0]));
+    const right = Math.max(...parts.map((p) => p[1]));
+    const stop = Math.ceil((left + 16) / GRID_PX) * GRID_PX;
+    const indent = Math.round((TEXT_WIDTH_PX - (right ? stop + right : left)) / 2 / GRID_PX);
+    lines.forEach((line, k) => {
+      const { align, ...layout } = line.layout;
+      out[i + k] = { ...line, runs: split[k], layout: { ...layout, tabs: layout.tabs || [{ pos: stop, type: 'left' }], indent: Math.max(0, Math.min(8, indent)) } };
+    });
     i = end;
   }
   return out;

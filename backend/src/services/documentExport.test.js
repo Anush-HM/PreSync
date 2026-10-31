@@ -214,18 +214,22 @@ describe('page breaks and blank lines from Word', () => {
     expect(content[1].content).toBeUndefined();
   });
 
-  it('starts the contents on a new page, title centred and items left', async () => {
-    const centre = (t) => `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>${t}</w:t></w:r></w:p>`;
-    const parsed = await parseDocx(await buildDocx(centre('Cover') + p('TABLE OF CONTENTS') + centre('1. Introduction') + centre('2. Meaning') + brThen('Body') + centre('Centred again')));
-    expect(parsed.blocks.map((b) => b.type)).toEqual(['paragraph', 'pageBreak', 'paragraph', 'paragraph', 'paragraph', 'pageBreak', 'paragraph', 'paragraph']);
-    expect(parsed.blocks[2].layout.align).toBe('center');
-    expect(parsed.blocks[3].layout?.align).toBeUndefined();
-    expect(parsed.blocks[4].layout?.align).toBeUndefined();
-    expect(parsed.blocks[7].layout.align).toBe('center');
+  it('applies no rule of its own to a table of contents', async () => {
+    const parsed = await parseDocx(await buildDocx(p('Cover') + p('TABLE OF CONTENTS') + p('1. Introduction')));
+    expect(parsed.blocks.map((block) => block.type)).toEqual(['paragraph', 'paragraph', 'paragraph']);
   });
+});
 
-  it('adds no page ahead of contents that open the document', async () => {
-    expect((await parseDocx(await buildDocx(p('Table of Contents') + p('x')))).blocks[0].type).toBe('paragraph');
+describe('paragraph alignment from Word', () => {
+  const styles = '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Mid"><w:name w:val="Mid"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style></w:styles>';
+  const jc = (val, style = '') => `<w:p><w:pPr>${style}<w:jc w:val="${val}"/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>`;
+
+  it('maps every w:jc value, from the paragraph or its style', async () => {
+    const body = ['left', 'start', 'center', 'right', 'end', 'both', 'distribute'].map((v) => jc(v)).join('')
+      + '<w:p><w:pPr><w:pStyle w:val="Mid"/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>' + jc('right', '<w:pStyle w:val="Mid"/>');
+    const parsed = await parseDocx(await buildDocx(body, { extraFiles: { 'word/styles.xml': styles } }));
+    const aligned = blocksToContent(parsed.blocks).content.map((n) => n.attrs.textAlign);
+    expect(aligned).toEqual(['left', 'left', 'center', 'right', 'right', 'justify', 'justify', 'center', 'right']);
   });
 });
 
@@ -241,14 +245,14 @@ describe('tabs and page borders from Word', () => {
 
   it('turns centred column lines into one left block on a shared stop', () => {
     const line = (text) => ({ type: 'paragraph', text, runs: [{ text, style: { fontSize: 14.7 } }], layout: { align: 'center' } });
-    const { content } = blocksToContent([line('Student Name: Amruth B     USN: 1'), line('Student Name: Yashwanth D     USN: 22'), line('Guide: Dr. M'), line('Plain centred line')]);
-    const [one, two, three, four] = content;
-    for (const n of [one, two, three]) {
+    const { content } = blocksToContent([line('Student Name: Amruth B     USN: 1'), line('Student Name: Yashwanth D     USN: 22'), line('Plain centred line')]);
+    const [one, two, three] = content;
+    for (const n of [one, two]) {
       expect(n.attrs.textAlign).toBeUndefined();
       expect(n.attrs.indent).toBe(one.attrs.indent);
     }
     expect(one.attrs.indent).toBeGreaterThan(0);
-    expect(four.attrs.textAlign).toBe('center');
+    expect(three.attrs.textAlign).toBe('center');
     const texts = (n) => n.content.map((c) => c.text);
     expect(texts(one)[0]).toBe('Student Name: Amruth B');
     expect(texts(one)[2]).toBe('USN: 1');
@@ -258,7 +262,7 @@ describe('tabs and page borders from Word', () => {
     expect(reach(one)).toBe(reach(two));
   });
 
-  it('leaves a lone centred label alone', () => {
+  it('keeps a centred line with a label centred, whatever it says', () => {
     const { content } = blocksToContent([{ type: 'paragraph', text: 'Note: read this', runs: [{ text: 'Note: read this' }], layout: { align: 'center' } }]);
     expect(content[0].attrs.textAlign).toBe('center');
   });

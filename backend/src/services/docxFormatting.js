@@ -130,7 +130,7 @@ export function paragraphLayout(para) {
   const { pPrs } = para;
   const out = {};
   const jc = attr(firstOf(pPrs, 'w:jc'), 'w:val');
-  if (ALIGN[jc] && ALIGN[jc] !== 'left') out.align = ALIGN[jc];
+  if (ALIGN[jc]) out.align = ALIGN[jc];
   const spacing = pPrs.map((n) => child(n, 'w:spacing')).filter(Boolean);
   const sp = (name) => {
     for (const s of spacing) if (attr(s, name) !== null) return Number(attr(s, name));
