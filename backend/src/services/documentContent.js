@@ -141,6 +141,129 @@ export function defaultPage(size = 'letter') {
 
 export const blankContent = () => ({ type: 'doc', content: [{ type: 'paragraph' }] });
 
+// --- page layout -----------------------------------------------------------------
+
+// Headers and footers are three short texts (left, centre, right) that
+// may hold {title}, {date}, {page} and {pages}. Keep the rules below in
+// step with frontend components/documents/pageLayout.js.
+const MAX_SLOT = 200;
+const SIDES = ['left', 'center', 'right'];
+export const BORDER_STYLES = ['solid', 'double', 'dashed', 'dotted', 'groove'];
+export const BORDER_WIDTHS = [0.5, 1, 1.5, 2.25, 3, 4.5, 6];
+export const MAX_BORDER_INSET = 31; // Word's limit, in points from the page edge
+const NUMBER_POSITIONS = ['top-right', 'top-center', 'bottom-center', 'bottom-right'];
+const SCOPES = ['all', 'first', 'exceptFirst', 'pages'];
+const HEX = /^#[0-9a-f]{6}$/i;
+
+export const defaultLayout = () => ({
+  header: { left: '', center: '', right: '' },
+  footer: { left: '', center: '', right: '' },
+  differentFirstPage: false,
+  pageNumbers: null,
+  pageBorder: null
+});
+
+function cleanSlots(input) {
+  return Object.fromEntries(SIDES.map((s) => [s, typeof input?.[s] === 'string' ? input[s].slice(0, MAX_SLOT) : '']));
+}
+
+function cleanBorder(input) {
+  if (!input?.sides) return null;
+  const sides = Object.fromEntries(['top', 'right', 'bottom', 'left'].map((s) => [s, !!input.sides[s]]));
+  if (!Object.values(sides).some(Boolean)) return null;
+  const inset = Number(input.inset);
+  return {
+    sides,
+    style: BORDER_STYLES.includes(input.style) ? input.style : 'solid',
+    width: BORDER_WIDTHS.includes(input.width) ? input.width : 1,
+    color: HEX.test(input.color || '') ? input.color : '#000000',
+    inset: Number.isFinite(inset) ? Math.max(0, Math.min(MAX_BORDER_INSET, inset)) : 24,
+    scope: SCOPES.includes(input.scope) ? input.scope : 'all',
+    pages: typeof input.pages === 'string' ? input.pages.slice(0, 80) : ''
+  };
+}
+
+// Always returns a complete layout; anything unusable falls back to off.
+export function cleanLayout(input) {
+  const numbers = input?.pageNumbers;
+  return {
+    header: cleanSlots(input?.header),
+    footer: cleanSlots(input?.footer),
+    differentFirstPage: !!input?.differentFirstPage,
+    pageNumbers: numbers && NUMBER_POSITIONS.includes(numbers.position)
+      ? { position: numbers.position, format: numbers.format === 'pageOf' ? 'pageOf' : 'plain', hideOnFirst: !!numbers.hideOnFirst }
+      : null,
+    pageBorder: cleanBorder(input?.pageBorder)
+  };
+}
+
+// Page ranges typed as "1, 3-5", as a set of page numbers from 1.
+export function parsePageRanges(text) {
+  const pages = new Set();
+  for (const part of String(text || '').split(',')) {
+    const m = /^\s*(\d{1,4})\s*(?:-\s*(\d{1,4})\s*)?$/.exec(part);
+    if (!m) continue;
+    const from = Number(m[1]);
+    const to = Math.min(Number(m[2] || m[1]), from + 2000);
+    for (let n = from; n <= to; n++) pages.add(n);
+  }
+  return pages;
+}
+
+export function borderOnPage(border, pageIndex) {
+  if (!border) return false;
+  if (border.scope === 'first') return pageIndex === 0;
+  if (border.scope === 'exceptFirst') return pageIndex > 0;
+  if (border.scope === 'pages') return parsePageRanges(border.pages).has(pageIndex + 1);
+  return true;
+}
+
+// The texts of a header or footer on one page, tokens not yet filled in.
+export function zoneTexts(layout, zone, pageIndex) {
+  const first = pageIndex === 0;
+  const out = first && layout.differentFirstPage ? { left: '', center: '', right: '' } : { ...layout[zone] };
+  const n = layout.pageNumbers;
+  if (n && !(first && (n.hideOnFirst || layout.differentFirstPage))) {
+    const [at, side] = n.position.split('-');
+    if ((at === 'top') === (zone === 'header')) {
+      const number = n.format === 'pageOf' ? 'Page {page} of {pages}' : '{page}';
+      out[side] = out[side] ? `${out[side]} ${number}` : number;
+    }
+  }
+  return out;
+}
+
+export const dateText = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+export function fillTokens(text, { page, pages, title }) {
+  return text.replace(/\{(page|pages|title|date)\}/g, (_, t) => ({ page, pages, title, date: dateText() })[t]);
+}
+
+// A Word header or footer as the three slots: tabs separate them, and a
+// paragraph without tabs goes by its alignment.
+export function slotsFromWord(paragraphs = []) {
+  const slots = { left: '', center: '', right: '' };
+  const add = (side, text) => {
+    const clean = text.trim();
+    if (clean) slots[side] = (slots[side] ? `${slots[side]} ${clean}` : clean).slice(0, MAX_SLOT);
+  };
+  for (const paragraph of paragraphs) {
+    let text = '';
+    for (const run of paragraph.runs || []) {
+      if (!run.field) text += run.text;
+      else if (!text.endsWith(`{${run.field.toLowerCase()}}`)) text += run.field === 'PAGE' ? '{page}' : '{pages}';
+    }
+    const parts = text.replace(/\n/g, ' ').split('\t');
+    if (parts.length === 1) add(paragraph.layout?.align === 'center' ? 'center' : paragraph.layout?.align === 'right' ? 'right' : 'left', parts[0]);
+    else {
+      add('left', parts[0]);
+      add('center', parts[1]);
+      add('right', parts.slice(2).join(' '));
+    }
+  }
+  return slots;
+}
+
 export function countWords(node) {
   if (node.type === 'text') return node.text.trim() ? node.text.trim().split(/\s+/).length : 0;
   return (node.content || []).reduce((sum, c) => sum + countWords(c), 0);
@@ -323,7 +446,6 @@ export function blocksToContent(blocks = [], images = []) {
 export function importNotes(found = {}) {
   const notes = [];
   const say = (flag, text) => { if (found[flag]) notes.push(text); };
-  say('headersFooters', 'Headers and footers were not imported.');
   say('textBoxes', 'Text boxes were not imported.');
   say('equations', 'Equations were not imported.');
   say('footnotes', 'Footnotes were not imported.');

@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { textLines } from './deckExportService.js';
+import { cleanLayout, dateText, parsePageRanges, zoneTexts } from './documentContent.js';
 
 // Exports a deck as a Word document: one section per slide, read top to
 // bottom. Titles become headings, text keeps its run formatting, tables
@@ -503,8 +504,72 @@ function numberingXml(starts) {
 <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>${bullets}</w:abstractNum><w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>${numbers}</w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>${nums}</w:numbering>`;
 }
 
+const WML = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+const ZONE_RUN = '<w:rPr><w:color w:val="5B625D"/><w:sz w:val="18"/></w:rPr>';
+const zoneText = (text) => (text ? `<w:r>${ZONE_RUN}<w:t xml:space="preserve">${esc(text)}</w:t></w:r>` : '');
+const zoneField = (instr, shown) => `<w:fldSimple w:instr=" ${instr} "><w:r>${ZONE_RUN}<w:t>${esc(shown)}</w:t></w:r></w:fldSimple>`;
+
+// A slot's text with its tokens as live Word fields where Word has them.
+function zoneRuns(text, title) {
+  return text.split(/(\{(?:page|pages|title|date)\})/).map((part) => {
+    if (part === '{page}') return zoneField('PAGE', '1');
+    if (part === '{pages}') return zoneField('NUMPAGES', '1');
+    if (part === '{title}') return zoneText(title);
+    if (part === '{date}') return zoneText(dateText());
+    return zoneText(part);
+  }).join('');
+}
+
+// One paragraph with centre and right tab stops holds the three slots.
+function zoneXml(tag, slots, title, contentPx) {
+  const width = Math.round(contentPx * PX_TWIPS);
+  const tabs = `<w:tabs><w:tab w:val="center" w:pos="${Math.round(width / 2)}"/><w:tab w:val="right" w:pos="${width}"/></w:tabs>`;
+  const tab = `<w:r>${ZONE_RUN}<w:tab/></w:r>`;
+  const line = `${zoneRuns(slots.left, title)}${tab}${zoneRuns(slots.center, title)}${tab}${zoneRuns(slots.right, title)}`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:${tag} ${WML}><w:p><w:pPr>${tabs}<w:spacing w:after="0"/></w:pPr>${line}</w:p></w:${tag}>`;
+}
+
+// Header and footer parts, and the references to them for w:sectPr. A
+// first page that differs from the rest needs its own parts and titlePg.
+function zoneParts(layout, title, contentPx) {
+  const texts = (zone, page) => zoneTexts(layout, zone, page);
+  const empty = (s) => !s.left && !s.center && !s.right;
+  const zones = ['header', 'footer'];
+  if (zones.every((z) => empty(texts(z, 0)) && empty(texts(z, 1)))) return { parts: [], refs: '', titlePg: false };
+  const titlePg = zones.some((z) => JSON.stringify(texts(z, 0)) !== JSON.stringify(texts(z, 1)));
+  const parts = [];
+  let refs = '';
+  for (const type of titlePg ? ['default', 'first'] : ['default']) {
+    for (const zone of zones) {
+      const tag = zone === 'header' ? 'hdr' : 'ftr';
+      const name = `${zone}${parts.length + 1}.xml`;
+      const id = `rIdZone${parts.length + 1}`;
+      parts.push({ name, id, zone, xml: zoneXml(tag, texts(zone, type === 'first' ? 0 : 1), title, contentPx) });
+      refs += `<w:${zone}Reference w:type="${type}" r:id="${id}"/>`;
+    }
+  }
+  return { parts, refs, titlePg };
+}
+
+const BORDER_VALS = { solid: 'single', double: 'double', dashed: 'dashed', dotted: 'dotted', groove: 'threeDEngrave' };
+
+// Word can show a page border on all pages, the first, or all but the
+// first, so a list of specific pages exports as all pages unless it is
+// just page 1.
+function pageBordersXml(border) {
+  if (!border) return '';
+  const pages = border.scope === 'pages' ? parsePageRanges(border.pages) : null;
+  const display = border.scope === 'first' || (pages?.size === 1 && pages.has(1)) ? 'firstPage' : border.scope === 'exceptFirst' ? 'notFirstPage' : 'allPages';
+  const side = (name) => (border.sides[name]
+    ? `<w:${name} w:val="${BORDER_VALS[border.style]}" w:sz="${Math.round(border.width * 8)}" w:space="${Math.round(border.inset)}" w:color="${border.color.slice(1).toUpperCase()}"/>`
+    : '');
+  return `<w:pgBorders w:offsetFrom="page" w:display="${display}">${['top', 'left', 'bottom', 'right'].map(side).join('')}</w:pgBorders>`;
+}
+
 // A document from the document editor as a .docx: real headings, lists
-// and tables, at its own page size. Callouts become one-cell tables.
+// and tables, at its own page size, with native headers, footers, page
+// number fields and page borders. Callouts become one-cell tables.
 export async function exportDocumentToDocx(document) {
   const media = new Media();
   const page = document.page;
@@ -523,7 +588,9 @@ export async function exportDocumentToDocx(document) {
   };
   const body = blocksXml(document.content?.content, ctx);
   const m = page.margins;
-  const sect = `<w:sectPr><w:pgSz w:w="${Math.round(page.width * PX_TWIPS)}" w:h="${Math.round(page.height * PX_TWIPS)}"/><w:pgMar w:top="${m.top * PX_TWIPS}" w:right="${m.right * PX_TWIPS}" w:bottom="${m.bottom * PX_TWIPS}" w:left="${m.left * PX_TWIPS}" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>`;
+  const layout = cleanLayout(document.layout);
+  const { parts, refs, titlePg } = zoneParts(layout, document.title || 'Document', contentPx);
+  const sect = `<w:sectPr>${refs}<w:pgSz w:w="${Math.round(page.width * PX_TWIPS)}" w:h="${Math.round(page.height * PX_TWIPS)}"/><w:pgMar w:top="${Math.round(m.top * PX_TWIPS)}" w:right="${Math.round(m.right * PX_TWIPS)}" w:bottom="${Math.round(m.bottom * PX_TWIPS)}" w:left="${Math.round(m.left * PX_TWIPS)}" w:header="720" w:footer="720" w:gutter="0"/>${pageBordersXml(layout.pageBorder)}${titlePg ? '<w:titlePg/>' : ''}</w:sectPr>`;
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document ${DOC_NS} mc:Ignorable="wps"><w:body>${body}${sect}</w:body></w:document>`;
 
@@ -531,7 +598,7 @@ export async function exportDocumentToDocx(document) {
   const zip = new JSZip();
   const exts = [...new Set(media.files.map((f) => f.ext))];
   zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${exts.map((e) => `<Default Extension="${e}" ContentType="image/${e}"/>`).join('')}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`);
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${exts.map((e) => `<Default Extension="${e}" ContentType="image/${e}"/>`).join('')}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>${parts.map((p) => `<Override PartName="/word/${p.name}" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.${p.zone}+xml"/>`).join('')}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`);
   zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`);
   zip.file('docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -540,7 +607,8 @@ export async function exportDocumentToDocx(document) {
   zip.file('word/styles.xml', DOC_STYLES);
   zip.file('word/numbering.xml', numberingXml(starts));
   zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>${media.files.map((f) => `<Relationship Id="${f.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${f.name}"/>`).join('')}</Relationships>`);
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>${parts.map((p) => `<Relationship Id="${p.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${p.zone}" Target="${p.name}"/>`).join('')}${media.files.map((f) => `<Relationship Id="${f.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${f.name}"/>`).join('')}</Relationships>`);
+  for (const p of parts) zip.file(`word/${p.name}`, p.xml);
   for (const f of media.files) zip.file(`word/media/${f.name}`, f.data);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }

@@ -6,6 +6,9 @@ import Logo from '../components/ui/Logo.jsx';
 import Menu from '../components/ui/Menu.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
 import DocumentToolbar from '../components/documents/DocumentToolbar.jsx';
+import PageSheets from '../components/documents/PageSheets.jsx';
+import { PageBorderDialog, PageNumbersDialog } from '../components/documents/PageDialogs.jsx';
+import { PAGE_GAP } from '../components/documents/pageLayout.js';
 import { documentExtensions, fontsIn } from '../components/documents/documentExtensions.js';
 import { readPicture } from '../components/documents/documentPictures.js';
 import { downloadDocument, getDocument, updateDocument } from '../data/documentsApi.js';
@@ -25,7 +28,7 @@ function pageSizeId(page) {
   return PAGE_SIZES.find((p) => Math.abs(p.width - page.width) < 4 && Math.abs(p.height - page.height) < 4)?.id || 'custom';
 }
 
-function DocumentCanvas({ document: doc, onChange, onReady }) {
+function DocumentCanvas({ document: doc, title, onChange, onReady, onLayoutChange }) {
   const toast = useToast();
   const insertFiles = useCallback((view, files, pos) => {
     const pictures = [...files].filter((f) => f.type.startsWith('image/'));
@@ -58,35 +61,82 @@ function DocumentCanvas({ document: doc, onChange, onReady }) {
   });
 
   if (!editor) return null;
-  return <DocumentSurface editor={editor} page={doc.page} />;
+  return <DocumentSurface editor={editor} page={doc.page} layout={doc.layout} title={title} onLayoutChange={onLayoutChange} />;
 }
 
-function DocumentSurface({ editor, page }) {
-  const m = page.margins;
+function DocumentSurface({ editor, page, layout, title, onLayoutChange }) {
+  const [pages, setPages] = useState(1);
+  const [editingPage, setEditingPage] = useState(null);
+  const [dialog, setDialog] = useState(null); // 'numbers' | 'border'
+
+  useEffect(() => {
+    const { storage } = editor;
+    storage.pagination.geometry = { pageHeight: page.height, gap: PAGE_GAP, marginTop: page.margins.top, marginBottom: page.margins.bottom };
+    storage.pagination.onPages = setPages;
+    storage.pagination.repaginate?.();
+    return () => { storage.pagination.onPages = null; };
+  }, [editor, page]);
+
+  // Header and footer fields take the keyboard while they are open.
+  useEffect(() => {
+    editor.setEditable(editingPage === null, false);
+  }, [editor, editingPage]);
+
+  // A click on a margin or a gap puts the cursor in the nearest text. A
+  // double click there is for the header or footer instead.
+  function placeCursor(e) {
+    if (e.detail > 1) return;
+    if (e.target.closest('.ProseMirror') && !e.target.closest('.doc-page-spacer, .doc-page-spacer-row')) return;
+    if (!e.target.closest('.doc-sheets')) return;
+    e.preventDefault();
+    const box = editor.view.dom.getBoundingClientRect();
+    const left = Math.max(box.left + 1, Math.min(box.right - 1, e.clientX));
+    const top = Math.max(box.top + 1, Math.min(box.bottom - 1, e.clientY));
+    let at = null;
+    try {
+      at = editor.view.posAtCoords({ left, top });
+    } catch {
+      // No layout to ask: fall through to the end of the text.
+    }
+    editor.commands.focus(at ? at.pos : 'end');
+  }
+
   return (
     <>
-      <DocumentToolbar editor={editor} />
-      {/* A click on the margins or the empty end of the page starts typing. */}
-      <div
-        className="doc-scroll"
-        onMouseDown={(e) => {
-          if (e.target.closest('.ProseMirror')) return;
-          e.preventDefault();
-          editor.commands.focus('end');
-        }}
+      <DocumentToolbar
+        editor={editor}
+        onPageNumbers={() => setDialog('numbers')}
+        onHeaderFooter={() => setEditingPage(0)}
+        onPageBorder={() => setDialog('border')}
+        hasBorder={!!layout.pageBorder}
+      />
+      <PageSheets
+        page={page}
+        pages={pages}
+        layout={layout}
+        title={title}
+        editingPage={editingPage}
+        onEditPage={setEditingPage}
+        onLayoutChange={onLayoutChange}
+        onSurfaceDown={placeCursor}
       >
-        <div
-          className="doc-page"
-          style={{
-            width: page.width,
-            minHeight: page.height,
-            padding: `${m.top}px ${m.right}px ${m.bottom}px ${m.left}px`,
-            fontFamily: DEFAULT_FONT_FAMILY
-          }}
-        >
-          <EditorContent editor={editor} />
-        </div>
-      </div>
+        <div style={{ fontFamily: DEFAULT_FONT_FAMILY }}><EditorContent editor={editor} /></div>
+      </PageSheets>
+      <footer className="doc-footer"><span className="mono">{plural(pages, 'page')}</span></footer>
+      {dialog === 'numbers' && (
+        <PageNumbersDialog
+          numbers={layout.pageNumbers}
+          onClose={() => setDialog(null)}
+          onApply={(pageNumbers) => { onLayoutChange({ ...layout, pageNumbers }); setDialog(null); }}
+        />
+      )}
+      {dialog === 'border' && (
+        <PageBorderDialog
+          border={layout.pageBorder}
+          onClose={() => setDialog(null)}
+          onApply={(pageBorder) => { onLayoutChange({ ...layout, pageBorder }); setDialog(null); }}
+        />
+      )}
     </>
   );
 }
@@ -101,6 +151,7 @@ function DocumentEditorPage() {
   const [loadError, setLoadError] = useState('');
   const [title, setTitle] = useState('');
   const [page, setPage] = useState(null);
+  const [layout, setLayout] = useState(null);
   const [status, setStatus] = useState('saved');
   const [wordCount, setWordCount] = useState(0);
   const [notesOpen, setNotesOpen] = useState(true);
@@ -119,6 +170,7 @@ function DocumentEditorPage() {
       setDoc(data);
       setTitle(data.title);
       setPage(data.page);
+      setLayout(data.layout);
       setWordCount(data.wordCount || 0);
     } catch (err) {
       setLoadError(err.message || 'Could not load this document');
@@ -219,8 +271,12 @@ function DocumentEditorPage() {
     }
   }
 
-  const liveDoc = useMemo(() => (doc && page ? { ...doc, page } : null), [doc, page]);
+  const liveDoc = useMemo(() => (doc && page && layout ? { ...doc, page, layout } : null), [doc, page, layout]);
   const onContentChange = useCallback(() => schedule({ content: true }), [schedule]);
+  const onLayoutChange = useCallback((next) => {
+    setLayout(next);
+    schedule({ layout: next });
+  }, [schedule]);
   const onEditorReady = useCallback((editor) => { editorRef.current = editor; }, []);
 
   if (loadError) {
@@ -294,9 +350,9 @@ function DocumentEditorPage() {
         </div>
       )}
 
-      <DocumentCanvas document={liveDoc} onChange={onContentChange} onReady={onEditorReady} />
+      <DocumentCanvas document={liveDoc} title={title} onChange={onContentChange} onReady={onEditorReady} onLayoutChange={onLayoutChange} />
 
-      <footer className="doc-footer"><span className="mono">{plural(wordCount, 'word')}</span></footer>
+      <p className="doc-word-count mono">{plural(wordCount, 'word')}</p>
     </div>
   );
 }

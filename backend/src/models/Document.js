@@ -12,6 +12,8 @@ const documentSchema = new mongoose.Schema(
     content: { type: mongoose.Schema.Types.Mixed, required: true },
     // Page size and margins in px at 96 dpi: { width, height, margins }.
     page: { type: mongoose.Schema.Types.Mixed, required: true },
+    // Headers, footers, page numbers and page border (see cleanLayout).
+    layout: { type: mongoose.Schema.Types.Mixed, default: null },
     wordCount: { type: Number, default: 0 },
     // For imported files: the original name, and what could not be brought in.
     sourceFileName: { type: String, default: null },

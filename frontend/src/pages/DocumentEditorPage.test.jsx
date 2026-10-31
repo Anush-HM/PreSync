@@ -13,12 +13,14 @@ vi.mock('../data/documentsApi.js', () => ({
 }));
 
 const PAGE = { width: 816, height: 1056, margins: { top: 96, right: 96, bottom: 96, left: 96 } };
+const LAYOUT = { header: { left: '{title}', center: '', right: '' }, footer: { left: '', center: '', right: '' }, differentFirstPage: false, pageNumbers: null, pageBorder: null };
 const DOC = {
   id: 'doc-1',
   title: 'Annual plan',
   wordCount: 2,
   page: PAGE,
   importNotes: [],
+  layout: LAYOUT,
   content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello there' }] }] }
 };
 
@@ -170,7 +172,7 @@ describe('DocumentEditorPage', () => {
   it('saves a change of page size', async () => {
     const user = await open();
     await user.selectOptions(screen.getByLabelText('Page size'), 'a4');
-    expect(document.querySelector('.doc-page').style.width).toBe('794px');
+    expect(document.querySelector('.doc-sheets').style.width).toBe('794px');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(updateDocument.mock.calls[0][1].page).toMatchObject({ width: 794, height: 1123 }));
   });
@@ -185,7 +187,7 @@ describe('DocumentEditorPage', () => {
 
   it('starts typing when the page margin is clicked', async () => {
     await open();
-    fireEvent.mouseDown(document.querySelector('.doc-page'));
+    fireEvent.mouseDown(document.querySelector('.doc-sheet'));
     await waitFor(() => expect(document.activeElement).toBe(prose()));
   });
 
@@ -194,6 +196,57 @@ describe('DocumentEditorPage', () => {
     act(() => { lastEditor().commands.insertContent('More '); });
     fireEvent.keyDown(window, { key: 's', ctrlKey: true });
     await waitFor(() => expect(updateDocument).toHaveBeenCalledTimes(1));
+  });
+
+  it('draws a page with its header, and edits it on double click', async () => {
+    const user = await open();
+    expect(screen.getByRole('region', { name: 'Page 1 of 1' })).toHaveTextContent('Annual plan');
+    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    const left = await screen.findByLabelText('Header left');
+    await user.clear(left);
+    await user.type(left, 'Cover');
+    await user.click(screen.getByLabelText('Different first page'));
+    await user.click(screen.getByRole('button', { name: 'Close Header/Footer' }));
+    expect(screen.queryByLabelText('Header left')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateDocument.mock.calls.at(-1)[1].layout).toMatchObject({ header: { left: 'Cover' }, differentFirstPage: true }));
+  });
+
+  it('closes header editing on a click outside', async () => {
+    await open();
+    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    await screen.findByLabelText('Footer right');
+    fireEvent.mouseDown(document.querySelector('.doc-header'));
+    await waitFor(() => expect(screen.queryByLabelText('Footer right')).not.toBeInTheDocument());
+  });
+
+  it('adds page numbers from the Insert menu', async () => {
+    const user = await open();
+    await user.click(screen.getByRole('button', { name: 'Insert' }));
+    await user.click(screen.getByRole('tab', { name: 'Page' }));
+    await user.click(screen.getByRole('button', { name: /Page numbers/ }));
+    await user.click(screen.getByRole('button', { name: 'Page 1 of 5' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(screen.getByRole('region', { name: 'Page 1 of 1' })).toHaveTextContent('Page 1 of 1');
+  });
+
+  it('inserts a page break with Ctrl+Enter', async () => {
+    await open();
+    act(() => { lastEditor().commands.focus('end'); });
+    fireEvent.keyDown(prose(), { key: 'Enter', ctrlKey: true });
+    expect(lastEditor().getJSON().content.map((n) => n.type)).toContain('pageBreak');
+  });
+
+  it('applies a page border', async () => {
+    const user = await open();
+    await user.click(screen.getByRole('button', { name: 'Page border' }));
+    await user.click(screen.getByRole('button', { name: 'Box' }));
+    await user.selectOptions(screen.getByLabelText('Style'), 'double');
+    await user.click(screen.getByRole('button', { name: 'Forest green' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(document.querySelector('.doc-sheet .doc-sheet-border')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateDocument.mock.calls.at(-1)[1].layout.pageBorder).toMatchObject({ style: 'double', color: '#2e5e4e', scope: 'all' }));
   });
 
   it('offers a retry when the document cannot load', async () => {

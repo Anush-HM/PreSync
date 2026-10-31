@@ -1,6 +1,6 @@
 import { useEditorState } from '@tiptap/react';
 import {
-  AlignCenter, AlignJustify, AlignLeft, AlignRight, Baseline, Bold, Check, Columns2, Combine, Italic, Minus, Plus,
+  AlignCenter, AlignJustify, AlignLeft, AlignRight, Baseline, Bold, Check, Columns2, Combine, Frame, Italic, Minus, Plus,
   Redo2, Rows2, Split, Strikethrough, Trash2, Underline, Undo2, Rows3
 } from 'lucide-react';
 import FontPicker from '../editor/FontPicker.jsx';
@@ -87,7 +87,7 @@ function TableTools({ editor }) {
 
 // Formatting bar for the document editor. Reads the current selection
 // through useEditorState, so it redraws only when a value it shows changes.
-function DocumentToolbar({ editor }) {
+function DocumentToolbar({ editor, onPageNumbers, onHeaderFooter, onPageBorder, hasBorder }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => {
@@ -118,7 +118,7 @@ function DocumentToolbar({ editor }) {
         <Toggle label="Undo" icon={Undo2} disabled={!state.canUndo} onClick={() => chain().undo().run()} />
         <Toggle label="Redo" icon={Redo2} disabled={!state.canRedo} onClick={() => chain().redo().run()} />
         <Sep />
-        <DocumentInsertMenu editor={editor} />
+        <DocumentInsertMenu editor={editor} onPageNumbers={onPageNumbers} onHeaderFooter={onHeaderFooter} />
         <Sep />
         <FontPicker value={state.family} onPick={(stack) => chain().setFontFamily(stack).run()} />
         <SizeStepper value={state.size} onChange={(pt) => chain().setFontSize(`${pt}pt`).run()} />
@@ -156,6 +156,8 @@ function DocumentToolbar({ editor }) {
           value={state.color}
           onPick={(c) => (c ? chain().setColor(c).run() : chain().unsetColor().run())}
         />
+        <Sep />
+        <Toggle label="Page border" icon={Frame} pressed={hasBorder} onClick={onPageBorder} />
       </div>
       {state.inTable && <TableTools editor={editor} />}
     </>

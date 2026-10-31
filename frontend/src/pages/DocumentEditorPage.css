@@ -1,4 +1,4 @@
-/* The app chrome follows the site theme; the page itself is always paper. */
+/* The app chrome follows the site theme; the sheets are always paper. */
 .doc-editor { display: flex; flex-direction: column; height: 100dvh; background: var(--bg-base, var(--bg-surface)); color: var(--text-primary); }
 .doc-editor-message { align-items: center; justify-content: center; gap: 12px; padding: 24px; }
 .doc-editor-message-actions { display: flex; gap: 8px; }
@@ -26,11 +26,35 @@
 .doc-import-notes ul { margin: 4px 0 0; padding-left: 18px; }
 
 .doc-scroll { flex: 1; overflow: auto; padding: 24px 16px 48px; }
-.doc-page { box-sizing: border-box; max-width: 100%; margin: 0 auto; background: #fff; color: #171a19; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.18); cursor: text; }
-.doc-footer { padding: 4px 14px; border-top: 1px solid var(--border-subtle); background: var(--bg-surface); font-size: 12px; color: var(--text-secondary); text-align: right; }
+.doc-sheets { position: relative; margin: 0 auto; flex: none; }
+.doc-sheet { position: absolute; left: 0; right: 0; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.18); }
+.doc-sheet-border { position: absolute; box-sizing: border-box; pointer-events: none; }
+.doc-flow { position: absolute; z-index: 2; color: #171a19; cursor: text; }
+.doc-sheets.is-editing-zones .doc-flow { opacity: 0.45; pointer-events: none; }
+.doc-page-spacer { display: block; user-select: none; }
+.doc-page-spacer-row td { padding: 0 !important; border: 0 !important; background: transparent; }
+
+.doc-zone { position: absolute; left: var(--zone-left); width: var(--zone-width); z-index: 3; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 9pt; line-height: 1.3; color: #5b625d; pointer-events: none; font-family: var(--font-sans, sans-serif); }
+.doc-zone.is-header { top: 44px; }
+.doc-zone.is-footer { bottom: 36px; }
+.doc-zone-slot { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-zone-slot.is-center, .doc-zone-input.is-center { text-align: center; }
+.doc-zone-slot.is-right, .doc-zone-input.is-right { text-align: right; }
+.doc-zone.is-editing { pointer-events: auto; z-index: 4; }
+.doc-zone-input { min-width: 0; padding: 3px 6px; border: 1px dashed #8a8f88; border-radius: 3px; background: #fff; color: #171a19; font: inherit; }
+.doc-zone-input:focus { outline: 2px solid #76c893; border-color: transparent; }
+.doc-zone-bar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); font-size: 13px; flex-wrap: wrap; }
+.doc-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-primary); cursor: pointer; }
+.doc-word-count { position: fixed; right: 88px; bottom: 5px; margin: 0; font-size: 12px; color: var(--text-secondary); }
+.doc-footer { padding: 4px 14px; min-height: 18px; border-top: 1px solid var(--border-subtle); background: var(--bg-surface); font-size: 12px; color: var(--text-secondary); text-align: right; }
+
+.doc-dialog { display: flex; flex-direction: column; gap: 14px; }
+.doc-dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.doc-dialog-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.doc-border-preview { position: relative; align-self: center; width: 126px; height: 178px; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
 
 /* Keep sizes in step with STYLES in backend documentPdfService.js and DOC_STYLES in docxExportService.js. */
-.doc-prose { min-height: 100%; outline: none; font-size: 11pt; line-height: 1.15; overflow-wrap: anywhere; }
+.doc-prose { outline: none; font-size: 11pt; line-height: 1.15; overflow-wrap: anywhere; }
 .doc-prose p { margin: 0 0 6pt; }
 .doc-prose p[data-block-style='title'] { margin-bottom: 12pt; font-size: 26pt; font-weight: 700; }
 .doc-prose p[data-block-style='subtitle'] { margin-bottom: 8pt; font-size: 14pt; color: #5b625d; }
@@ -61,7 +85,7 @@
 .doc-prose .tableWrapper { overflow-x: auto; }
 .doc-prose.resize-cursor { cursor: col-resize; }
 
-.doc-page-break { position: relative; height: 18px; margin: 8pt 0; border-top: 1px dashed #8a8f88; }
+.doc-page-break { position: relative; height: 14px; margin: 4pt 0 0; border-top: 1px dashed #8a8f88; }
 .doc-page-break::after { content: 'Page break'; position: absolute; top: -8px; left: 50%; transform: translateX(-50%); padding: 0 8px; background: #fff; font-family: var(--font-sans, sans-serif); font-size: 10px; color: #5b625d; }
 .doc-page-break.ProseMirror-selectednode { border-top-color: #285c43; }
 
@@ -90,6 +114,5 @@
 
 @media (max-width: 720px) {
   .doc-title { width: 100%; order: 3; }
-  .doc-page { padding: 32px 20px !important; min-height: 70dvh !important; }
   .doc-scroll { padding: 12px 8px 32px; }
 }

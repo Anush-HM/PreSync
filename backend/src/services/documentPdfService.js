@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from 'fs';
 import path from 'path';
 import PDFDocument from 'pdfkit';
 import { processImage } from './imageProcessing.js';
+import { borderOnPage, cleanLayout, fillTokens, zoneTexts } from './documentContent.js';
 
 // Lays a document from the document editor out as a PDF. Text is set
 // word by word, so mixed sizes share a baseline, justified lines fill the
@@ -136,8 +137,10 @@ export function exportDocumentToPdf(document) {
   const doc = new PDFDocument({
     size: [page.width * PX_PT, page.height * PX_PT],
     margins,
+    bufferPages: true, // headers and footers need the final page count
     info: { Title: document.title || 'Document', Creator: 'PreSync' }
   });
+  const layout = cleanLayout(document.layout);
   const top = margins.top;
   const bottom = page.height * PX_PT - margins.bottom;
   const contentWidth = (page.width - page.margins.left - page.margins.right) * PX_PT;
@@ -260,7 +263,7 @@ export function exportDocumentToPdf(document) {
     const lines = wrap(tokens(node.content || [], style), ctx.width);
     lines.forEach((line, i) => {
       const size = Math.max(style.size, ...line.words.map((w) => w.style.size));
-      const height = size * lineHeight * 1.2;
+      const height = size * lineHeight; // as CSS does, so pages match the editor
       ensure(height);
       const baseline = y + size;
       if (!dry) {
@@ -509,6 +512,60 @@ export function exportDocumentToPdf(document) {
     nodes.forEach((n) => block(n, ctx));
   }
 
+  function borderLine(border, x1, y1, x2, y2, nx, ny) {
+    const w = border.width;
+    const stroke = (dx, dy, width, color, dash) => {
+      doc.save().moveTo(x1 + dx, y1 + dy).lineTo(x2 + dx, y2 + dy).lineWidth(width).strokeColor(color);
+      if (dash) doc.dash(dash[0], { space: dash[1] });
+      doc.stroke().restore();
+    };
+    if (border.style === 'double') {
+      stroke(0, 0, Math.max(0.4, w / 3), border.color);
+      stroke(nx * w, ny * w, Math.max(0.4, w / 3), border.color);
+    } else if (border.style === 'groove') {
+      stroke(0, 0, w / 2, border.color);
+      stroke((nx * w) / 2, (ny * w) / 2, w / 2, '#c9cec9');
+    } else if (border.style === 'dashed') stroke(0, 0, w, border.color, [w * 3, w * 2]);
+    else if (border.style === 'dotted') stroke(0, 0, w, border.color, [w, w]);
+    else stroke(0, 0, w, border.color);
+  }
+
+  function pageBorder(border) {
+    const { width, height } = doc.page;
+    const i = border.inset;
+    if (border.sides.top) borderLine(border, i, i, width - i, i, 0, 1);
+    if (border.sides.bottom) borderLine(border, i, height - i, width - i, height - i, 0, -1);
+    if (border.sides.left) borderLine(border, i, i, i, height - i, 1, 0);
+    if (border.sides.right) borderLine(border, width - i, i, width - i, height - i, -1, 0);
+  }
+
+  function zone(slots, baseline, values) {
+    const style = { size: 9, color: '#5b625d' };
+    setFont(style);
+    doc.fillColor(style.color);
+    const inner = doc.page.width - margins.left - margins.right;
+    for (const [side, text] of Object.entries(slots)) {
+      if (!text) continue;
+      const shown = fillTokens(text, values);
+      const w = doc.widthOfString(shown);
+      const x = margins.left + (side === 'center' ? (inner - w) / 2 : side === 'right' ? inner - w : 0);
+      doc.text(shown, x, baseline, { lineBreak: false, baseline: 'alphabetic' });
+    }
+  }
+
+  // Headers, footers and borders go on last, once the page count is known.
+  function decoratePages() {
+    const { start, count } = doc.bufferedPageRange();
+    const title = document.title || 'Document';
+    for (let i = 0; i < count; i++) {
+      doc.switchToPage(start + i);
+      const values = { page: i + 1, pages: count, title };
+      if (borderOnPage(layout.pageBorder, i)) pageBorder(layout.pageBorder);
+      zone(zoneTexts(layout, 'header', i), Math.min(45, margins.top - 6), values);
+      zone(zoneTexts(layout, 'footer', i), doc.page.height - Math.min(36, margins.bottom - 12), values);
+    }
+  }
+
   // Pictures are decoded up front, since laying out stays synchronous.
   const pictures = new Map();
   async function collect(node) {
@@ -524,6 +581,7 @@ export function exportDocumentToPdf(document) {
     collect(document.content || {})
       .then(() => {
         blocks(document.content?.content, { x: margins.left, width: contentWidth });
+        decoratePages();
         doc.end();
       })
       .catch(reject);

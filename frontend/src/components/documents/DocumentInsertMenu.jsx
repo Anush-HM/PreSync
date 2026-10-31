@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ImagePlus, List, ListOrdered, Minus, Plus, Quote, Scissors, Shapes, Table2, Type } from 'lucide-react';
+import { FileText, Hash, ImagePlus, List, ListOrdered, Minus, PanelTop, Plus, Quote, Scissors, Shapes, Table2, Type } from 'lucide-react';
 import Popover from '../ui/Popover.jsx';
 import { useToast } from '../ui/Toast.jsx';
 import { CALLOUT_TONES } from './documentExtensions.js';
@@ -16,7 +16,8 @@ const TABS = [
   { id: 'text', label: 'Text', icon: Type },
   { id: 'table', label: 'Table', icon: Table2 },
   { id: 'image', label: 'Image', icon: ImagePlus },
-  { id: 'elements', label: 'Elements', icon: Shapes }
+  { id: 'elements', label: 'Elements', icon: Shapes },
+  { id: 'page', label: 'Page', icon: FileText }
 ];
 
 const setBlock = (chain, type, attrs) => chain.focus().clearNodes()[type === 'paragraph' ? 'setParagraph' : 'setHeading'](attrs);
@@ -31,8 +32,7 @@ const TEXT_ITEMS = [
   { id: 'numbers', label: 'Numbered list', icon: ListOrdered, run: (e) => e.chain().focus().toggleOrderedList().run() },
   { id: 'quote', label: 'Blockquote', icon: Quote, run: (e) => e.chain().focus().toggleBlockquote().run() },
   { id: 'caption', label: 'Caption', style: { fontSize: 12, fontStyle: 'italic' }, run: (e) => setBlock(e.chain(), 'paragraph').updateAttributes('paragraph', { blockStyle: 'caption' }).run() },
-  { id: 'divider', label: 'Horizontal divider line', icon: Minus, run: (e) => e.chain().focus().setHorizontalRule().run() },
-  { id: 'break', label: 'Page break', icon: Scissors, run: (e) => e.chain().focus().insertContent([{ type: 'pageBreak' }, { type: 'paragraph' }]).run() }
+  { id: 'divider', label: 'Horizontal divider line', icon: Minus, run: (e) => e.chain().focus().setHorizontalRule().run() }
 ];
 
 const tableCount = (value, max) => Math.max(1, Math.min(max, parseInt(value, 10) || 1));
@@ -94,7 +94,7 @@ function TablePicker({ onPick }) {
 }
 
 // Insert: text styles, tables, pictures, and shapes, badges and callouts.
-function DocumentInsertMenu({ editor }) {
+function DocumentInsertMenu({ editor, onPageNumbers, onHeaderFooter }) {
   const toast = useToast();
   const fileRef = useRef(null);
   const [tab, setTab] = useState('text');
@@ -177,6 +177,13 @@ function DocumentInsertMenu({ editor }) {
                         </button>
                       );
                     })}
+                  </div>
+                )}
+                {tab === 'page' && (
+                  <div className="insert-list">
+                    <button type="button" className="insert-text" onClick={done(() => editor.chain().focus().setPageBreak().run())}><Scissors aria-hidden="true" />Insert Page Break<kbd className="menu-kbd">Ctrl+Enter</kbd></button>
+                    <button type="button" className="insert-text" onClick={done(onPageNumbers)}><Hash aria-hidden="true" />Page numbers…</button>
+                    <button type="button" className="insert-text" onClick={done(onHeaderFooter)}><PanelTop aria-hidden="true" />Header &amp; footer</button>
                   </div>
                 )}
                 {tab === 'table' && <TablePicker onPick={done(insertTable)} />}

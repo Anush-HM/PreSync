@@ -4,7 +4,8 @@ import ImportedDocument from '../models/ImportedDocument.js';
 import { detectFormat, unsupportedFormatError } from '../services/importService.js';
 import { DocxParseError, parseDocx } from '../services/docxIngestService.js';
 import {
-  blankContent, blocksToContent, cleanContent, cleanPage, countWords, defaultPage, DocumentContentError, importNotes
+  blankContent, blocksToContent, cleanContent, cleanLayout, cleanPage, countWords, defaultLayout, defaultPage, DocumentContentError,
+  importNotes, slotsFromWord
 } from '../services/documentContent.js';
 import { exportDocumentToDocx } from '../services/docxExportService.js';
 import { exportDocumentToPdf } from '../services/documentPdfService.js';
@@ -34,7 +35,7 @@ function summary(doc, userId) {
 }
 
 function full(doc, userId) {
-  return { ...summary(doc, userId), content: doc.content, page: doc.page, importNotes: doc.importNotes || [] };
+  return { ...summary(doc, userId), content: doc.content, page: doc.page, layout: cleanLayout(doc.layout), importNotes: doc.importNotes || [] };
 }
 
 const canEdit = (doc, userId) =>
@@ -65,7 +66,8 @@ export async function createDocument(req, res) {
     title: cleanTitle(req.body?.title, DEFAULT_TITLE),
     ownerId: req.userId,
     content,
-    page: defaultPage(req.body?.pageSize === 'a4' ? 'a4' : 'letter'),
+    page: defaultPage(req.body?.pageSize === 'letter' ? 'letter' : 'a4'),
+    layout: defaultLayout(),
     wordCount: 0
   });
   res.status(201).json(full(doc, req.userId));
@@ -88,8 +90,12 @@ export async function getDocument(req, res) {
 export async function updateDocument(req, res) {
   const doc = await findAccessible(req, res);
   if (!doc) return;
-  const { title, content, page } = req.body || {};
+  const { title, content, page, layout } = req.body || {};
   if (title !== undefined) doc.title = cleanTitle(title, doc.title);
+  if (layout !== undefined) {
+    doc.layout = cleanLayout(layout);
+    doc.markModified('layout');
+  }
   if (page !== undefined) {
     doc.page = cleanPage(page, doc.page);
     doc.markModified('page');
@@ -148,6 +154,7 @@ export async function importDocx(req, res) {
     ownerId: req.userId,
     content,
     page: cleanPage(parsed.meta.page, defaultPage()),
+    layout: { ...defaultLayout(), header: slotsFromWord(parsed.header || []), footer: slotsFromWord(parsed.footer || []) },
     wordCount: countWords(content),
     sourceFileName: file.originalname,
     importNotes: importNotes(parsed.found)
@@ -170,6 +177,7 @@ export async function createFromImport(req, res) {
     ownerId: req.userId,
     content,
     page: cleanPage(source.page, defaultPage()),
+    layout: { ...defaultLayout(), header: slotsFromWord(source.header || []), footer: slotsFromWord(source.footer || []) },
     wordCount: countWords(content),
     sourceFileName: source.fileName
   });

@@ -4,7 +4,9 @@ import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { blocksToContent, cleanContent, countWords, defaultPage, importNotes } from './documentContent.js';
+import {
+  blocksToContent, borderOnPage, cleanContent, countWords, defaultPage, importNotes, parsePageRanges, slotsFromWord, zoneTexts
+} from './documentContent.js';
 import { exportDocumentToDocx } from './docxExportService.js';
 import { exportDocumentToPdf } from './documentPdfService.js';
 import { parseDocx } from './docxIngestService.js';
@@ -137,7 +139,73 @@ describe('blocksToContent', () => {
   });
 });
 
+const SIDES_ALL = { top: true, right: true, bottom: true, left: true };
+const LAYOUT = {
+  header: { left: '{title}', center: '', right: '' },
+  footer: { left: 'Draft', center: '', right: '' },
+  differentFirstPage: false,
+  pageNumbers: { position: 'bottom-center', format: 'pageOf', hideOnFirst: true },
+  pageBorder: { sides: SIDES_ALL, style: 'double', width: 1.5, color: '#2e5e4e', inset: 24, scope: 'all', pages: '' }
+};
+
+describe('page layout rules', () => {
+  it('adds the page number to its zone, and hides it on page 1 when asked', () => {
+    expect(zoneTexts(LAYOUT, 'footer', 1).center).toBe('Page {page} of {pages}');
+    expect(zoneTexts(LAYOUT, 'footer', 0).center).toBe('');
+    expect(zoneTexts(LAYOUT, 'header', 1).center).toBe('');
+  });
+
+  it('clears page 1 for a different first page', () => {
+    const first = zoneTexts({ ...LAYOUT, differentFirstPage: true }, 'header', 0);
+    expect(first).toEqual({ left: '', center: '', right: '' });
+  });
+
+  it('limits a border to its pages', () => {
+    const on = (scope, pages = '') => [0, 1, 2].map((i) => borderOnPage({ scope, pages }, i));
+    expect(on('all')).toEqual([true, true, true]);
+    expect(on('first')).toEqual([true, false, false]);
+    expect(on('exceptFirst')).toEqual([false, true, true]);
+    expect(on('pages', '1, 3')).toEqual([true, false, true]);
+    expect([...parsePageRanges('2-4, x, 7')]).toEqual([2, 3, 4, 7]);
+  });
+
+  it('reads Word headers into slots, with their page fields', () => {
+    const runs = [{ text: 'Left\t' }, { text: 'Mid\t' }, { text: 'Page ' }, { text: '3', field: 'PAGE' }];
+    expect(slotsFromWord([{ runs }])).toEqual({ left: 'Left', center: 'Mid', right: 'Page {page}' });
+    expect(slotsFromWord([{ runs: [{ text: 'Only' }], layout: { align: 'right' } }]).right).toBe('Only');
+  });
+});
+
 describe('exportDocumentToDocx', () => {
+  it('writes native headers, footers, page fields and page borders', async () => {
+    const zip = await JSZip.loadAsync(await exportDocumentToDocx({ ...DOC, layout: LAYOUT }));
+    const xml = await zip.file('word/document.xml').async('string');
+    expect(xml).toMatch(/<w:headerReference w:type="default" r:id="rIdZone1"\/>/);
+    expect(xml).toMatch(/<w:footerReference w:type="first" r:id="rIdZone4"\/>/);
+    expect(xml).toContain('<w:titlePg/>');
+    expect(xml).toContain('<w:pgBorders w:offsetFrom="page" w:display="allPages"><w:top w:val="double" w:sz="12" w:space="24" w:color="2E5E4E"/>');
+    expect(xml.indexOf('<w:pgMar')).toBeLessThan(xml.indexOf('<w:pgBorders'));
+    expect(xml.indexOf('<w:pgBorders')).toBeLessThan(xml.indexOf('<w:titlePg'));
+    const footer = await zip.file('word/footer2.xml').async('string');
+    expect(footer).toContain('<w:fldSimple w:instr=" PAGE ">');
+    expect(footer).toContain('<w:fldSimple w:instr=" NUMPAGES ">');
+    expect(await zip.file('word/footer4.xml').async('string')).not.toContain('fldSimple');
+    expect(await zip.file('[Content_Types].xml').async('string')).toContain('/word/header1.xml');
+    expect(await zip.file('word/_rels/document.xml.rels').async('string')).toContain('Target="footer2.xml"');
+  });
+
+  it('keeps headers and footers through export and import', async () => {
+    const parsed = await parseDocx(await exportDocumentToDocx({ ...DOC, title: 'Plan', layout: { ...LAYOUT, pageNumbers: { position: 'bottom-center', format: 'plain', hideOnFirst: false } } }));
+    expect(slotsFromWord(parsed.header).left).toBe('Plan');
+    expect(slotsFromWord(parsed.footer)).toMatchObject({ left: 'Draft', center: '{page}' });
+  });
+
+  it('adds nothing when the layout is empty', async () => {
+    const zip = await JSZip.loadAsync(await exportDocumentToDocx(DOC));
+    expect(zip.file('word/header1.xml')).toBeNull();
+    expect(await zip.file('word/document.xml').async('string')).not.toContain('pgBorders');
+  });
+
   it('writes a package Word styles, numbering and media can resolve', async () => {
     const zip = await JSZip.loadAsync(await exportDocumentToDocx(DOC));
     const xml = await zip.file('word/document.xml').async('string');
@@ -181,6 +249,18 @@ describe('exportDocumentToPdf', () => {
     expect(pages).toHaveLength(2);
     for (const word of ['Annual', 'Goals', 'Bold', 'badge', 'First', 'Nested', 'Third', 'Quoted', 'Mind']) expect(pages[0]).toContain(word);
     expect(pages[1]).toContain('After');
+  });
+
+  it('puts numbered footers on each page, and draws every border style', async () => {
+    const pages = await pdfPages(await exportDocumentToPdf({ ...DOC, layout: LAYOUT }));
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toContain('Annual plan');
+    expect(pages[0]).not.toMatch(/Page\s+1\s+of\s+2/);
+    expect(pages[1]).toMatch(/Page\s+2\s+of\s+2/);
+    for (const style of ['solid', 'dashed', 'dotted', 'groove']) {
+      const buffer = await exportDocumentToPdf({ ...DOC, layout: { ...LAYOUT, pageBorder: { ...LAYOUT.pageBorder, style } } });
+      expect(await pdfPages(buffer)).toHaveLength(2);
+    }
   });
 
   it('flows long text onto new pages', async () => {

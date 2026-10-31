@@ -59,13 +59,14 @@ describe('POST /api/documents', () => {
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ id: DOC_ID, title: 'Untitled document', isOwner: true });
     expect(res.body.content).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] });
-    expect(res.body.page.width).toBe(816);
+    expect(res.body.page).toMatchObject({ width: 794, height: 1123 });
+    expect(res.body.layout).toMatchObject({ differentFirstPage: false, pageNumbers: null, pageBorder: null });
   });
 
-  it('can start on A4', async () => {
+  it('can start on Letter', async () => {
     Document.create.mockImplementation(async (d) => makeDoc(d));
-    const res = await call('POST', '', { body: { pageSize: 'a4' } });
-    expect(res.body.page).toMatchObject({ width: 794, height: 1123 });
+    const res = await call('POST', '', { body: { pageSize: 'letter' } });
+    expect(res.body.page.width).toBe(816);
   });
 });
 
@@ -108,6 +109,21 @@ describe('PUT /api/documents/:id', () => {
     expect(doc.title).toBe('New name');
     expect(doc.wordCount).toBe(3);
     expect(res.body.title).toBe('New name');
+  });
+
+  it('saves the page layout, dropping anything unusable', async () => {
+    const doc = makeDoc();
+    Document.findById.mockResolvedValue(doc);
+    const layout = {
+      footer: { center: '{title}' },
+      pageNumbers: { position: 'nowhere' },
+      pageBorder: { sides: { top: true }, style: 'wavy', width: 99, color: 'red', inset: 500 }
+    };
+    expect((await call('PUT', `/${DOC_ID}`, { body: { layout } })).status).toBe(200);
+    expect(doc.layout.footer).toEqual({ left: '', center: '{title}', right: '' });
+    expect(doc.layout.pageNumbers).toBeNull();
+    expect(doc.layout.pageBorder).toMatchObject({ style: 'solid', width: 1, color: '#000000', inset: 31 });
+    expect(doc.markModified).toHaveBeenCalledWith('layout');
   });
 
   it('rejects unknown content without saving', async () => {

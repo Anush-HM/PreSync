@@ -6,6 +6,7 @@ import TextAlign from '@tiptap/extension-text-align';
 import { TextStyleKit } from '@tiptap/extension-text-style';
 import { TableKit } from '@tiptap/extension-table';
 import { ImageFigure, ShapeFigure } from './FigureViews.jsx';
+import { Pagination } from './pagination.js';
 
 // The editor's document model. Node and mark names and attributes match
 // what backend/src/services/documentContent.js accepts and what the
@@ -106,7 +107,17 @@ const PageBreak = Node.create({
   },
   renderHTML() {
     return ['div', { 'data-page-break': '', class: 'doc-page-break' }];
-  }
+  },
+  addCommands() {
+    return {
+      setPageBreak: () => ({ chain }) => chain().insertContent([{ type: 'pageBreak' }, { type: 'paragraph' }]).run()
+    };
+  },
+  addKeyboardShortcuts() {
+    return { 'Mod-Enter': () => this.editor.commands.setPageBreak() };
+  },
+  // Runs before the hard break that Mod-Enter otherwise inserts.
+  priority: 1000
 });
 
 const figureAttrs = {
@@ -163,7 +174,8 @@ export const documentExtensions = [
   Badge,
   Callout,
   PageBreak,
-  Shape
+  Shape,
+  Pagination
 ];
 
 const FALLBACK_SIZE = { paragraph: 11, title: 26, subtitle: 14, caption: 9, 1: 20, 2: 16, 3: 13, 4: 12, 5: 11, 6: 11 };
