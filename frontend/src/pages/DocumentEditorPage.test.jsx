@@ -206,10 +206,55 @@ describe('DocumentEditorPage', () => {
     await user.clear(left);
     await user.type(left, 'Cover');
     await user.click(screen.getByLabelText('Different first page'));
-    await user.click(screen.getByRole('button', { name: 'Close Header/Footer' }));
+    await user.click(screen.getByRole('button', { name: 'Close Header & Footer' }));
     expect(screen.queryByLabelText('Header left')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(updateDocument.mock.calls.at(-1)[1].layout).toMatchObject({ header: { left: 'Cover' }, differentFirstPage: true }));
+  });
+
+  it('applies header and footer presets, and removes them', async () => {
+    const user = await open();
+    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    await user.click(await screen.findByRole('button', { name: 'Header styles' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Three-column (academic)' }));
+    expect(screen.getByLabelText('Header centre')).toHaveValue('Department / College Name');
+    await user.click(screen.getByRole('button', { name: 'Footer styles' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Split academic' }));
+    expect(screen.getByLabelText('Footer right')).toHaveValue('Page {page} of {pages}');
+    await user.click(screen.getByRole('button', { name: 'Header styles' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Accent line' }));
+    expect(document.querySelector('.doc-zone.is-header')).toHaveClass('has-rule');
+    await user.click(screen.getByRole('button', { name: 'Remove Header' }));
+    expect(screen.getByLabelText('Header left')).toHaveValue('');
+    expect(document.querySelector('.doc-zone.is-header')).not.toHaveClass('has-rule');
+  });
+
+  it('inserts page numbers and dates at the cursor', async () => {
+    const user = await open();
+    fireEvent.doubleClick(document.querySelector('.doc-sheets'), { clientY: 10 });
+    await user.click(await screen.findByLabelText('Footer right'));
+    await user.click(screen.getByRole('button', { name: 'Insert Page Number' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Page 1 of 5' }));
+    expect(screen.getByLabelText('Footer right')).toHaveValue('Page {page} of {pages}');
+    await user.click(screen.getByLabelText('Footer left'));
+    await user.click(screen.getByRole('button', { name: 'Insert Date' }));
+    await user.click(screen.getByRole('menuitem', { name: 'DD/MM/YYYY' }));
+    expect(screen.getByLabelText('Footer left').value).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+  });
+
+  it('turns text into a styled list, and indents paragraphs and list items', async () => {
+    const user = await open();
+    await user.click(screen.getByRole('button', { name: 'Increase indent' }));
+    expect(lastEditor().getJSON().content[0].attrs.indent).toBe(1);
+    await user.click(screen.getByRole('button', { name: 'Decrease indent' }));
+    expect(lastEditor().getJSON().content[0].attrs.indent).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Numbered list' }));
+    await user.click(screen.getByRole('button', { name: 'Roman numerals' }));
+    expect(lastEditor().getJSON().content[0]).toMatchObject({ type: 'orderedList', attrs: { listStyle: 'lower-roman' } });
+    await user.click(screen.getByRole('button', { name: 'Bulleted list' }));
+    await user.click(screen.getByRole('button', { name: 'Arrow' }));
+    expect(lastEditor().getJSON().content[0]).toMatchObject({ type: 'bulletList', attrs: { listStyle: 'arrow' } });
+    expect(prose().querySelector('ul').style.listStyleType).toContain('➔');
   });
 
   it('closes header editing on a click outside', async () => {
@@ -235,6 +280,16 @@ describe('DocumentEditorPage', () => {
     act(() => { lastEditor().commands.focus('end'); });
     fireEvent.keyDown(prose(), { key: 'Enter', ctrlKey: true });
     expect(lastEditor().getJSON().content.map((n) => n.type)).toContain('pageBreak');
+  });
+
+  it('splits text at a page break without leaving an empty line', async () => {
+    await open();
+    act(() => { lastEditor().chain().focus(6).setPageBreak().run(); });
+    const { content } = lastEditor().getJSON();
+    expect(content.map((n) => n.type)).toEqual(['paragraph', 'pageBreak', 'paragraph']);
+    expect(content[2].content[0].text).toBe(' there');
+    act(() => { lastEditor().chain().focus('start').setPageBreak().run(); });
+    expect(lastEditor().getJSON().content.map((n) => n.type)).toEqual(['pageBreak', 'paragraph', 'pageBreak', 'paragraph']);
   });
 
   it('applies a page border', async () => {

@@ -3,6 +3,8 @@
 // the .docx and PDF exports use.
 
 export const PAGE_GAP = 24;
+export const DEFAULT_ZONE_INCHES = 0.5;
+const EMPTY_SLOTS = { left: '', center: '', right: '' };
 const PT_PX = 96 / 72;
 
 export const BORDER_STYLES = [
@@ -28,11 +30,25 @@ export const NUMBER_POSITIONS = [
   { id: 'bottom-right', label: 'Footer, bottom right' }
 ];
 
-export const TOKENS = [
-  { token: '{title}', label: 'Title' },
-  { token: '{date}', label: 'Date' },
-  { token: '{page}', label: 'Page number' },
-  { token: '{pages}', label: 'Page count' }
+export const PAGE_NUMBER_TOKENS = [
+  { label: '1', text: '{page}' },
+  { label: 'Page 1', text: 'Page {page}' },
+  { label: 'Page 1 of 5', text: 'Page {page} of {pages}' }
+];
+
+const slots = (left, center, right) => ({ left, center, right });
+export const HEADER_PRESETS = [
+  { id: 'basic', label: 'Basic', slots: slots('{title}', '', ''), rule: false },
+  { id: 'threeColumn', label: 'Three-column (academic)', slots: slots('{title}', 'Department / College Name', '{date}'), rule: false },
+  { id: 'accent', label: 'Accent line', slots: slots('{title}', '', ''), rule: true },
+  { id: 'titlePage', label: 'Title & page number', slots: slots('{title}', '', 'Page {page}'), rule: false }
+];
+export const FOOTER_PRESETS = [
+  { id: 'number', label: 'Centered number', slots: slots('', '{page}', ''), rule: false },
+  { id: 'pageNumber', label: 'Centered Page 1', slots: slots('', 'Page {page}', ''), rule: false },
+  { id: 'split', label: 'Split academic', slots: slots('Author name / USN', '', 'Page {page} of {pages}'), rule: false },
+  { id: 'threePart', label: 'Three-part', slots: slots('Confidential', 'Page {page}', '{date}'), rule: false },
+  { id: 'topBorder', label: 'Top border', slots: slots('', '{page}', ''), rule: true }
 ];
 
 export function parsePageRanges(text) {
@@ -55,9 +71,34 @@ export function borderOnPage(border, pageIndex) {
   return true;
 }
 
+// Odd pages use header and footer; even pages their own when asked.
+export function zoneSource(layout, pageIndex) {
+  return layout.differentOddEven && pageIndex % 2 === 1 ? 'even' : 'main';
+}
+
+export function zoneSlots(layout, zone, pageIndex) {
+  const source = zoneSource(layout, pageIndex) === 'even' ? layout.even : layout;
+  return source?.[zone] || EMPTY_SLOTS;
+}
+
+export function zoneRule(layout, zone, pageIndex) {
+  if (pageIndex === 0 && layout.differentFirstPage) return false;
+  return !!layout[`${zone}Rule`];
+}
+
+export const zoneDistance = (layout, zone) => (layout[`${zone}Distance`] ?? DEFAULT_ZONE_INCHES) * 96;
+
+export function dateTexts(now = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return [
+    { label: 'DD/MM/YYYY', text: `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}` },
+    { label: 'Month DD, YYYY', text: now.toLocaleDateString('en-US', { month: 'long', day: '2-digit', year: 'numeric' }) }
+  ];
+}
+
 export function zoneTexts(layout, zone, pageIndex) {
   const first = pageIndex === 0;
-  const out = first && layout.differentFirstPage ? { left: '', center: '', right: '' } : { ...layout[zone] };
+  const out = first && layout.differentFirstPage ? { ...EMPTY_SLOTS } : { ...zoneSlots(layout, zone, pageIndex) };
   const n = layout.pageNumbers;
   if (n && !(first && (n.hideOnFirst || layout.differentFirstPage))) {
     const [at, side] = n.position.split('-');

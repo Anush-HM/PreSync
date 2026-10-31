@@ -9,7 +9,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 // Each run takes the spacers out, measures the text as one column, then
 // puts new spacers in, all within one task so nothing paints in between.
 // Paragraphs break between lines, lists between items, and tables between
-// rows; pictures, shapes and callouts move to the next page whole.
+// rows; images, shapes and callouts move to the next page whole.
 
 const key = new PluginKey('pagination');
 const DELAY_MS = 80;
@@ -175,7 +175,7 @@ export const Pagination = Extension.create({
             timer = setTimeout(() => run(view, storage), DELAY_MS);
           };
           storage.repaginate = schedule;
-          // Pictures and web fonts change heights after they load.
+          // Images and web fonts change heights after they load.
           view.dom.addEventListener('load', schedule, true);
           document.fonts?.ready?.then(schedule);
           document.fonts?.addEventListener?.('loadingdone', schedule);

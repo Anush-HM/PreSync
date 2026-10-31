@@ -10,7 +10,7 @@ import PageSheets from '../components/documents/PageSheets.jsx';
 import { PageBorderDialog, PageNumbersDialog } from '../components/documents/PageDialogs.jsx';
 import { PAGE_GAP } from '../components/documents/pageLayout.js';
 import { documentExtensions, fontsIn } from '../components/documents/documentExtensions.js';
-import { readPicture } from '../components/documents/documentPictures.js';
+import { readImage } from '../components/documents/documentImages.js';
 import { downloadDocument, getDocument, updateDocument } from '../data/documentsApi.js';
 import { loadFont } from '../data/fonts.js';
 import { plural } from '../data/format.js';
@@ -31,17 +31,17 @@ function pageSizeId(page) {
 function DocumentCanvas({ document: doc, title, onChange, onReady, onLayoutChange }) {
   const toast = useToast();
   const insertFiles = useCallback((view, files, pos) => {
-    const pictures = [...files].filter((f) => f.type.startsWith('image/'));
-    pictures.forEach(async (file) => {
+    const images = [...files].filter((f) => f.type.startsWith('image/'));
+    images.forEach(async (file) => {
       try {
-        const attrs = await readPicture(file, view.dom.clientWidth);
+        const attrs = await readImage(file, view.dom.clientWidth);
         const node = view.state.schema.nodes.image.create(attrs);
         view.dispatch(view.state.tr.insert(pos ?? view.state.selection.to, node));
       } catch (err) {
         toast.error(err.message);
       }
     });
-    return pictures.length > 0;
+    return images.length > 0;
   }, [toast]);
 
   const editor = useEditor({

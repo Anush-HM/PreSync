@@ -3,7 +3,7 @@ import { getSchema } from '@tiptap/core';
 import { Node } from '@tiptap/pm/model';
 import { documentExtensions } from './documentExtensions.js';
 import { layoutBlocks } from './pagination.js';
-import { borderOnPage, fillTokens, parsePageRanges, zoneTexts } from './pageLayout.js';
+import { borderOnPage, dateTexts, fillTokens, parsePageRanges, zoneTexts } from './pageLayout.js';
 
 const schema = getSchema(documentExtensions);
 const para = (t) => ({ type: 'paragraph', content: [{ type: 'text', text: t }] });
@@ -26,7 +26,7 @@ describe('layoutBlocks', () => {
     expect(blocks[0].anchor).toBe(0);
   });
 
-  it('keeps callouts and pictures whole', () => {
+  it('keeps callouts and images whole', () => {
     const blocks = layoutBlocks(doc({ type: 'callout', attrs: { tone: 'info' }, content: [para('a'), para('b')] }, para('c')));
     expect(blocks.map((b) => b.node.type.name)).toEqual(['callout', 'paragraph']);
   });
@@ -39,6 +39,18 @@ describe('pageLayout', () => {
     const { right } = zoneTexts(layout, 'header', 2);
     expect(right).toBe('R {page}');
     expect(fillTokens(right, { page: 3, pages: 9, title: 'T' })).toBe('R 3');
+  });
+
+  it('gives even pages their own texts when asked', () => {
+    const both = { ...layout, pageNumbers: null, differentOddEven: true, even: { header: { left: 'Even', center: '', right: '' }, footer: layout.footer } };
+    expect(zoneTexts(both, 'header', 1).left).toBe('Even');
+    expect(zoneTexts(both, 'header', 2).right).toBe('R');
+  });
+
+  it('offers both date formats', () => {
+    const [short, long] = dateTexts(new Date(2026, 9, 5));
+    expect(short.text).toBe('05/10/2026');
+    expect(long.text).toBe('October 05, 2026');
   });
 
   it('reads page ranges', () => {

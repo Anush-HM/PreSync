@@ -1,6 +1,6 @@
 import { useEditorState } from '@tiptap/react';
 import {
-  AlignCenter, AlignJustify, AlignLeft, AlignRight, Baseline, Bold, Check, Columns2, Combine, Frame, Italic, Minus, Plus,
+  AlignCenter, AlignJustify, AlignLeft, AlignRight, Baseline, Bold, Check, Columns2, Combine, ChevronDown, Frame, IndentDecrease, IndentIncrease, Italic, List, ListOrdered, Minus, Plus,
   Redo2, Rows2, Split, Strikethrough, Trash2, Underline, Undo2, Rows3
 } from 'lucide-react';
 import FontPicker from '../editor/FontPicker.jsx';
@@ -9,7 +9,7 @@ import { HIGHLIGHTS, keepCanvasFocus } from '../editor/palette.js';
 import Popover from '../ui/Popover.jsx';
 import { DEFAULT_FONT_FAMILY } from '../../data/slideFormat.js';
 import DocumentInsertMenu from './DocumentInsertMenu.jsx';
-import { blockFontSize } from './documentExtensions.js';
+import { blockFontSize, BULLET_STYLES, NUMBER_STYLES } from './documentExtensions.js';
 import '../editor/toolbar.css';
 
 const LINE_SPACINGS = [1, 1.15, 1.5, 2];
@@ -29,6 +29,28 @@ function Toggle({ label, icon: Icon, pressed, disabled, onClick }) {
     <button type="button" className="icon-btn" aria-label={label} data-tip={label} aria-pressed={pressed === undefined ? undefined : !!pressed} disabled={disabled} onClick={onClick}>
       <Icon />
     </button>
+  );
+}
+
+function ListMenu({ label, icon: Icon, styles, active, current, onPick, onRemove }) {
+  return (
+    <Popover
+      label={label}
+      tip={label}
+      triggerClassName={`btn btn-ghost btn-sm doc-list-trigger${active ? ' is-active' : ''}`}
+      trigger={<><Icon aria-hidden="true" /><ChevronDown aria-hidden="true" /></>}
+    >
+      {(close) => (
+        <div className="tb-list" role="group" aria-label={label} onMouseDown={keepCanvasFocus}>
+          {styles.map((s) => (
+            <button key={s.id} type="button" className="menu-item" aria-label={s.label} aria-pressed={active && current === s.id} onClick={() => { onPick(s.id); close(); }}>
+              <span className="doc-list-sample">{s.sample}</span>{s.label}
+            </button>
+          ))}
+          {active && <button type="button" className="menu-item" onClick={() => { onRemove(); close(); }}>Remove list</button>}
+        </div>
+      )}
+    </Popover>
   );
 }
 
@@ -103,6 +125,10 @@ function DocumentToolbar({ editor, onPageNumbers, onHeaderFooter, onPageBorder, 
         color: style.color || null,
         align: block.textAlign || 'left',
         line: block.lineHeight || 1.15,
+        bullets: e.isActive('bulletList'),
+        numbers: e.isActive('orderedList'),
+        bulletStyle: e.getAttributes('bulletList').listStyle || 'disc',
+        numberStyle: e.getAttributes('orderedList').listStyle || 'decimal',
         inTable: e.isActive('table'),
         canUndo: e.can().undo(),
         canRedo: e.can().redo()
@@ -147,6 +173,11 @@ function DocumentToolbar({ editor, onPageNumbers, onHeaderFooter, onPageBorder, 
         {ALIGNS.map((a) => (
           <Toggle key={a.id} label={a.label} icon={a.icon} pressed={state.align === a.id} onClick={() => chain().setTextAlign(a.id).run()} />
         ))}
+        <Sep />
+        <ListMenu label="Bulleted list" icon={List} styles={BULLET_STYLES} active={state.bullets} current={state.bulletStyle} onPick={(id) => chain().setListStyle('bulletList', id).run()} onRemove={() => chain().toggleBulletList().run()} />
+        <ListMenu label="Numbered list" icon={ListOrdered} styles={NUMBER_STYLES} active={state.numbers} current={state.numberStyle} onPick={(id) => chain().setListStyle('orderedList', id).run()} onRemove={() => chain().toggleOrderedList().run()} />
+        <Toggle label="Decrease indent" icon={IndentDecrease} onClick={() => chain().shiftIndent(-1).run()} />
+        <Toggle label="Increase indent" icon={IndentIncrease} onClick={() => chain().shiftIndent(1).run()} />
         <Sep />
         <ColorPopover
           label="Text colour"

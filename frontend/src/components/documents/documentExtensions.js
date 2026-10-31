@@ -19,6 +19,23 @@ export const CALLOUT_TONES = [
   { id: 'danger', label: 'Important' }
 ];
 
+const INDENT_PX = 48; // half an inch
+const MAX_INDENT = 8;
+
+export const BULLET_STYLES = [
+  { id: 'disc', label: 'Standard bullet', sample: '•' },
+  { id: 'circle', label: 'Hollow circle', sample: '○' },
+  { id: 'square', label: 'Square', sample: '■' },
+  { id: 'arrow', label: 'Arrow', sample: '➔' }
+];
+export const NUMBER_STYLES = [
+  { id: 'decimal', label: 'Numeric', sample: '1. 2. 3.' },
+  { id: 'lower-alpha', label: 'Lowercase letters', sample: 'a. b. c.' },
+  { id: 'upper-alpha', label: 'Uppercase letters', sample: 'A. B. C.' },
+  { id: 'lower-roman', label: 'Roman numerals', sample: 'i. ii. iii.' }
+];
+const LIST_CSS = { disc: 'disc', circle: 'circle', square: 'square', arrow: '"➔  "', decimal: 'decimal', 'lower-alpha': 'lower-alpha', 'upper-alpha': 'upper-alpha', 'lower-roman': 'lower-roman' };
+
 // Paragraph looks: line spacing, and the named styles that are not headings.
 const BlockFormat = Extension.create({
   name: 'blockFormat',
@@ -31,6 +48,21 @@ const BlockFormat = Extension.create({
             default: null,
             parseHTML: (el) => Number(el.style.lineHeight) || null,
             renderHTML: (attrs) => (attrs.lineHeight ? { style: `line-height: ${attrs.lineHeight}` } : {})
+          },
+          indent: {
+            default: null,
+            parseHTML: (el) => Number(el.getAttribute('data-indent')) || null,
+            renderHTML: (attrs) => (attrs.indent ? { 'data-indent': attrs.indent, style: `margin-left: ${attrs.indent * INDENT_PX}px` } : {})
+          }
+        }
+      },
+      {
+        types: ['bulletList', 'orderedList'],
+        attributes: {
+          listStyle: {
+            default: null,
+            parseHTML: (el) => el.getAttribute('data-list-style'),
+            renderHTML: (attrs) => (attrs.listStyle ? { 'data-list-style': attrs.listStyle, style: `list-style-type: ${LIST_CSS[attrs.listStyle]}` } : {})
           }
         }
       },
@@ -62,9 +94,31 @@ const BlockFormat = Extension.create({
         const a = commands.updateAttributes('paragraph', { lineHeight });
         const b = commands.updateAttributes('heading', { lineHeight });
         return a || b;
+      },
+      // Turns the selection into this kind of list, in this marker style.
+      setListStyle: (type, listStyle) => ({ editor, chain }) => {
+        const steps = chain();
+        if (!editor.isActive(type)) steps[type === 'bulletList' ? 'toggleBulletList' : 'toggleOrderedList']();
+        return steps.updateAttributes(type, { listStyle }).run();
+      },
+      shiftIndent: (delta) => ({ editor, commands }) => {
+        if (editor.isActive('listItem')) return delta > 0 ? commands.sinkListItem('listItem') : commands.liftListItem('listItem');
+        const type = editor.isActive('heading') ? 'heading' : 'paragraph';
+        const indent = Math.max(0, Math.min(MAX_INDENT, (editor.getAttributes(type).indent || 0) + delta));
+        return commands.updateAttributes(type, { indent: indent || null });
       }
     };
-  }
+  },
+  addKeyboardShortcuts() {
+    // In a table, Tab moves between cells instead.
+    const shift = (delta) => () => {
+      if (this.editor.isActive('table')) return false;
+      this.editor.commands.shiftIndent(delta);
+      return true;
+    };
+    return { Tab: shift(1), 'Shift-Tab': shift(-1) };
+  },
+  priority: 200
 });
 
 const Badge = Mark.create({
@@ -110,7 +164,16 @@ const PageBreak = Node.create({
   },
   addCommands() {
     return {
-      setPageBreak: () => ({ chain }) => chain().insertContent([{ type: 'pageBreak' }, { type: 'paragraph' }]).run()
+      // Text after the cursor starts the next page, with no empty line above
+      // it. Inside a list or table the break goes after the whole block.
+      setPageBreak: () => ({ state, chain }) => {
+        const { $from } = state.selection;
+        const pageBreak = this.type.create();
+        if ($from.depth > 1) return chain().command(({ tr }) => { tr.insert($from.after(1), pageBreak); return true; }).run();
+        const steps = chain();
+        if ($from.parentOffset > 0) steps.splitBlock();
+        return steps.command(({ tr }) => { tr.insert(tr.selection.$from.before(), pageBreak); return true; }).run();
+      }
     };
   },
   addKeyboardShortcuts() {
@@ -149,7 +212,7 @@ const Shape = Node.create({
   }
 });
 
-const Picture = Image.extend({
+const DocumentImage = Image.extend({
   draggable: true,
   addAttributes() {
     return { ...this.parent?.(), ...figureAttrs };
@@ -169,7 +232,7 @@ export const documentExtensions = [
   TextStyleKit.configure({ lineHeight: false }),
   TextAlign.configure({ types: ['heading', 'paragraph'] }),
   TableKit.configure({ table: { resizable: true } }),
-  Picture.configure({ allowBase64: true }),
+  DocumentImage.configure({ allowBase64: true }),
   BlockFormat,
   Badge,
   Callout,

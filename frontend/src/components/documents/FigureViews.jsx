@@ -11,7 +11,7 @@ const ALIGNS = [
 ];
 const SHAPE_COLORS = PALETTE.filter((_, i) => i % 7 === 1 || i % 7 === 2);
 
-// Picture or shape in the document: drag the corner to resize, keeping
+// Image or shape in the document: drag the corner to resize, keeping
 // proportions; the bar above sets alignment.
 function Figure({ node, updateAttributes, selected, label, naturalRatio, tools, children }) {
   const { width, height, align } = node.attrs;
@@ -63,7 +63,7 @@ function Figure({ node, updateAttributes, selected, label, naturalRatio, tools, 
 export function ImageFigure(props) {
   const { src, alt } = props.node.attrs;
   return (
-    <Figure {...props} label="Picture">
+    <Figure {...props} label="Image">
       <img src={src} alt={alt || ''} draggable={false} />
     </Figure>
   );

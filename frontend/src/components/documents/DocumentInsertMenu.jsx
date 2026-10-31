@@ -5,7 +5,7 @@ import { useToast } from '../ui/Toast.jsx';
 import { CALLOUT_TONES } from './documentExtensions.js';
 import { DOCUMENT_SHAPES } from './documentShapes.js';
 import ShapeGlyph from './ShapeGlyph.jsx';
-import { readPicture } from './documentPictures.js';
+import { readImage } from './documentImages.js';
 
 const MAX_ROWS = 50;
 const MAX_COLS = 12;
@@ -93,7 +93,7 @@ function TablePicker({ onPick }) {
   );
 }
 
-// Insert: text styles, tables, pictures, and shapes, badges and callouts.
+// Insert: text styles, tables, images, and shapes, badges and callouts.
 function DocumentInsertMenu({ editor, onPageNumbers, onHeaderFooter }) {
   const toast = useToast();
   const fileRef = useRef(null);
@@ -103,9 +103,9 @@ function DocumentInsertMenu({ editor, onPageNumbers, onHeaderFooter }) {
     editor.chain().focus().insertTable({ rows, cols, withHeaderRow: false }).run();
   }
 
-  async function insertPicture(file) {
+  async function insertImage(file) {
     try {
-      const attrs = await readPicture(file, editor.view.dom.clientWidth);
+      const attrs = await readImage(file, editor.view.dom.clientWidth);
       editor.chain().focus().setImage(attrs).run();
     } catch (err) {
       toast.error(err.message);
@@ -134,11 +134,11 @@ function DocumentInsertMenu({ editor, onPageNumbers, onHeaderFooter }) {
         type="file"
         accept="image/png,image/jpeg,image/gif"
         hidden
-        aria-label="Upload picture"
+        aria-label="Upload image"
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = '';
-          if (file) insertPicture(file);
+          if (file) insertImage(file);
         }}
       />
       <Popover
@@ -189,8 +189,8 @@ function DocumentInsertMenu({ editor, onPageNumbers, onHeaderFooter }) {
                 {tab === 'table' && <TablePicker onPick={done(insertTable)} />}
                 {tab === 'image' && (
                   <div className="insert-list">
-                    <button type="button" className="btn btn-secondary" onClick={done(() => fileRef.current?.click())}><ImagePlus aria-hidden="true" />Upload picture…</button>
-                    <p className="field-hint">PNG, JPEG or GIF up to 1.5 MB. Select a picture to resize or align it. You can also paste or drop one onto the page.</p>
+                    <button type="button" className="btn btn-secondary" onClick={done(() => fileRef.current?.click())}><ImagePlus aria-hidden="true" />Upload image…</button>
+                    <p className="field-hint">PNG, JPEG or GIF up to 1.5 MB. Select an image to resize or align it. You can also paste or drop one onto the page.</p>
                   </div>
                 )}
                 {tab === 'elements' && (
