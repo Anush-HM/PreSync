@@ -249,6 +249,34 @@ function cellText(tc, found) {
     .trim();
 }
 
+const BORDER_STYLES = { single: 'solid', thick: 'solid', double: 'double', dashed: 'dashed', dashSmallGap: 'dashed', dotted: 'dotted', threeDEngrave: 'groove', threeDEmboss: 'groove' };
+const BORDER_SCOPES = { allPages: 'all', firstPage: 'first', notFirstPage: 'exceptFirst' };
+const BORDER_WIDTHS = [0.5, 1, 1.5, 2.25, 3, 4.5, 6];
+const SIDE_NAMES = ['top', 'right', 'bottom', 'left'];
+
+// The section's page border, in the shape of the document layout. Word
+// measures `w:space` from the page or from the text; the layout always
+// measures from the page.
+function readPageBorder(node, margins) {
+  if (!node) return null;
+  const present = SIDE_NAMES.map((side) => [side, child(node, `w:${side}`)]).filter(([, n]) => n && !['nil', 'none'].includes(attr(n, 'w:val')));
+  if (!present.length) return null;
+  const [firstSide, first] = present[0];
+  const points = Number(attr(first, 'w:sz') || 8) / 8;
+  const width = BORDER_WIDTHS.reduce((best, w) => (Math.abs(w - points) < Math.abs(best - points) ? w : best));
+  const space = Number(attr(first, 'w:space') || 0);
+  const inset = attr(node, 'w:offsetFrom') === 'page' ? space : margins[firstSide] * 0.75 - space;
+  const color = attr(first, 'w:color');
+  return {
+    sides: Object.fromEntries(SIDE_NAMES.map((side) => [side, present.some(([name]) => name === side)])),
+    style: BORDER_STYLES[attr(first, 'w:val')] || 'solid',
+    width,
+    color: /^[0-9a-f]{6}$/i.test(color || '') ? `#${color.toLowerCase()}` : '#000000',
+    inset: Math.max(0, Math.min(31, Math.round(inset))),
+    scope: BORDER_SCOPES[attr(node, 'w:display')] || 'all'
+  };
+}
+
 // --- main entry -------------------------------------------------------------
 
 // Returns { blocks, images, meta, found } where
@@ -392,6 +420,9 @@ export async function parseDocx(buffer) {
     const para = paragraphContext(p, ctx);
     const layout = paragraphLayout(para);
     const { runs, pageBreak } = readRuns(p, para, ctx);
+    // Tabbed columns only line up from the left, so centring that merely
+    // comes from a style is dropped; a paragraph's own w:jc is kept.
+    if (layout.align && runs.some((r) => r.text.includes('\t')) && !find(p, 'w:pPr', 'w:jc')) delete layout.align;
     const formatted = { runs, ...(Object.keys(layout).length ? { layout } : {}) };
     // Quote and caption paragraphs keep their style for the document editor.
     if (/^(quote|intensequote|caption)$/i.test(para.styleId || '')) formatted.styleId = para.styleId;
@@ -498,5 +529,7 @@ export async function parseDocx(buffer) {
   const footer = await headerFooter('w:footerReference');
   if (header || footer) found.headersFooters = true;
 
-  return { blocks, images, meta, found, header, footer };
+  const pageBorder = readPageBorder(child(sectPr, 'w:pgBorders') || findDeep(body, 'w:pgBorders'), meta.page.margins);
+
+  return { blocks, images, meta, found, header, footer, pageBorder };
 }

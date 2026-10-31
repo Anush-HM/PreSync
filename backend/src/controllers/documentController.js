@@ -4,7 +4,7 @@ import ImportedDocument from '../models/ImportedDocument.js';
 import { detectFormat, unsupportedFormatError } from '../services/importService.js';
 import { DocxParseError, parseDocx } from '../services/docxIngestService.js';
 import {
-  blankContent, blocksToContent, cleanContent, cleanLayout, cleanPage, countWords, defaultLayout, defaultPage, DocumentContentError,
+  blankContent, blocksToContent, cleanBorder, cleanContent, cleanLayout, cleanPage, countWords, defaultLayout, defaultPage, DocumentContentError,
   importNotes, slotsFromWord
 } from '../services/documentContent.js';
 import { exportDocumentToDocx } from '../services/docxExportService.js';
@@ -154,7 +154,7 @@ export async function importDocx(req, res) {
     ownerId: req.userId,
     content,
     page: cleanPage(parsed.meta.page, defaultPage()),
-    layout: { ...defaultLayout(), header: slotsFromWord(parsed.header || []), footer: slotsFromWord(parsed.footer || []) },
+    layout: { ...defaultLayout(), header: slotsFromWord(parsed.header || []), footer: slotsFromWord(parsed.footer || []), pageBorder: cleanBorder(parsed.pageBorder) },
     wordCount: countWords(content),
     sourceFileName: file.originalname,
     importNotes: importNotes(parsed.found)
@@ -177,7 +177,7 @@ export async function createFromImport(req, res) {
     ownerId: req.userId,
     content,
     page: cleanPage(source.page, defaultPage()),
-    layout: { ...defaultLayout(), header: slotsFromWord(source.header || []), footer: slotsFromWord(source.footer || []) },
+    layout: { ...defaultLayout(), header: slotsFromWord(source.header || []), footer: slotsFromWord(source.footer || []), pageBorder: cleanBorder(source.pageBorder) },
     wordCount: countWords(content),
     sourceFileName: source.fileName
   });

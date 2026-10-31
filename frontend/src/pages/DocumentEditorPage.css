@@ -51,7 +51,12 @@
 .doc-zone-row + .doc-zone-row { border-top: 1px solid var(--border-subtle); }
 .doc-zone-group { display: flex; align-items: center; gap: 4px; flex: none; min-height: 40px; }
 @media (max-width: 1240px) {
+  .doc-zone-bar { padding: 2px 8px; }
+  .doc-zone-row { gap: 2px 4px; }
   .doc-zone-row .tb-sep { display: none; }
+  .doc-zone-group { gap: 0; }
+  .doc-zone-group .btn, .doc-zone-close { padding: 0 7px; font-size: 12px; }
+  .doc-zone-group .doc-check, .doc-zone-distance { margin-right: 6px; font-size: 12px; }
 }
 .doc-zone-group .btn { height: 32px; }
 .doc-zone-group .doc-check { margin-right: 8px; }
@@ -83,7 +88,8 @@
 .doc-border-preview { position: relative; align-self: center; width: 126px; height: 178px; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
 
 /* Keep sizes in step with STYLES in backend documentPdfService.js and DOC_STYLES in docxExportService.js. */
-.doc-prose { outline: none; font-size: 11pt; line-height: 1.15; overflow-wrap: anywhere; }
+/* Word's default tab stops: every half inch, from the paragraph's start. */
+.doc-prose { outline: none; font-size: 11pt; line-height: 1.15; overflow-wrap: anywhere; white-space: pre-wrap; tab-size: 48px; }
 .doc-prose p { margin: 0 0 6pt; }
 .doc-prose p[data-block-style='title'] { margin-bottom: 12pt; font-size: 26pt; font-weight: 700; }
 .doc-prose p[data-block-style='subtitle'] { margin-bottom: 8pt; font-size: 14pt; color: #5b625d; }

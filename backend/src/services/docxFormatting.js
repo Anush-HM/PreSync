@@ -159,6 +159,11 @@ export function paragraphLayout(para) {
   if (right) out.indentRight = twipsToPx(right);
   if (hanging) out.indentFirst = -twipsToPx(hanging);
   else if (firstLine) out.indentFirst = twipsToPx(firstLine);
+  const tabs = pPrs.flatMap((n) => children(child(n, 'w:tabs'), 'w:tab'))
+    .filter((t) => attr(t, 'w:val') !== 'clear')
+    .map((t) => ({ pos: twipsToPx(attr(t, 'w:pos')), type: attr(t, 'w:val') || 'left' }))
+    .sort((a, b) => a.pos - b.pos);
+  if (tabs.length) out.tabs = tabs;
   if (on(firstOf(pPrs, 'w:pageBreakBefore'))) out.pageBreakBefore = true;
   const shd = attr(firstOf(pPrs, 'w:shd'), 'w:fill');
   if (shd && /^[0-9a-f]{6}$/i.test(shd)) out.background = `#${shd.toLowerCase()}`;

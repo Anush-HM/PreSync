@@ -5,12 +5,12 @@ import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
-  blocksToContent, borderOnPage, cleanContent, countWords, defaultPage, importNotes, parsePageRanges, slotsFromWord, zoneTexts
+  blocksToContent, borderOnPage, cleanBorder, cleanContent, countWords, expandTabs, defaultPage, importNotes, parsePageRanges, slotsFromWord, zoneTexts
 } from './documentContent.js';
 import { exportDocumentToDocx } from './docxExportService.js';
 import { exportDocumentToPdf } from './documentPdfService.js';
 import { parseDocx } from './docxIngestService.js';
-import { PNG_BASE64 } from '../test/buildDocx.js';
+import { buildDocx, p, PNG_BASE64 } from '../test/buildDocx.js';
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), '../test/fixtures/fidelity-report.docx');
 const PNG = `data:image/png;base64,${PNG_BASE64}`;
@@ -173,6 +173,64 @@ describe('page layout rules', () => {
     const runs = [{ text: 'Left\t' }, { text: 'Mid\t' }, { text: 'Page ' }, { text: '3', field: 'PAGE' }];
     expect(slotsFromWord([{ runs }])).toEqual({ left: 'Left', center: 'Mid', right: 'Page {page}' });
     expect(slotsFromWord([{ runs: [{ text: 'Only' }], layout: { align: 'right' } }]).right).toBe('Only');
+  });
+});
+
+describe('tabs and page borders from Word', () => {
+  const tab = '<w:r><w:tab/></w:r>';
+  const line = (left, right, pPr = '') => `<w:p><w:pPr>${pPr}</w:pPr><w:r><w:t>${left}</w:t></w:r>${tab}<w:r><w:t>${right}</w:t></w:r></w:p>`;
+
+  it('keeps tabs and repeated spaces in the text', async () => {
+    const parsed = await parseDocx(await buildDocx(`${line('Student Name:   Asha', 'USN: 1')}`));
+    const text = blocksToContent(parsed.blocks).content[0].content.map((n) => n.text).join('');
+    expect(text).toBe('Student Name:   Asha\tUSN: 1');
+  });
+
+  it('drops centring from a style on tabbed lines, but not a line\'s own', async () => {
+    const styles = '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Mid"><w:name w:val="Mid"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style></w:styles>';
+    const body = line('a', 'b', '<w:pStyle w:val="Mid"/>') + line('c', 'd', '<w:jc w:val="center"/>');
+    const parsed = await parseDocx(await buildDocx(body, { extraFiles: { 'word/styles.xml': styles } }));
+    expect(parsed.blocks[0].layout?.align).toBeUndefined();
+    expect(parsed.blocks[1].layout.align).toBe('center');
+  });
+
+  it('lines columns up on a custom tab stop, whatever the left text', async () => {
+    const stop = '<w:tabs><w:tab w:val="left" w:pos="5040"/></w:tabs>';
+    const parsed = await parseDocx(await buildDocx(line('Name: Asha', 'USN', stop) + line('Department of Computer', 'Sem', stop)));
+    expect(parsed.blocks[0].layout.tabs).toEqual([{ pos: 336, type: 'left' }]);
+    const reach = (block) => {
+      const text = blocksToContent([block]).content[0].content.map((n) => n.text).join('');
+      const [left, tabs] = text.split(/(\t+)/);
+      return Math.floor((left.length * 8) / 48) + tabs.length;
+    };
+    expect(reach(parsed.blocks[0])).toBe(reach(parsed.blocks[1]));
+  });
+
+  it('leaves text alone without custom stops', () => {
+    const runs = [{ text: 'a' }, { text: '\t' }, { text: 'b' }];
+    expect(expandTabs(runs, undefined)).toBe(runs);
+  });
+
+  it('reads a page border, measured from the page', async () => {
+    const sect = '<w:p><w:pPr><w:sectPr><w:pgBorders w:offsetFrom="page" w:display="notFirstPage"><w:top w:val="double" w:sz="12" w:space="24" w:color="2E5E4E"/><w:left w:val="double" w:sz="12" w:space="24" w:color="2E5E4E"/><w:bottom w:val="double" w:sz="12" w:space="24" w:color="2E5E4E"/><w:right w:val="double" w:sz="12" w:space="24" w:color="2E5E4E"/></w:pgBorders></w:sectPr></w:pPr></w:p>';
+    const { pageBorder } = await parseDocx(await buildDocx(p('x') + sect));
+    expect(pageBorder).toEqual({ sides: { top: true, right: true, bottom: true, left: true }, style: 'double', width: 1.5, color: '#2e5e4e', inset: 24, scope: 'exceptFirst' });
+    expect(cleanBorder(pageBorder)).toMatchObject({ style: 'double', width: 1.5, scope: 'exceptFirst' });
+  });
+
+  it('converts a border measured from the text, and keeps only present sides', async () => {
+    const sect = '<w:p><w:pPr><w:sectPr><w:pgBorders><w:top w:val="thick" w:sz="36" w:space="10" w:color="auto"/><w:bottom w:val="nil"/></w:pgBorders></w:sectPr></w:pPr></w:p>';
+    const { pageBorder } = await parseDocx(await buildDocx(sect));
+    expect(pageBorder).toMatchObject({ sides: { top: true, bottom: false }, style: 'solid', width: 4.5, color: '#000000', inset: 31, scope: 'all' });
+  });
+
+  it('has no border when Word has none', async () => {
+    expect((await parseDocx(await buildDocx(p('x')))).pageBorder).toBeNull();
+  });
+
+  it('round-trips a border through export and import', async () => {
+    const { pageBorder } = await parseDocx(await exportDocumentToDocx({ ...DOC, layout: LAYOUT }));
+    expect(pageBorder).toMatchObject({ style: 'double', width: 1.5, color: '#2e5e4e', inset: 24, scope: 'all' });
   });
 });
 

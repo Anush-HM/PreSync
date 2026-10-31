@@ -1,3 +1,4 @@
+import PDFDocument from 'pdfkit';
 import { textLines } from './deckExportService.js';
 
 // The stored form of a Word document: the editor's JSON tree.
@@ -167,7 +168,7 @@ function cleanSlots(input) {
   return Object.fromEntries(SIDES.map((s) => [s, typeof input?.[s] === 'string' ? input[s].slice(0, MAX_SLOT) : '']));
 }
 
-function cleanBorder(input) {
+export function cleanBorder(input) {
   if (!input?.sides) return null;
   const sides = Object.fromEntries(['top', 'right', 'bottom', 'left'].map((s) => [s, !!input.sides[s]]));
   if (!Object.values(sides).some(Boolean)) return null;
@@ -301,6 +302,42 @@ function inlineNodes(runs) {
   return out;
 }
 
+// The editor has one tab grid, every half inch. Word's custom tab stops
+// are met by choosing how many grid tabs reach them, from an estimate of
+// the text's width, so columns land on the same stop line after line.
+const GRID_PX = 48;
+const FONT_SCALE = [[/calibri|carlito/i, 0.9], [/times|tinos|cambria|caladea/i, 0.92]];
+let metrics = null;
+
+// Helvetica's metrics, scaled towards the run's font.
+function textWidth(text, style = {}) {
+  metrics ||= new PDFDocument({ autoFirstPage: false }).font('Helvetica').fontSize(1);
+  const scale = FONT_SCALE.find(([re]) => re.test(style.fontFamily || ''))?.[1] || 1;
+  return metrics.widthOfString(text) * (style.fontSize || 14.7) * scale;
+}
+
+export function expandTabs(runs, stops) {
+  if (!stops?.length) return runs;
+  let x = 0;
+  return runs.map((run, index) => {
+    if (run.text !== '\t') {
+      x += textWidth(run.text, run.style);
+      return run;
+    }
+    const stop = stops.find((t) => t.pos > x + 1);
+    if (!stop) {
+      x = (Math.floor(x / GRID_PX) + 1) * GRID_PX;
+      return run;
+    }
+    let after = 0;
+    for (let i = index + 1; i < runs.length && runs[i].text !== '\t'; i++) after += textWidth(runs[i].text, runs[i].style);
+    const start = stop.type === 'right' ? stop.pos - after : stop.type === 'center' ? stop.pos - after / 2 : stop.pos;
+    const count = Math.max(1, Math.round(start / GRID_PX) - Math.floor(x / GRID_PX));
+    x = (Math.floor(x / GRID_PX) + count) * GRID_PX;
+    return { ...run, text: '\t'.repeat(count) };
+  });
+}
+
 function blockAttrs(layout = {}, extra = {}) {
   const attrs = { ...extra };
   if (layout.align) attrs.textAlign = layout.align;
@@ -310,7 +347,7 @@ function blockAttrs(layout = {}, extra = {}) {
 
 function textBlock(type, block, extra) {
   const attrs = blockAttrs(block.layout, extra);
-  const content = block.runs?.length ? inlineNodes(block.runs) : block.text ? [{ type: 'text', text: block.text }] : [];
+  const content = block.runs?.length ? inlineNodes(expandTabs(block.runs, block.layout?.tabs)) : block.text ? [{ type: 'text', text: block.text }] : [];
   return { type, ...(Object.keys(attrs).length ? { attrs } : {}), ...(content.length ? { content } : {}) };
 }
 
