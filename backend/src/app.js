@@ -7,6 +7,7 @@ import roomRoutes from './routes/roomRoutes.js';
 import importRoutes from './routes/importRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import templateRoutes from './routes/templateRoutes.js';
+import documentRoutes from './routes/documentRoutes.js';
 
 // Builds the Express app without opening a port or a DB connection, so
 // server.js can wire it to the HTTP/Socket.io/Yjs servers and tests can
@@ -19,6 +20,8 @@ export function createApp({ corsOptions } = {}) {
   app.use('/api/imports', express.json({ limit: '2mb' }));
   // Copilot requests carry trimmed editor context (see ai/context.js).
   app.use('/api/ai', express.json({ limit: '512kb' }));
+  // Documents are saved whole, with their pictures inline.
+  app.use('/api/documents', express.json({ limit: '20mb' }));
   app.use(express.json());
 
   app.get('/health', (req, res) => res.json({ ok: true }));
@@ -28,9 +31,13 @@ export function createApp({ corsOptions } = {}) {
   app.use('/api/imports', importRoutes);
   app.use('/api/ai', aiRoutes);
   app.use('/api/templates', templateRoutes);
+  app.use('/api/documents', documentRoutes);
 
   // Centralized error handler — controllers can throw/reject freely.
   app.use((err, req, res, next) => {
+    if (err?.type === 'entity.too.large') {
+      return res.status(413).json({ error: 'That is too large to save' });
+    }
     // Content that doesn't fit the schema is the client's mistake.
     if (err?.name === 'ValidationError' || err?.name === 'CastError') {
       return res.status(400).json({ error: 'Some of that content is not valid' });

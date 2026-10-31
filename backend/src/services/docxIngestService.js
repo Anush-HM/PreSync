@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import path from 'path';
 import { attr, child, children, find, num, readRels, readXml } from './ooxml.js';
-import { paragraphContext, paragraphLayout, readRuns, readTable, readWordStyles, twipsToPx } from './docxFormatting.js';
+import { paragraphContext, paragraphLayout, readRuns, readTable, readWordStyles, runStyle, twipsToPx } from './docxFormatting.js';
 import { processImage } from './imageProcessing.js';
 import { readChart } from './pptxCharts.js';
 
@@ -249,6 +249,46 @@ function cellText(tc, found) {
     .trim();
 }
 
+const COLUMN_LINE = /\t|\S[ \u00a0]{2,}\S/;
+
+function trimLeadingSpaces(runs) {
+  while (runs.length) {
+    runs[0].text = runs[0].text.replace(/^[ \u00a0]+/, '');
+    if (runs[0].text) break;
+    runs.shift();
+  }
+}
+
+const isBlank = (block) => block?.type === 'paragraph' && !block.text;
+
+const BORDER_STYLES = { single: 'solid', thick: 'solid', double: 'double', dashed: 'dashed', dashSmallGap: 'dashed', dotted: 'dotted', threeDEngrave: 'groove', threeDEmboss: 'groove' };
+const BORDER_SCOPES = { allPages: 'all', firstPage: 'first', notFirstPage: 'exceptFirst' };
+const BORDER_WIDTHS = [0.5, 1, 1.5, 2.25, 3, 4.5, 6];
+const SIDE_NAMES = ['top', 'right', 'bottom', 'left'];
+
+// The section's page border, in the shape of the document layout. Word
+// measures `w:space` from the page or from the text; the layout always
+// measures from the page.
+function readPageBorder(node, margins) {
+  if (!node) return null;
+  const present = SIDE_NAMES.map((side) => [side, child(node, `w:${side}`)]).filter(([, n]) => n && !['nil', 'none'].includes(attr(n, 'w:val')));
+  if (!present.length) return null;
+  const [firstSide, first] = present[0];
+  const points = Number(attr(first, 'w:sz') || 8) / 8;
+  const width = BORDER_WIDTHS.reduce((best, w) => (Math.abs(w - points) < Math.abs(best - points) ? w : best));
+  const space = Number(attr(first, 'w:space') || 0);
+  const inset = attr(node, 'w:offsetFrom') === 'page' ? space : margins[firstSide] * 0.75 - space;
+  const color = attr(first, 'w:color');
+  return {
+    sides: Object.fromEntries(SIDE_NAMES.map((side) => [side, present.some(([name]) => name === side)])),
+    style: BORDER_STYLES[attr(first, 'w:val')] || 'solid',
+    width,
+    color: /^[0-9a-f]{6}$/i.test(color || '') ? `#${color.toLowerCase()}` : '#000000',
+    inset: Math.max(0, Math.min(31, Math.round(inset))),
+    scope: BORDER_SCOPES[attr(node, 'w:display')] || 'all'
+  };
+}
+
 // --- main entry -------------------------------------------------------------
 
 // Returns { blocks, images, meta, found } where
@@ -383,6 +423,13 @@ export async function parseDocx(buffer) {
     return { marker, indentLeft: lvl.indentLeft, indentFirst: lvl.indentFirst };
   }
 
+  // One break per page turn. Blank lines just before a break only filled
+  // out the page, and here could spill over into a page of their own.
+  function pushPageBreak() {
+    while (isBlank(blocks[blocks.length - 1])) blocks.pop();
+    if (blocks.length && blocks[blocks.length - 1].type !== 'pageBreak') blocks.push({ type: 'pageBreak' });
+  }
+
   async function readParagraph(p) {
     const styleId = attr(find(p, 'w:pPr', 'w:pStyle'), 'w:val');
     const style = (styleId && styles.get(styleId)) || { kind: null, level: null };
@@ -391,9 +438,13 @@ export async function parseDocx(buffer) {
     const { text, pictures, charts } = readParagraphContent(p, found);
     const para = paragraphContext(p, ctx);
     const layout = paragraphLayout(para);
-    const { runs, pageBreak } = readRuns(p, para, ctx);
+    const { runs, pageBreak, breakBefore } = readRuns(p, para, ctx);
+    // A stray space would push a list item or column line out of line.
+    if (numPr || style.kind === 'list' || COLUMN_LINE.test(text)) trimLeadingSpaces(runs);
     const formatted = { runs, ...(Object.keys(layout).length ? { layout } : {}) };
-    if (layout.pageBreakBefore) blocks.push({ type: 'pageBreak' });
+    // Quote and caption paragraphs keep their style for the document editor.
+    if (/^(quote|intensequote|caption)$/i.test(para.styleId || '')) formatted.styleId = para.styleId;
+    if (layout.pageBreakBefore || breakBefore) pushPageBreak();
 
     if (text) {
       if (style.kind === 'title') blocks.push({ type: 'title', text, ...formatted });
@@ -426,6 +477,13 @@ export async function parseDocx(buffer) {
       }
     }
 
+    // Blank lines are how many documents space a page out.
+    if (!text && !pictures.length && !charts.length && !pageBreak && !breakBefore) {
+      // Its height comes from the formatting of its paragraph mark.
+      const mark = [child(child(p, 'w:pPr'), 'w:rPr'), ...para.styleNodes.map((n) => child(n, 'w:rPr')), ctx.styles.rPrDefault].filter(Boolean);
+      blocks.push({ type: 'paragraph', text: '', ...formatted, markStyle: runStyle(mark, ctx).style });
+    }
+
     for (const pic of pictures) {
       const imageId = await loadPicture(pic);
       if (imageId) blocks.push({ type: 'image', imageId, ...(layout.align ? { layout: { align: layout.align } } : {}) });
@@ -443,7 +501,7 @@ export async function parseDocx(buffer) {
     }
     // An explicit page break, or the end of a section that starts a new page.
     const sectionType = attr(find(p, 'w:pPr', 'w:sectPr', 'w:type'), 'w:val');
-    if (pageBreak || (find(p, 'w:pPr', 'w:sectPr') && sectionType !== 'continuous')) blocks.push({ type: 'pageBreak' });
+    if (pageBreak || (find(p, 'w:pPr', 'w:sectPr') && sectionType !== 'continuous')) pushPageBreak();
   }
 
   const cellParagraphs = (tc, tableCtx) =>
@@ -475,8 +533,8 @@ export async function parseDocx(buffer) {
   }
 
   await readContainer(body);
-  // A break with nothing after it doesn't start a page.
-  while (blocks.length && blocks[blocks.length - 1].type === 'pageBreak') blocks.pop();
+  // A break or blank line with nothing after it doesn't start a page.
+  while (blocks.length && (blocks[blocks.length - 1].type === 'pageBreak' || isBlank(blocks[blocks.length - 1]))) blocks.pop();
 
   // Default header and footer of the last section, for the preview.
   async function headerFooter(tag) {
@@ -496,5 +554,7 @@ export async function parseDocx(buffer) {
   const footer = await headerFooter('w:footerReference');
   if (header || footer) found.headersFooters = true;
 
-  return { blocks, images, meta, found, header, footer };
+  const pageBorder = readPageBorder(child(sectPr, 'w:pgBorders') || findDeep(body, 'w:pgBorders'), meta.page.margins);
+
+  return { blocks, images, meta, found, header, footer, pageBorder };
 }

@@ -1,22 +1,11 @@
 import Deck from '../models/Deck.js';
 import { extractSlidesFromPdf } from '../services/pdfIngestService.js';
 import { extractSlidesFromPptx } from '../services/pptxIngestService.js';
-import { parseDocx } from '../services/docxIngestService.js';
-import { analyzeDocx, outlineToSlides } from '../services/documentAnalysis.js';
 import { detectFormat, FORMAT_LABELS, unsupportedFormatError } from '../services/importService.js';
-
-// Word documents go through the same outline step as the review flow,
-// using the suggested outline unchanged.
-async function extractSlidesFromDocx(buffer, fileName) {
-  const parsed = await parseDocx(buffer);
-  const { outline } = analyzeDocx(parsed, fileName);
-  return { slides: outlineToSlides(outline, parsed.images, parsed.blocks) };
-}
 
 const EXTRACTORS = {
   pdf: (file) => extractSlidesFromPdf(file.buffer),
-  pptx: (file) => extractSlidesFromPptx(file.buffer),
-  docx: (file) => extractSlidesFromDocx(file.buffer, file.originalname)
+  pptx: (file) => extractSlidesFromPptx(file.buffer)
 };
 
 // Editor-only: uploads a file and straight away creates a new Deck owned
@@ -31,6 +20,7 @@ export async function importDeck(req, res) {
   const format = detectFormat(file);
   const unsupported = unsupportedFormatError(format);
   if (unsupported) return res.status(unsupported.status).json({ error: unsupported.error });
+  if (format === 'docx') return res.status(400).json({ error: 'Word documents open in the document editor and do not become presentations' });
 
   let extracted;
   try {

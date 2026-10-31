@@ -151,7 +151,7 @@ describe('POST /api/imports/:id/decks', () => {
     server.request('POST', `/api/imports/${IMPORT_ID}/decks`, { token: tokenFor(userId), body });
 
   it('generates slides from the stored outline and links the new deck', async () => {
-    const doc = makeImport();
+    const doc = makeImport({ format: 'pptx' });
     ImportedDocument.findById.mockResolvedValue(doc);
     Deck.create.mockImplementation(async (d) => ({ _id: 'deck-1', ...d }));
 
@@ -167,7 +167,7 @@ describe('POST /api/imports/:id/decks', () => {
   });
 
   it('uses an edited outline and title from the request', async () => {
-    ImportedDocument.findById.mockResolvedValue(makeImport());
+    ImportedDocument.findById.mockResolvedValue(makeImport({ format: 'pptx' }));
     Deck.create.mockImplementation(async (d) => ({ _id: 'deck-2', ...d }));
     const res = await create({ outline: [{ title: 'Only slide', bullets: [] }], title: 'Custom' });
     expect(res.status).toBe(201);
@@ -175,10 +175,14 @@ describe('POST /api/imports/:id/decks', () => {
     expect(res.body.title).toBe('Custom');
   });
 
-  it('keeps PowerPoint slides as extracted in "original" mode, but not for Word', async () => {
+  it('never makes a presentation from a Word import', async () => {
     ImportedDocument.findById.mockResolvedValue(makeImport());
     expect((await create({ mode: 'original' })).status).toBe(400);
+    expect((await create({ mode: 'outline' })).status).toBe(400);
+    expect(Deck.create).not.toHaveBeenCalled();
+  });
 
+  it('keeps PowerPoint slides as extracted in "original" mode', async () => {
     const slides = [{ id: 'slide-1', order: 0, blocks: [] }];
     ImportedDocument.findById.mockResolvedValue(makeImport({ format: 'pptx', slides }));
     Deck.create.mockImplementation(async (d) => ({ _id: 'deck-3', ...d }));

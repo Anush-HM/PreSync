@@ -27,10 +27,10 @@ export function validateImportFile(file) {
 // fetch because fetch can't report upload progress.
 // Returns { promise, abort }. onProgress gets 0..1; onUploaded fires
 // once the bytes are sent and the server is analysing.
-export function uploadImport(file, { onProgress, onUploaded } = {}) {
+export function uploadImport(file, { onProgress, onUploaded, path = '/api/imports' } = {}) {
   const xhr = new XMLHttpRequest();
   const promise = new Promise((resolve, reject) => {
-    xhr.open('POST', `${API_BASE}/api/imports`);
+    xhr.open('POST', `${API_BASE}${path}`);
     const token = getAuthToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };

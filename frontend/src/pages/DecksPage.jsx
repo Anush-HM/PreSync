@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, FileText, Presentation, ArrowRight, RefreshCw, X, LayoutTemplate } from 'lucide-react';
+import { Plus, Search, FilePlus2, FileText, Presentation, ArrowRight, RefreshCw, X, LayoutTemplate } from 'lucide-react';
 import AppShell from '../components/layout/AppShell.jsx';
 import DeckCard from '../components/decks/DeckCard.jsx';
 import RenameDeckDialog from '../components/decks/RenameDeckDialog.jsx';
@@ -13,6 +13,7 @@ import TemplateGallery from '../components/templates/TemplateGallery.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
 import { listDecks, createDeck, deleteDeck, duplicateDeck } from '../data/decksApi.js';
 import { listImports } from '../data/importsApi.js';
+import { createDocument } from '../data/documentsApi.js';
 import { getCurrentUser } from '../data/apiConfig.js';
 import { greetingFor, plural } from '../data/format.js';
 import { ASPECT_RATIOS } from '../data/slideFormat.js';
@@ -67,7 +68,7 @@ function SkeletonGrid() {
   );
 }
 
-function Onboarding({ onCreate, onImport, onTemplate }) {
+function Onboarding({ onCreate, onImport, onTemplate, onNewDocument }) {
   return (
     <section className="onboarding card" aria-labelledby="onboarding-title">
       <div className="onboarding-copy">
@@ -92,11 +93,19 @@ function Onboarding({ onCreate, onImport, onTemplate }) {
           </span>
           <ArrowRight className="onboarding-arrow" aria-hidden="true" />
         </button>
+        <button type="button" className="onboarding-option" onClick={onNewDocument}>
+          <span className="onboarding-icon"><FilePlus2 aria-hidden="true" /></span>
+          <span className="onboarding-text">
+            <strong>New Word document</strong>
+            <span>A blank document, ready to write in.</span>
+          </span>
+          <ArrowRight className="onboarding-arrow" aria-hidden="true" />
+        </button>
         <button type="button" className="onboarding-option" onClick={() => onImport('docx')}>
           <span className="onboarding-icon"><FileText aria-hidden="true" /></span>
           <span className="onboarding-text">
             <strong>Import a Word document</strong>
-            <span>Headings become slides. Review the outline first.</span>
+            <span>Keep editing it here, then download .docx or PDF.</span>
           </span>
           <ArrowRight className="onboarding-arrow" aria-hidden="true" />
         </button>
@@ -187,6 +196,7 @@ function DecksPage({ view = 'home' }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [creatingDocument, setCreatingDocument] = useState(false);
   const [showNewDeckDialog, setShowNewDeckDialog] = useState(false);
   const [importKind, setImportKind] = useState(null);
   const [imports, setImports] = useState([]);
@@ -236,6 +246,17 @@ function DecksPage({ view = 'home' }) {
     } catch (err) {
       toast.error(err.message || 'Could not create a presentation');
       setCreating(false);
+    }
+  }
+
+  async function handleNewDocument() {
+    setCreatingDocument(true);
+    try {
+      const doc = await createDocument();
+      navigate(`/documents/${doc.id}`);
+    } catch (err) {
+      toast.error(err.message || 'Could not create a document');
+      setCreatingDocument(false);
     }
   }
 
@@ -314,6 +335,9 @@ function DecksPage({ view = 'home' }) {
             <p className="dash-sub">{viewInfo.subtitle}</p>
           </div>
           <div className="dash-actions">
+            <button type="button" className="btn btn-secondary" onClick={handleNewDocument} disabled={creatingDocument}>
+              <FilePlus2 /> {creatingDocument ? 'Creating…' : 'New Word document'}
+            </button>
             <button type="button" className="btn btn-secondary" onClick={() => setImportKind('docx')}>
               <FileText /> Import Word document
             </button>
@@ -337,7 +361,7 @@ function DecksPage({ view = 'home' }) {
         )}
 
         {isEmptyAccount && view === 'home' ? (
-          <Onboarding onCreate={handleCreate} onImport={setImportKind} onTemplate={() => setShowTemplates(true)} />
+          <Onboarding onCreate={handleCreate} onImport={setImportKind} onTemplate={() => setShowTemplates(true)} onNewDocument={handleNewDocument} />
         ) : (
           <>
             {!loadError && (

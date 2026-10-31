@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Wand2, PencilRuler, Save, RotateCcw, ExternalLink } from 'lucide-react';
+import { ArrowLeft, FileText, Wand2, PencilRuler, Save, RotateCcw, ExternalLink } from 'lucide-react';
 import AppShell from '../components/layout/AppShell.jsx';
 import AnalysisPanel from '../components/imports/AnalysisPanel.jsx';
 import OutlineEditor from '../components/imports/OutlineEditor.jsx';
@@ -9,6 +9,7 @@ import SlidesPreview from '../components/imports/SlidesPreview.jsx';
 import { FORMAT_ICON, FORMAT_LABEL } from '../components/imports/formatIcons.js';
 import { useToast } from '../components/ui/Toast.jsx';
 import { createDeckFromImport, getImport, saveImportOutline } from '../data/importsApi.js';
+import { createDocumentFromImport } from '../data/documentsApi.js';
 import { formatBytes, plural, timeAgo } from '../data/format.js';
 import './ImportReviewPage.css';
 
@@ -38,7 +39,7 @@ function ImportReviewPage() {
       setDoc(data);
       setOutline(data.outline || []);
       setSavedOutline(JSON.stringify(data.outline || []));
-      setTab((t) => t || (data.format === 'docx' ? 'outline' : 'slides'));
+      setTab((t) => t || (data.format === 'docx' ? 'document' : 'slides'));
     } catch (err) {
       setLoadError(err.message || 'Could not load this import');
     }
@@ -87,6 +88,18 @@ function ImportReviewPage() {
     }
   }
 
+  // Word imports from before the document editor open there instead.
+  async function handleOpenDocument() {
+    setCreating('document');
+    try {
+      const created = await createDocumentFromImport(importId);
+      navigate(`/documents/${created.id}`);
+    } catch (err) {
+      toast.error(err.message || 'Could not open this document');
+      setCreating(null);
+    }
+  }
+
   if (loadError) {
     return (
       <AppShell>
@@ -119,7 +132,7 @@ function ImportReviewPage() {
   const isDocx = doc.format === 'docx';
   const Icon = FORMAT_ICON[doc.format];
   const tabs = isDocx
-    ? [{ key: 'outline', label: 'Outline' }, { key: 'document', label: 'Document preview' }]
+    ? [{ key: 'document', label: 'Document preview' }]
     : [{ key: 'slides', label: 'Slides' }, { key: 'outline', label: 'Outline' }];
   const busy = !!creating;
 
@@ -140,14 +153,14 @@ function ImportReviewPage() {
           </div>
           <div className="review-actions">
             <button type="button" className="btn btn-ghost" onClick={() => navigate('/decks')} disabled={busy}>Cancel</button>
-            {tab !== 'outline' && (
+            {!isDocx && tab !== 'outline' && (
               <button type="button" className="btn btn-secondary" onClick={() => setTab('outline')} disabled={busy}>
                 <PencilRuler /> Review outline
               </button>
             )}
             {isDocx ? (
-              <button type="button" className="btn btn-primary" onClick={() => handleCreate('outline')} disabled={busy || outline.length === 0}>
-                <Wand2 /> {creating === 'outline' ? 'Generating…' : 'Generate presentation'}
+              <button type="button" className="btn btn-primary" onClick={handleOpenDocument} disabled={busy}>
+                <FileText /> {creating === 'document' ? 'Opening…' : 'Open in document editor'}
               </button>
             ) : (
               <>
@@ -199,9 +212,7 @@ function ImportReviewPage() {
                 <>
                   <div className="outline-bar">
                     <p className="field-hint">
-                      {isDocx
-                        ? 'Each item becomes one slide. Edit titles and bullets, reorder, or remove slides before generating.'
-                        : 'Use this presentation as source material: the outline turns each slide’s text into a fresh, consistently laid-out deck.'}
+                      Use this presentation as source material: the outline turns each slide’s text into a fresh, consistently laid-out deck.
                     </p>
                     <div className="outline-bar-actions">
                       {dirty && <span className="badge badge-warning">Unsaved changes</span>}

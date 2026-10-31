@@ -133,12 +133,13 @@ export async function createDeckFromImport(req, res) {
   const doc = await findOwned(req, res);
   if (!doc) return;
 
+  if (doc.format === 'docx') {
+    return res.status(400).json({ error: 'Word documents open in the document editor and do not become presentations' });
+  }
+
   const mode = req.body.mode === 'original' ? 'original' : 'outline';
   let slides;
   if (mode === 'original') {
-    if (doc.format === 'docx') {
-      return res.status(400).json({ error: 'Word documents become presentations through their outline' });
-    }
     slides = doc.slides;
   } else {
     let outline;

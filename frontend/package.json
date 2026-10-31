@@ -11,6 +11,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@tiptap/core": "^3.32.2",
+    "@tiptap/extension-image": "^3.32.2",
+    "@tiptap/extension-table": "^3.32.2",
+    "@tiptap/extension-text-align": "^3.32.2",
+    "@tiptap/extension-text-style": "^3.32.2",
+    "@tiptap/pm": "^3.32.2",
+    "@tiptap/react": "^3.32.2",
+    "@tiptap/starter-kit": "^3.32.2",
     "fabric": "^7.4.0",
     "lib0": "^0.2.88",
     "lucide-react": "^1.61.0",

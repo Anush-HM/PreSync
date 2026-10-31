@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router-dom';
 import DecksPage from './DecksPage.jsx';
 import { listDecks, deleteDeck, duplicateDeck } from '../data/decksApi.js';
+import { createDocument } from '../data/documentsApi.js';
 import { renderAt } from '../test/renderAt.jsx';
 
 vi.mock('../data/decksApi.js', () => ({
@@ -26,6 +27,8 @@ vi.mock('../data/importsApi.js', () => ({
   IMPORT_ACCEPT_ALL: '.docx',
   MAX_IMPORT_MB: 25
 }));
+
+vi.mock('../data/documentsApi.js', () => ({ createDocument: vi.fn(), uploadDocx: vi.fn() }));
 
 const ME = { id: 'u1', name: 'Leo Grant', email: 'leo@example.com' };
 const OTHER = { id: 'u2', name: 'Maya Ross', email: 'maya@example.com' };
@@ -62,6 +65,16 @@ describe('DecksPage', () => {
     await user.click(screen.getByRole('button', { name: 'Import Word document' }));
     expect(screen.getByRole('dialog', { name: 'Import a Word document' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Browse files' })).toBeInTheDocument();
+  });
+
+  it('creates a blank Word document and opens it', async () => {
+    listDecks.mockResolvedValue(DECKS);
+    createDocument.mockResolvedValue({ id: 'doc-1' });
+    const user = renderDecks();
+    await screen.findByText('Roadmap');
+    await user.click(screen.getByRole('button', { name: 'New Word document' }));
+    expect(createDocument).toHaveBeenCalled();
+    expect(await screen.findByTestId('location')).toHaveTextContent('/documents/doc-1');
   });
 
   it('greets the user and lists recent and shared presentations', async () => {

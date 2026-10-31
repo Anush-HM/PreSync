@@ -19,7 +19,7 @@ const FEATURES = [
   {
     icon: Upload,
     title: 'Bring your existing slides',
-    description: 'Import Word, PowerPoint and PDF files. PreSync maps out headings, lists, tables and slides, and you review the outline before anything is created.'
+    description: 'Import PowerPoint and PDF files as slides, and review what PreSync found before anything is created. Word documents open in their own editor.'
   },
   {
     icon: Radio,
@@ -44,7 +44,7 @@ const FEATURES = [
 ];
 
 const STEPS = [
-  { num: '01', title: 'Create or import', description: 'Start from a blank presentation, or upload a .docx, .pptx or PDF and review the structure PreSync extracts.' },
+  { num: '01', title: 'Create or import', description: 'Start from a blank presentation, or upload a .pptx or PDF and review the structure PreSync extracts.' },
   { num: '02', title: 'Edit together', description: 'Invite teammates by email. Everyone edits the same deck in real time; edits autosave and Save writes them to the database immediately.' },
   { num: '03', title: 'Go live', description: 'Choose Present to open the presenter view and get a session code. Editing can continue safely in the background.' },
   { num: '04', title: 'Audience joins', description: 'Viewers enter the code and a name, follow along, take private notes and ask questions.' }
@@ -210,7 +210,7 @@ function LandingPage() {
             </div>
             <ArrowRight className="import-flow-arrow" aria-hidden="true" />
             <ul className="import-flow-list">
-              <li><Check aria-hidden="true" />Word headings become slides; lists, tables and pictures are mapped into a reviewable outline</li>
+              <li><Check aria-hidden="true" />Word documents open in the document editor with headings, lists, tables and pictures intact</li>
               <li><Check aria-hidden="true" />PowerPoint slide order, text boxes and their positions</li>
               <li><Check aria-hidden="true" />Fonts, sizes, bold / italic / underline, colours, alignment</li>
               <li><Check aria-hidden="true" />Pictures, slide backgrounds and speaker notes (PowerPoint)</li>
@@ -317,7 +317,7 @@ function LandingPage() {
             <div className="docs-card card">
               <h3>Importing</h3>
               <dl className="docs-list">
-                <div><dt>Word</dt><dd>.docx up to 25 MB. Headings, paragraphs, lists, tables and PNG/JPEG/GIF pictures. Legacy .doc must be re-saved as .docx first.</dd></div>
+                <div><dt>Word</dt><dd>.docx up to 25 MB, opened in the document editor. Headings, paragraphs, lists, tables and PNG/JPEG/GIF pictures. Legacy .doc must be re-saved as .docx first.</dd></div>
                 <div><dt>PowerPoint</dt><dd>.pptx up to 25 MB. Pictures up to 1.5 MB each, 8 MB per deck. Legacy .ppt must be re-saved as .pptx first.</dd></div>
                 <div><dt>PDF</dt><dd>.pdf up to 25 MB. Each page becomes a slide with editable text.</dd></div>
                 <div><dt>Export</dt><dd>PowerPoint keeps text editable and includes speaker notes. PDF uses standard fonts and covers Latin text.</dd></div>
