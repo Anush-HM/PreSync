@@ -175,7 +175,20 @@ class Media {
   }
 }
 
-function pictureXml(media, url, widthPx, heightPx, alt, { align, maxWidth = MAX_IMAGE_PX } = {}) {
+// How a picture is placed: in line, or floating ('square' text wrap
+// on its side, 'front' at an offset from the column and its paragraph).
+function placementXml(n, cx, cy, { wrap, align, offsetX, offsetY }) {
+  const square = wrap === 'square';
+  const h = square
+    ? `<wp:positionH relativeFrom="column"><wp:align>${align === 'right' ? 'right' : 'left'}</wp:align></wp:positionH>`
+    : `<wp:positionH relativeFrom="column"><wp:posOffset>${Math.round((offsetX || 0) * PX_TO_EMU)}</wp:posOffset></wp:positionH>`;
+  const v = `<wp:positionV relativeFrom="paragraph"><wp:posOffset>${square ? 0 : Math.round((offsetY || 0) * PX_TO_EMU)}</wp:posOffset></wp:positionV>`;
+  const wrapXml = square ? '<wp:wrapSquare wrapText="bothSides"/>' : '<wp:wrapNone/>';
+  const dist = square ? 'distT="0" distB="0" distL="114300" distR="114300"' : 'distT="0" distB="0" distL="0" distR="0"';
+  return { open: `<wp:anchor ${dist} simplePos="0" relativeHeight="${n + 1}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>${h}${v}<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrapXml}`, close: '</wp:anchor>' };
+}
+
+function pictureXml(media, url, widthPx, heightPx, alt, { align, maxWidth = MAX_IMAGE_PX, wrap, offsetX, offsetY } = {}) {
   const ref = media.add(url);
   if (!ref) return null;
   const ratio = widthPx > 0 && heightPx > 0 ? heightPx / widthPx : 0.5625;
@@ -183,7 +196,11 @@ function pictureXml(media, url, widthPx, heightPx, alt, { align, maxWidth = MAX_
   const cx = Math.round(w * PX_TO_EMU);
   const cy = Math.round(w * ratio * PX_TO_EMU);
   const descr = esc(alt || '');
-  return paragraph(`<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${ref.n}" name="Picture ${ref.n}" descr="${descr}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${ref.n}" name="Picture ${ref.n}" descr="${descr}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${ref.id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`, { align });
+  const floating = wrap === 'square' || wrap === 'front';
+  const frame = floating
+    ? placementXml(ref.n, cx, cy, { wrap, align, offsetX, offsetY })
+    : { open: `<wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/>`, close: '</wp:inline>' };
+  return paragraph(`<w:r><w:drawing>${frame.open}<wp:docPr id="${ref.n}" name="Picture ${ref.n}" descr="${descr}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${ref.n}" name="Picture ${ref.n}" descr="${descr}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${ref.id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>${frame.close}</w:drawing></w:r>`, { align: floating ? null : align });
 }
 
 const note = (text) => paragraph(run(text, { fontStyle: 'italic', fill: '#5d6b63' }));
@@ -462,7 +479,7 @@ function blockXml(node, ctx) {
       return shapeXml(node.attrs || {}, ctx);
     case 'image': {
       const a = node.attrs || {};
-      return pictureXml(ctx.media, a.src, a.width, a.height, a.alt, { align: a.align, maxWidth: ctx.contentPx }) || '';
+      return pictureXml(ctx.media, a.src, a.width, a.height, a.alt, { align: a.align, maxWidth: ctx.contentPx, wrap: a.wrap, offsetX: a.offsetX, offsetY: a.offsetY }) || '';
     }
     default:
       return '';

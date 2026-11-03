@@ -206,7 +206,8 @@ function readParagraphContent(p, found) {
             pictures.push({
               rId,
               widthPx: Math.round(Number(attr(extent, 'cx') || 0) / EMU_PER_PX) || null,
-              heightPx: Math.round(Number(attr(extent, 'cy') || 0) / EMU_PER_PX) || null
+              heightPx: Math.round(Number(attr(extent, 'cy') || 0) / EMU_PER_PX) || null,
+              ...(c.nodeName === 'wp:anchor' ? { anchor: readAnchor(c) } : {})
             });
           }
           walk(c);
@@ -229,6 +230,33 @@ function readParagraphContent(p, found) {
   }
   walk(p);
   return { text: text.replace(/[ \t]+$/gm, '').trim(), pictures, charts };
+}
+
+const emuPx = (v) => Math.round(Number(v || 0) / EMU_PER_PX);
+
+// Where a floating picture sits: how text wraps around it ('square'
+// beside it, 'front' over or behind it, 'block' above and below), its
+// horizontal alignment when Word aligns it, and its offset in px from
+// the text column (x) and from its paragraph (y). Positions measured
+// from the page or margin edge are taken relative to the column, which
+// the caller corrects with the page margins.
+function readAnchor(node) {
+  const wrapNode = children(node).find((n) => /^wp:wrap/.test(n.nodeName));
+  const wrapName = wrapNode?.nodeName.slice(7) || 'None';
+  const wrap = ['Square', 'Tight', 'Through'].includes(wrapName) ? 'square' : wrapName === 'TopAndBottom' ? 'block' : 'front';
+  const posH = child(node, 'wp:positionH');
+  const posV = child(node, 'wp:positionV');
+  const alignH = child(posH, 'wp:align')?.textContent?.trim() || null;
+  const out = {
+    wrap,
+    relativeH: attr(posH, 'relativeFrom') || 'column',
+    relativeV: attr(posV, 'relativeFrom') || 'paragraph',
+    x: emuPx(child(posH, 'wp:posOffset')?.textContent),
+    y: emuPx(child(posV, 'wp:posOffset')?.textContent)
+  };
+  if (alignH) out.alignH = { left: 'left', inside: 'left', center: 'center', right: 'right', outside: 'right' }[alignH] || 'left';
+  if (attr(node, 'behindDoc') === '1') out.behind = true;
+  return out;
 }
 
 function findDeep(node, tag) {
@@ -399,6 +427,28 @@ export async function parseDocx(buffer) {
     return image.id;
   }
 
+  // A floating picture's placement within the text column of the page:
+  // { wrap, align, x, y }. Square wrapping keeps the side the picture is
+  // on; pictures in front of the text keep their offset.
+  function placeFloat(pic, layout) {
+    const a = pic.anchor;
+    const { width, margins } = meta.page;
+    const column = width - margins.left - margins.right;
+    const w = Math.min(pic.widthPx || 0, column);
+    let x = a.x;
+    if (a.relativeH === 'page') x -= margins.left;
+    else if (a.relativeH === 'rightMargin') x += column;
+    else if (a.relativeH === 'leftMargin') x -= margins.left;
+    if (a.alignH) x = a.alignH === 'center' ? (column - w) / 2 : a.alignH === 'right' ? column - w : 0;
+    x = Math.round(Math.max(-margins.left, Math.min(column + margins.right - w, x)));
+    let y = a.relativeV === 'paragraph' || a.relativeV === 'line' ? a.y : 0;
+    y = Math.round(Math.max(-200, Math.min(1200, y)));
+    const align = a.alignH || (x + w / 2 < column / 3 ? 'left' : x + w / 2 > (column * 2) / 3 ? 'right' : 'center');
+    if (a.wrap === 'block') return { wrap: 'inline', align: layout.align === 'justify' ? align : layout.align || align };
+    if (a.wrap === 'square') return { wrap: 'square', align: align === 'right' ? 'right' : 'left' };
+    return { wrap: 'front', align: 'left', x, y, ...(a.behind ? { behind: true } : {}) };
+  }
+
   // The marker Word draws for a list item ("1.", "a)", "•"), counting
   // per list and level the way Word does.
   function listMarker(numId, level) {
@@ -446,6 +496,13 @@ export async function parseDocx(buffer) {
     if (/^(quote|intensequote|caption)$/i.test(para.styleId || '')) formatted.styleId = para.styleId;
     if (layout.pageBreakBefore || breakBefore) pushPageBreak();
 
+    // Floating pictures go ahead of the text of their paragraph, so text
+    // that wraps around one starts beside it.
+    for (const pic of pictures.filter((x) => x.anchor)) {
+      const imageId = await loadPicture(pic);
+      if (imageId) blocks.push({ type: 'image', imageId, float: placeFloat(pic, layout) });
+    }
+
     if (text) {
       if (style.kind === 'title') blocks.push({ type: 'title', text, ...formatted });
       else if (style.kind === 'subtitle') blocks.push({ type: 'subtitle', text, ...formatted });
@@ -484,7 +541,7 @@ export async function parseDocx(buffer) {
       blocks.push({ type: 'paragraph', text: '', ...formatted, markStyle: runStyle(mark, ctx).style });
     }
 
-    for (const pic of pictures) {
+    for (const pic of pictures.filter((x) => !x.anchor)) {
       const imageId = await loadPicture(pic);
       if (imageId) blocks.push({ type: 'image', imageId, ...(layout.align ? { layout: { align: layout.align } } : {}) });
     }

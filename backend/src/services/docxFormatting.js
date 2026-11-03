@@ -88,6 +88,25 @@ function runPropertyChain(r, para, ctx) {
   ].filter(Boolean);
 }
 
+// The Latin face of a run. Each w:rFonts may name only some scripts (a
+// run often carries just w:cs or w:eastAsia), so the chain is followed
+// until a node names the Latin face; a theme face wins over a named one
+// on the same node, as in Word.
+function latinFace(rPrs, ctx) {
+  for (const rPr of rPrs) {
+    const fonts = child(rPr, 'w:rFonts');
+    if (!fonts) continue;
+    const theme = attr(fonts, 'w:asciiTheme') || attr(fonts, 'w:hAnsiTheme');
+    if (theme) {
+      const face = /^major/.test(theme) ? ctx.styles.themeFonts.major : ctx.styles.themeFonts.minor;
+      if (face) return face;
+    }
+    const face = attr(fonts, 'w:ascii') || attr(fonts, 'w:hAnsi');
+    if (face) return face;
+  }
+  return null;
+}
+
 export function runStyle(rPrs, ctx) {
   const style = {};
   const sz = firstOf(rPrs, 'w:sz');
@@ -99,11 +118,7 @@ export function runStyle(rPrs, ctx) {
   style.linethrough = !!on(firstOf(rPrs, 'w:strike')) || !!on(firstOf(rPrs, 'w:dstrike'));
   const color = attr(firstOf(rPrs, 'w:color'), 'w:val');
   style.fill = color && /^[0-9a-f]{6}$/i.test(color) ? `#${color.toLowerCase()}` : '#000000';
-  const fonts = firstOf(rPrs, 'w:rFonts');
-  let face = attr(fonts, 'w:ascii') || attr(fonts, 'w:hAnsi');
-  const theme = attr(fonts, 'w:asciiTheme') || attr(fonts, 'w:hAnsiTheme');
-  if (!face && theme) face = /^major/.test(theme) ? ctx.styles.themeFonts.major : ctx.styles.themeFonts.minor;
-  style.fontFamily = fontStack(face || ctx.styles.themeFonts.minor || 'Calibri');
+  style.fontFamily = fontStack(latinFace(rPrs, ctx) || ctx.styles.themeFonts.minor || 'Calibri');
   const extra = {};
   const hl = attr(firstOf(rPrs, 'w:highlight'), 'w:val');
   if (HIGHLIGHT[hl]) extra.highlight = HIGHLIGHT[hl];
@@ -113,6 +128,43 @@ export function runStyle(rPrs, ctx) {
   const va = attr(firstOf(rPrs, 'w:vertAlign'), 'w:val');
   if (va === 'superscript' || va === 'subscript') extra.vertAlign = va;
   return { style, extra };
+}
+
+// --- symbol fonts ----------------------------------------------------------------
+
+const SYMBOL_STACK = '"Segoe UI Symbol", "Noto Sans Symbols", "DejaVu Sans", sans-serif';
+const GREEK = 'ΑΒΧΔΕΦΓΗΙϑΚΛΜΝΟΠΘΡΣΤΥςΩΞΨΖ';
+const SYMBOL_EXTRA = {
+  0x22: '∀', 0x24: '∃', 0x27: '∋', 0x2a: '∗', 0x2d: '−', 0x40: '≅', 0x5c: '∴', 0x5e: '⊥', 0x60: '‾', 0x6a: 'φ', 0x76: 'ϖ',
+  0xa1: 'ϒ', 0xa2: '′', 0xa3: '≤', 0xa4: '⁄', 0xa5: '∞', 0xa6: 'ƒ', 0xa7: '♣', 0xa8: '♦', 0xa9: '♥', 0xaa: '♠', 0xab: '↔',
+  0xac: '←', 0xad: '↑', 0xae: '→', 0xaf: '↓', 0xb0: '°', 0xb1: '±', 0xb2: '″', 0xb3: '≥', 0xb4: '×', 0xb5: '∝', 0xb6: '∂',
+  0xb7: '•', 0xb8: '÷', 0xb9: '≠', 0xba: '≡', 0xbb: '≈', 0xbc: '…', 0xc0: 'ℵ', 0xc1: 'ℑ', 0xc2: 'ℜ', 0xc3: '℘', 0xc4: '⊗',
+  0xc5: '⊕', 0xc6: '∅', 0xc7: '∩', 0xc8: '∪', 0xc9: '⊃', 0xca: '⊇', 0xcb: '⊄', 0xcc: '⊂', 0xcd: '⊆', 0xce: '∈', 0xcf: '∉',
+  0xd0: '∠', 0xd1: '∇', 0xd2: '®', 0xd3: '©', 0xd4: '™', 0xd5: '∏', 0xd6: '√', 0xd7: '⋅', 0xd8: '¬', 0xd9: '∧', 0xda: '∨',
+  0xdb: '⇔', 0xdc: '⇐', 0xdd: '⇑', 0xde: '⇒', 0xdf: '⇓', 0xe0: '◊', 0xe1: '〈', 0xe5: '∑', 0xf1: '〉', 0xf2: '∫'
+};
+const WINGDINGS = {
+  0x21: '✏', 0x22: '✂', 0x28: '☎', 0x2a: '✉', 0x3f: '✍', 0x4a: '☺', 0x4b: '😐', 0x4c: '☹', 0x6c: '●', 0x6d: '❍', 0x6e: '■',
+  0x6f: '□', 0x70: '◻', 0x71: '❑', 0x72: '❒', 0x73: '⬧', 0x74: '⧫', 0x75: '◆', 0x76: '❖', 0x77: '⬥', 0x9f: '•', 0xa1: '○',
+  0xa7: '▪', 0xa8: '◻', 0xa9: '✦', 0xaa: '★', 0xab: '✶', 0xd8: '➢', 0xd5: '⌫', 0xdc: '➤', 0xdf: '⇦', 0xe0: '⇨', 0xe8: '➔',
+  0xef: '⇦', 0xf0: '⇨', 0xfb: '✗', 0xfc: '✓', 0xfd: '☒', 0xfe: '☑'
+};
+
+const isSymbolFont = (face) => /^(symbol|wingdings|webdings)/i.test(face || '');
+
+// Text typed in a symbol font, as the Unicode characters Word shows.
+function symbolText(text, face) {
+  const wingdings = /^(wingdings|webdings)/i.test(face);
+  return Array.from(text, (ch) => {
+    let code = ch.codePointAt(0);
+    if (code >= 0xf000 && code <= 0xf0ff) code -= 0xf000; // private-use alias of the font's codes
+    if (code < 0x20 || code > 0xff) return ch;
+    if (wingdings) return WINGDINGS[code] || '•';
+    if (SYMBOL_EXTRA[code]) return SYMBOL_EXTRA[code];
+    if (code >= 0x41 && code <= 0x5a) return GREEK[code - 0x41];
+    if (code >= 0x61 && code <= 0x7a) return GREEK[code - 0x61].toLowerCase();
+    return String.fromCharCode(code);
+  }).join('');
 }
 
 // --- paragraphs ----------------------------------------------------------------
@@ -186,8 +238,16 @@ export function readRuns(p, para, ctx, onNode = () => {}) {
     else pageBreak = true;
   };
   let field = null; // complex field being read: { instr, result }
-  const push = (text, r) => {
-    const { style, extra } = runStyle(runPropertyChain(r, para, ctx), ctx);
+  const push = (text, r, symbolFont = null) => {
+    const rPrs = runPropertyChain(r, para, ctx);
+    const { style, extra } = runStyle(rPrs, ctx);
+    // Symbol fonts draw their own glyph for a letter (Symbol's "a" is α);
+    // in a web font that would show as a wrong letter, so map to Unicode.
+    const face = symbolFont || latinFace(rPrs, ctx);
+    if (isSymbolFont(face)) {
+      text = symbolText(text, face);
+      style.fontFamily = SYMBOL_STACK;
+    }
     const run = { text: extra.caps ? text.toUpperCase() : text, style };
     if (extra.highlight || extra.vertAlign) run.extra = { highlight: extra.highlight, vertAlign: extra.vertAlign };
     if (field?.result && /\bPAGE\b/.test(field.instr)) run.field = 'PAGE';
@@ -216,7 +276,7 @@ export function readRuns(p, para, ctx, onNode = () => {}) {
           push('‑', r);
           break;
         case 'w:sym':
-          push(String.fromCharCode(parseInt(attr(c, 'w:char') || '2022', 16) & 0xff || 0x2022), r);
+          push(String.fromCharCode(parseInt(attr(c, 'w:char') || '2022', 16) || 0x2022), r, attr(c, 'w:font') || 'Symbol');
           break;
         case 'w:fldChar': {
           const type = attr(c, 'w:fldCharType');

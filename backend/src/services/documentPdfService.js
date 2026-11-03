@@ -329,6 +329,19 @@ export function exportDocumentToPdf(document) {
   function imageBlock(node, ctx) {
     const a = node.attrs || {};
     const { width, height } = figureSize(a, ctx, 0.5625);
+    // A free picture takes no room in the text: drawn at its offset from
+    // where it is anchored.
+    if (a.wrap === 'front') {
+      if (!dry) {
+        const bytes = pictures.get(a.src);
+        try {
+          if (bytes) doc.image(bytes, ctx.x + (a.offsetX || 0) * PX_PT, y + (a.offsetY || 0) * PX_PT, { width, height });
+        } catch {
+          // Damaged picture: leave it out rather than fail the export.
+        }
+      }
+      return;
+    }
     const room = bottom - top;
     const fit = !pinned && height > room ? room / height : 1;
     ensure(height * fit);

@@ -54,21 +54,35 @@
   font-family: Georgia, 'Times New Roman', serif; font-size: 14.7px; line-height: 1.17;
   overflow: hidden;
 }
-.doc-flow-page { position: relative; }
-.doc-header, .doc-footer { position: absolute; color: inherit; }
-.doc-pages p { margin: 0; overflow-wrap: break-word; }
+.docp-flow-page { position: relative; }
+.docp-header, .docp-footer { position: absolute; color: inherit; }
+.doc-pages p { margin: 0; overflow-wrap: break-word; white-space: pre-wrap; }
+/* Tabs are sized by layoutTabs() in DocumentPreview.jsx. */
+.docp-tab { display: inline-block; overflow: hidden; white-space: pre; text-indent: 0; vertical-align: baseline; height: 1em; }
+.docp-tab.has-leader { border-bottom: 1.5px dotted currentColor; }
+/* Pictures that float in Word: text wraps beside them, or they sit freely at their offset. */
+.docp-float { float: left; margin: 2px 12px 6px 0; max-width: 70%; line-height: 0; }
+.docp-float.is-right { float: right; margin: 2px 0 6px 12px; }
+.docp-free { position: relative; height: 0; z-index: 1; }
+.docp-free.is-behind { z-index: 0; }
+.docp-free-box { position: absolute; line-height: 0; }
+/* Preview class names start with docp- where the document editor's
+   stylesheet (loaded globally once it has been opened) uses the doc- name. */
 .doc-li { position: relative; }
 .doc-marker { position: absolute; top: 0; white-space: pre; text-indent: 0; }
 .doc-img-wrap img { max-width: 100%; height: auto; }
 /* Imports parsed before formatting was kept: a readable default. */
 .doc-pages .is-legacy { margin: 0 0 12px; line-height: 1.65; font-size: 15.5px; }
-.doc-title.is-legacy { font-size: 30px; font-family: var(--font-ui); color: #101311; letter-spacing: -0.02em; }
+.docp-title.is-legacy { font-size: 30px; font-family: var(--font-ui); color: #101311; letter-spacing: -0.02em; }
 .doc-subtitle.is-legacy { font-size: 18px; color: #5B635E; }
 .doc-h.is-legacy { font-family: var(--font-ui); color: #101311; margin-top: 26px; }
 .doc-h1.is-legacy { font-size: 22px; }
 .doc-h2.is-legacy { font-size: 18px; }
+/* The marker sits in the left margin, outside the text, so a centred or
+   long heading lays out exactly as it does in Word. */
+.doc-pages .has-slide-marker { position: relative; }
 .doc-slide-marker {
-  display: inline-block; margin-right: 10px; vertical-align: 3px; text-indent: 0;
+  position: absolute; right: 100%; top: 0.35em; margin-right: 10px; white-space: nowrap; text-indent: 0; text-align: left;
   font-family: var(--font-mono, monospace); font-size: 10.5px; font-weight: 500; line-height: 1.4;
   padding: 2px 6px; border-radius: 4px;
   background: #285C43; color: #F2F4F0; letter-spacing: 0.02em;
