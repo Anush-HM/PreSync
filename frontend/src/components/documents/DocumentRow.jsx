@@ -4,12 +4,15 @@ import Menu from '../ui/Menu.jsx';
 import { plural, timeAgo } from '../../data/format.js';
 import '../imports/imports.css';
 
-// One Word document in a list, with its actions.
+// One Word document in a list, with its actions. People it is shared
+// with to view can open and download it, nothing more.
 function DocumentRow({ item, onRename, onDownload, onDelete }) {
   const navigate = useNavigate();
+  const viewOnly = item.role === 'viewer';
+  const sharedBy = item.owner?.name || item.owner?.email;
   const items = [
     { label: 'Open', icon: FileText, onSelect: () => navigate(`/documents/${item.id}`) },
-    { label: 'Rename', icon: Pencil, onSelect: () => onRename(item) },
+    ...(viewOnly ? [] : [{ label: 'Rename', icon: Pencil, onSelect: () => onRename(item) }]),
     { label: 'Download as .docx', icon: Download, onSelect: () => onDownload(item, 'docx') },
     { label: 'Download as PDF', icon: FileDown, onSelect: () => onDownload(item, 'pdf') }
   ];
@@ -21,7 +24,8 @@ function DocumentRow({ item, onRename, onDownload, onDelete }) {
         <Link to={`/documents/${item.id}`} className="import-row-title">{item.title}</Link>
         <span className="import-row-meta">
           {plural(item.wordCount, 'word')} · edited {timeAgo(item.updatedAt)}
-          {!item.isOwner && ' · shared with you'}
+          {!item.isOwner && (sharedBy ? ` · shared by ${sharedBy}` : ' · shared with you')}
+          {viewOnly && ' · view only'}
         </span>
       </div>
       <Link to={`/documents/${item.id}`} className="btn btn-sm btn-ghost">Open</Link>

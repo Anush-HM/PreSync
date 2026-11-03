@@ -449,7 +449,8 @@ function calloutXml(node, ctx) {
 
 function listXml(node, ctx, level) {
   const ordered = node.type === 'orderedList';
-  const numId = ordered ? ctx.numbering.orderedList(node.attrs?.start) : 1;
+  const style = node.attrs?.listStyle;
+  const numId = ordered ? ctx.numbering.orderedList(node.attrs?.start, style) : ctx.numbering.bulletList(style);
   return (node.content || []).map((item) => (item.content || []).map((child) => {
     if (child.type === 'bulletList' || child.type === 'orderedList') return listXml(child, ctx, Math.min(level + 1, 8));
     if (child.type === 'paragraph' || child.type === 'heading') return docParagraph(child, { numbering: { numId, level } });
@@ -507,18 +508,24 @@ const DOC_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </w:styles>`;
 
 const BULLETS = ['•', '○', '▪'];
+// The editor's marker styles (documentExtensions.js) as Word formats.
+const BULLET_MARKERS = { disc: '•', circle: '○', square: '▪', arrow: '➔' };
+const NUMBER_FORMATS = { decimal: 'decimal', 'lower-alpha': 'lowerLetter', 'upper-alpha': 'upperLetter', 'lower-roman': 'lowerRoman' };
+const FORMATS = ['decimal', 'lowerLetter', 'lowerRoman'];
 
-// Bullets are one list; every numbered list gets its own w:num so it
-// counts from its own start.
-function numberingXml(starts) {
+// Plain bullets are one list. A bullet list with its own marker, and
+// every numbered list, gets its own w:num so it keeps its marker style
+// and counts from its own start.
+function numberingXml(lists) {
   const level = (i, fmt, text) => `<w:lvl w:ilvl="${i}"><w:start w:val="1"/><w:numFmt w:val="${fmt}"/><w:lvlText w:val="${text}"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="${(i + 1) * 360}" w:hanging="260"/></w:pPr></w:lvl>`;
   const levels = Array.from({ length: 9 }, (_, i) => i);
-  const FORMATS = ['decimal', 'lowerLetter', 'lowerRoman'];
-  const bullets = levels.map((i) => level(i, 'bullet', BULLETS[i % 3])).join('');
-  const numbers = levels.map((i) => level(i, FORMATS[i % 3], `%${i + 1}.`)).join('');
-  const nums = starts.map((start, i) => `<w:num w:numId="${i + 2}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="${start}"/></w:lvlOverride></w:num>`).join('');
+  const bulletLevels = (first) => levels.map((i) => level(i, 'bullet', i === 0 && first ? first : BULLETS[i % 3])).join('');
+  const numberLevels = (first) => levels.map((i) => level(i, i === 0 && first ? first : FORMATS[i % 3], `%${i + 1}.`)).join('');
+  const abstract = (id, lvls) => `<w:abstractNum w:abstractNumId="${id}"><w:multiLevelType w:val="hybridMultilevel"/>${lvls}</w:abstractNum>`;
+  const custom = lists.map((list, i) => abstract(i + 2, list.ordered ? numberLevels(NUMBER_FORMATS[list.style]) : bulletLevels(BULLET_MARKERS[list.style]))).join('');
+  const nums = lists.map((list, i) => `<w:num w:numId="${i + 2}"><w:abstractNumId w:val="${i + 2}"/>${list.ordered ? `<w:lvlOverride w:ilvl="0"><w:startOverride w:val="${list.start}"/></w:lvlOverride>` : ''}</w:num>`).join('');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>${bullets}</w:abstractNum><w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>${numbers}</w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>${nums}</w:numbering>`;
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${abstract(0, bulletLevels())}${abstract(1, numberLevels())}${custom}<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>${nums}</w:numbering>`;
 }
 
 const WML = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
@@ -591,15 +598,20 @@ export async function exportDocumentToDocx(document) {
   const media = new Media();
   const page = document.page;
   const contentPx = page.width - page.margins.left - page.margins.right;
-  const starts = [];
+  const lists = [];
   const ctx = {
     media,
     contentPx,
     shapeId: 0,
     numbering: {
-      orderedList(start) {
-        starts.push(start || 1);
-        return starts.length + 1;
+      orderedList(start, style) {
+        lists.push({ ordered: true, start: start || 1, style });
+        return lists.length + 1;
+      },
+      bulletList(style) {
+        if (!BULLET_MARKERS[style] || style === 'disc') return 1;
+        lists.push({ ordered: false, style });
+        return lists.length + 1;
       }
     }
   };
@@ -622,7 +634,7 @@ export async function exportDocumentToDocx(document) {
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${title}</dc:title><dc:creator>PreSync</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}</dcterms:created></cp:coreProperties>`);
   zip.file('word/document.xml', documentXml);
   zip.file('word/styles.xml', DOC_STYLES);
-  zip.file('word/numbering.xml', numberingXml(starts));
+  zip.file('word/numbering.xml', numberingXml(lists));
   zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>${parts.map((p) => `<Relationship Id="${p.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${p.zone}" Target="${p.name}"/>`).join('')}${media.files.map((f) => `<Relationship Id="${f.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${f.name}"/>`).join('')}</Relationships>`);
   for (const p of parts) zip.file(`word/${p.name}`, p.xml);

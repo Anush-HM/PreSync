@@ -3,13 +3,32 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route } from 'react-router-dom';
 import DocumentEditorPage from './DocumentEditorPage.jsx';
-import { downloadDocument, getDocument, updateDocument } from '../data/documentsApi.js';
+import { downloadDocument, getDocument, listDocumentComments, updateDocument } from '../data/documentsApi.js';
 import { renderAt } from '../test/renderAt.jsx';
 
 vi.mock('../data/documentsApi.js', () => ({
   getDocument: vi.fn(),
   updateDocument: vi.fn(),
-  downloadDocument: vi.fn()
+  downloadDocument: vi.fn(),
+  saveDocument: vi.fn(),
+  listDocumentComments: vi.fn(),
+  addDocumentComment: vi.fn(),
+  replyToDocumentComment: vi.fn(),
+  updateDocumentComment: vi.fn(),
+  deleteDocumentComment: vi.fn(),
+  listDocumentVersions: vi.fn(),
+  getDocumentVersion: vi.fn(),
+  saveDocumentVersion: vi.fn(),
+  restoreDocumentVersion: vi.fn(),
+  shareDocument: vi.fn(),
+  updateDocumentShare: vi.fn(),
+  removeDocumentShare: vi.fn()
+}));
+
+// Without a server to talk to, the editor works on its own (see the live
+// tests in DocumentCollab.test.jsx).
+vi.mock('../data/yjsClient.js', () => ({
+  connectDocumentDoc: () => ({ onStatus: (cb) => { cb('denied'); return () => {}; }, disconnect: () => {} })
 }));
 
 const PAGE = { width: 816, height: 1056, margins: { top: 96, right: 96, bottom: 96, left: 96 } };
@@ -44,6 +63,7 @@ const lastEditor = () => prose().editor;
 beforeEach(() => {
   vi.clearAllMocks();
   getDocument.mockResolvedValue(DOC);
+  listDocumentComments.mockResolvedValue([]);
   updateDocument.mockResolvedValue({ id: 'doc-1', title: 'Annual plan', wordCount: 3 });
 });
 
