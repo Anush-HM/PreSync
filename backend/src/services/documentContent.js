@@ -58,6 +58,12 @@ const CELL_ATTRS = {
 };
 const FIGURE_ATTRS = { width: nullable(number(1, 4000)), height: nullable(number(1, 6000)), align: nullable(oneOf('left', 'center', 'right')) };
 
+// How a picture sits among the text: in line (the default), with text
+// wrapping beside it, or free over the text at an offset (px) from where
+// it is anchored.
+export const WRAPS = ['inline', 'square', 'front'];
+const PLACEMENT_ATTRS = { wrap: nullable(oneOf(...WRAPS)), offsetX: nullable(number(-4000, 4000)), offsetY: nullable(number(-4000, 8000)) };
+
 // Allowed attributes of each node type, with a check for each.
 const NODES = {
   doc: {},
@@ -75,7 +81,7 @@ const NODES = {
   tableRow: {},
   tableCell: CELL_ATTRS,
   tableHeader: CELL_ATTRS,
-  image: { ...FIGURE_ATTRS, src: matches(IMAGE_SRC), alt: nullable((v) => typeof v === 'string' && v.length <= 500), title: anything },
+  image: { ...FIGURE_ATTRS, ...PLACEMENT_ATTRS, src: matches(IMAGE_SRC), alt: nullable((v) => typeof v === 'string' && v.length <= 500), title: anything },
   shape: { ...FIGURE_ATTRS, shape: oneOf(...SHAPES), color: matches(COLOR) },
   callout: { tone: oneOf(...TONES) }
 };
@@ -440,6 +446,16 @@ function shareTabStops(blocks) {
   return out;
 }
 
+function imagePlacement(block) {
+  const f = block.float;
+  if (!f || f.wrap === 'inline') {
+    const align = f?.align || block.layout?.align;
+    return { align: align === 'justify' ? null : align || null };
+  }
+  if (f.wrap === 'square') return { wrap: 'square', align: f.align === 'right' ? 'right' : 'left' };
+  return { wrap: 'front', align: null, offsetX: Math.round(f.x || 0), offsetY: Math.round(f.y || 0) };
+}
+
 // The document tree for blocks from parseDocx.
 export function blocksToContent(blocks = [], images = []) {
   const byId = new Map(images.map((i) => [i.id, i]));
@@ -482,7 +498,7 @@ export function blocksToContent(blocks = [], images = []) {
         if (image && IMAGE_SRC.test(image.dataUrl)) {
           out.push({
             type: 'image',
-            attrs: { src: image.dataUrl, width: image.widthPx || null, height: image.heightPx || null, align: block.layout?.align === 'justify' ? null : block.layout?.align || null }
+            attrs: { src: image.dataUrl, width: image.widthPx || null, height: image.heightPx || null, ...imagePlacement(block) }
           });
         }
         break;
