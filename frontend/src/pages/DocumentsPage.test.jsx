@@ -41,6 +41,19 @@ beforeEach(() => {
 });
 
 describe('DocumentsPage', () => {
+  it('lists documents shared with the user on their own, with who shared them', async () => {
+    listDocuments.mockResolvedValue([DOC, { ...SHARED, role: 'viewer', owner: { id: 'u9', name: 'Olu', email: 'olu@example.com' } }]);
+    const user = renderPage();
+    const mine = await screen.findByRole('list', { name: 'Word documents' });
+    expect(within(mine).queryByText('Their notes')).not.toBeInTheDocument();
+    const shared = screen.getByRole('list', { name: 'Word documents shared with you' });
+    expect(within(shared).getByText(/shared by Olu · view only/)).toBeInTheDocument();
+    await user.click(within(shared).getByRole('button', { name: 'Actions for Their notes' }));
+    expect(screen.queryByRole('menuitem', { name: 'Rename' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Download as PDF' })).toBeInTheDocument();
+  });
+
   it('lists Word documents, and keeps other imports apart', async () => {
     renderPage();
     const docs = await screen.findByRole('list', { name: 'Word documents' });

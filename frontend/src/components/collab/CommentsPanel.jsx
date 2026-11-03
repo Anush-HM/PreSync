@@ -17,7 +17,7 @@ function blockLabel(block) {
   return { image: 'a picture', shape: 'a shape', table: 'a table', chart: 'a chart' }[type] || 'an element';
 }
 
-function Composer({ placeholder, onSubmit, autoFocus, submitLabel = 'Comment', onCancel }) {
+export function Composer({ placeholder, onSubmit, autoFocus, submitLabel = 'Comment', onCancel }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const ref = useRef(null);

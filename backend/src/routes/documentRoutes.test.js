@@ -3,6 +3,9 @@ import { buildDocx, p } from '../test/buildDocx.js';
 
 vi.mock('../models/Document.js', () => ({ default: { create: vi.fn(), find: vi.fn(), findById: vi.fn() } }));
 vi.mock('../models/ImportedDocument.js', () => ({ default: { create: vi.fn(), find: vi.fn(), findById: vi.fn() } }));
+vi.mock('../models/DocumentComment.js', () => ({ default: { create: vi.fn(), find: vi.fn(), findById: vi.fn(), deleteMany: vi.fn().mockResolvedValue({}) } }));
+vi.mock('../models/DocumentVersion.js', () => ({ default: { create: vi.fn(), find: vi.fn(), findOne: vi.fn(), findById: vi.fn(), deleteMany: vi.fn().mockResolvedValue({}), deleteOne: vi.fn() } }));
+vi.mock('../models/User.js', () => ({ default: { findOne: vi.fn() } }));
 
 const { default: Document } = await import('../models/Document.js');
 const { default: ImportedDocument } = await import('../models/ImportedDocument.js');
@@ -30,6 +33,7 @@ function makeDoc(overrides = {}) {
     save: vi.fn().mockResolvedValue(undefined),
     deleteOne: vi.fn().mockResolvedValue(undefined),
     markModified: vi.fn(),
+    populate: vi.fn().mockResolvedValue(undefined),
     ...overrides
   };
 }
@@ -72,11 +76,11 @@ describe('POST /api/documents', () => {
 
 describe('GET /api/documents', () => {
   it('lists what the caller owns or edits, without content', async () => {
-    const limit = vi.fn().mockResolvedValue([makeDoc()]);
-    Document.find.mockReturnValue({ select: () => ({ sort: () => ({ limit }) }) });
+    const populate = vi.fn().mockResolvedValue([makeDoc()]);
+    Document.find.mockReturnValue({ select: () => ({ sort: () => ({ limit: () => ({ populate }) }) }) });
     const res = await call('GET', '');
     expect(res.status).toBe(200);
-    expect(Document.find).toHaveBeenCalledWith({ $or: [{ ownerId: OWNER_ID }, { collaboratorIds: OWNER_ID }] });
+    expect(Document.find).toHaveBeenCalledWith({ $or: [{ ownerId: OWNER_ID }, { collaboratorIds: OWNER_ID }, { viewerIds: OWNER_ID }] });
     expect(res.body[0]).toMatchObject({ id: DOC_ID, title: 'Plan', wordCount: 2 });
     expect(res.body[0].content).toBeUndefined();
   });
@@ -233,5 +237,132 @@ describe('GET /api/documents/:id/export/:format', () => {
     Document.findById.mockResolvedValue(makeDoc());
     expect((await call('GET', `/${DOC_ID}/export/rtf`)).status).toBe(400);
     expect((await call('GET', `/${DOC_ID}/export/pdf`, { userId: STRANGER_ID })).status).toBe(403);
+  });
+});
+
+const VIEWER_ID = '64b000000000000000000004';
+const COMMENT_ID = '64b0000000000000000000c1';
+const VERSION_ID = '64b0000000000000000000e1';
+const { default: User } = await import('../models/User.js');
+const { default: DocumentComment } = await import('../models/DocumentComment.js');
+const { default: DocumentVersion } = await import('../models/DocumentVersion.js');
+
+describe('sharing a document', () => {
+  it('lets the owner share by email to edit or to view, and change it later', async () => {
+    const doc = makeDoc({ collaboratorIds: [], viewerIds: [] });
+    Document.findById.mockResolvedValue(doc);
+    User.findOne.mockResolvedValue({ _id: VIEWER_ID });
+    const res = await call('POST', `/${DOC_ID}/share`, { body: { email: ' Pat@Example.com ', role: 'viewer' } });
+    expect(res.status).toBe(201);
+    expect(User.findOne).toHaveBeenCalledWith({ email: 'pat@example.com' });
+    expect(doc.viewerIds).toEqual([VIEWER_ID]);
+    expect(doc.collaboratorIds).toEqual([]);
+
+    expect((await call('PATCH', `/${DOC_ID}/share/${VIEWER_ID}`, { body: { role: 'editor' } })).status).toBe(200);
+    expect(doc.viewerIds).toEqual([]);
+    expect(doc.collaboratorIds).toEqual([VIEWER_ID]);
+  });
+
+  it('refuses unknown emails, the owner, and anyone but the owner', async () => {
+    Document.findById.mockResolvedValue(makeDoc());
+    User.findOne.mockResolvedValue(null);
+    expect((await call('POST', `/${DOC_ID}/share`, { body: { email: 'nobody@example.com' } })).status).toBe(404);
+    User.findOne.mockResolvedValue({ _id: OWNER_ID });
+    expect((await call('POST', `/${DOC_ID}/share`, { body: { email: 'me@example.com' } })).status).toBe(400);
+    expect((await call('POST', `/${DOC_ID}/share`, { userId: COLLAB_ID, body: { email: 'x@example.com' } })).status).toBe(403);
+  });
+
+  it('lets someone leave a document shared with them', async () => {
+    const doc = makeDoc({ viewerIds: [VIEWER_ID] });
+    Document.findById.mockResolvedValue(doc);
+    expect((await call('DELETE', `/${DOC_ID}/share/${COLLAB_ID}`, { userId: VIEWER_ID })).status).toBe(403);
+    expect((await call('DELETE', `/${DOC_ID}/share/${VIEWER_ID}`, { userId: VIEWER_ID })).status).toBe(200);
+    expect(doc.viewerIds).toEqual([]);
+  });
+});
+
+describe('view-only access', () => {
+  it('can read and download but not change, save or delete', async () => {
+    const doc = makeDoc({ viewerIds: [VIEWER_ID] });
+    Document.findById.mockResolvedValue(doc);
+    const res = await call('GET', `/${DOC_ID}`, { userId: VIEWER_ID });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ role: 'viewer', isOwner: false });
+    expect((await call('GET', `/${DOC_ID}/export/docx`, { userId: VIEWER_ID })).status).toBe(200);
+    expect((await call('PUT', `/${DOC_ID}`, { userId: VIEWER_ID, body: { title: 'Mine now' } })).status).toBe(403);
+    expect((await call('POST', `/${DOC_ID}/save`, { userId: VIEWER_ID })).status).toBe(403);
+    expect((await call('DELETE', `/${DOC_ID}`, { userId: VIEWER_ID })).status).toBe(403);
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(doc.title).toBe('Plan');
+  });
+});
+
+describe('document comments', () => {
+  const populated = (c) => ({ ...c, populate: vi.fn().mockResolvedValue(undefined) });
+
+  it('lets editors start a thread on quoted text, and viewers only read', async () => {
+    Document.findById.mockResolvedValue(makeDoc({ viewerIds: [VIEWER_ID] }));
+    DocumentComment.create.mockImplementation(async (c) => populated({ _id: COMMENT_ID, ...c, replies: [], createdAt: new Date() }));
+    const res = await call('POST', `/${DOC_ID}/comments`, { userId: COLLAB_ID, body: { text: ' Check this ', quote: 'Hello there' } });
+    expect(res.status).toBe(201);
+    expect(DocumentComment.create).toHaveBeenCalledWith(expect.objectContaining({ documentId: DOC_ID, authorId: COLLAB_ID, text: 'Check this', quote: 'Hello there' }));
+    expect(res.body).toMatchObject({ id: COMMENT_ID, text: 'Check this', quote: 'Hello there', resolved: false });
+
+    expect((await call('POST', `/${DOC_ID}/comments`, { userId: VIEWER_ID, body: { text: 'hi' } })).status).toBe(403);
+    DocumentComment.find.mockReturnValue({ sort: () => ({ populate: async () => [populated({ _id: COMMENT_ID, text: 'Check this', replies: [] })] }) });
+    const list = await call('GET', `/${DOC_ID}/comments`, { userId: VIEWER_ID });
+    expect(list.status).toBe(200);
+    expect(list.body).toHaveLength(1);
+  });
+
+  it('only lets the author or the owner delete a thread', async () => {
+    Document.findById.mockResolvedValue(makeDoc({ collaboratorIds: [COLLAB_ID, VIEWER_ID] }));
+    const thread = { _id: COMMENT_ID, documentId: DOC_ID, authorId: COLLAB_ID, deleteOne: vi.fn() };
+    DocumentComment.findById.mockResolvedValue(thread);
+    expect((await call('DELETE', `/${DOC_ID}/comments/${COMMENT_ID}`, { userId: VIEWER_ID })).status).toBe(403);
+    expect((await call('DELETE', `/${DOC_ID}/comments/${COMMENT_ID}`, { userId: OWNER_ID })).status).toBe(204);
+    expect(thread.deleteOne).toHaveBeenCalled();
+  });
+});
+
+describe('document versions', () => {
+  it('saves a named version of the current document', async () => {
+    Document.findById.mockResolvedValue(makeDoc());
+    DocumentVersion.create.mockImplementation(async (v) => ({ _id: VERSION_ID, ...v, createdAt: new Date(), populate: vi.fn() }));
+    DocumentVersion.find.mockReturnValue({ select: () => ({ sort: async () => [] }) });
+    const res = await call('POST', `/${DOC_ID}/versions`, { body: { label: 'Draft 1' } });
+    expect(res.status).toBe(201);
+    expect(DocumentVersion.create).toHaveBeenCalledWith(expect.objectContaining({ documentId: DOC_ID, label: 'Draft 1', kind: 'manual', content: CONTENT }));
+    expect(res.body).toMatchObject({ id: VERSION_ID, label: 'Draft 1' });
+  });
+
+  it('restores a version after keeping what was there', async () => {
+    const doc = makeDoc();
+    Document.findById.mockResolvedValue(doc);
+    const old = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Older words here' }] }] };
+    DocumentVersion.findById.mockReturnValue({ populate: async () => ({ _id: VERSION_ID, documentId: DOC_ID, kind: 'manual', content: old, page: PAGE, layout: null, wordCount: 3 }) });
+    DocumentVersion.create.mockImplementation(async (v) => ({ _id: '64b0000000000000000000e2', ...v }));
+    DocumentVersion.find.mockReturnValue({ select: () => ({ sort: async () => [] }) });
+    const res = await call('POST', `/${DOC_ID}/versions/${VERSION_ID}/restore`);
+    expect(res.status).toBe(200);
+    expect(DocumentVersion.create).toHaveBeenCalledWith(expect.objectContaining({ kind: 'restore', content: CONTENT }));
+    expect(doc.content).toEqual(old);
+    expect(doc.title).toBe('Plan');
+    expect(doc.save).toHaveBeenCalled();
+
+    expect((await call('POST', `/${DOC_ID}/versions/${VERSION_ID}/restore`, { userId: STRANGER_ID })).status).toBe(403);
+  });
+});
+
+describe('Save', () => {
+  it('keeps an automatic version when the last one is old', async () => {
+    Document.findById.mockResolvedValue(makeDoc());
+    DocumentVersion.findOne.mockReturnValue({ sort: () => ({ select: async () => ({ createdAt: new Date(Date.now() - 3600e3), fingerprint: 'other' }) }) });
+    DocumentVersion.create.mockImplementation(async (v) => ({ _id: VERSION_ID, ...v }));
+    DocumentVersion.find.mockReturnValue({ select: () => ({ sort: async () => [] }) });
+    const res = await call('POST', `/${DOC_ID}/save`);
+    expect(res.status).toBe(200);
+    expect(res.body.versionId).toBe(VERSION_ID);
+    expect(DocumentVersion.create).toHaveBeenCalledWith(expect.objectContaining({ kind: 'auto' }));
   });
 });

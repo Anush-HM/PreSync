@@ -69,6 +69,10 @@ function DocumentsPage() {
 
   useEffect(() => { refresh(); }, []);
 
+  // Documents shared with the user are listed on their own.
+  const owned = documents.filter((d) => d.isOwner);
+  const shared = documents.filter((d) => !d.isOwner);
+
   async function refresh() {
     setLoading(true);
     setError('');
@@ -156,11 +160,27 @@ function DocumentsPage() {
             <button type="button" className="btn btn-primary" onClick={handleCreate} disabled={creating}><Plus /> New Word document</button>
           </div>
         ) : (
-          <ul className="import-list" aria-label="Word documents">
-            {documents.map((item) => (
-              <DocumentRow key={item.id} item={item} onRename={setRenameTarget} onDownload={handleDownload} onDelete={setDeleteTarget} />
-            ))}
-          </ul>
+          <>
+            {owned.length > 0 && (
+              <ul className="import-list" aria-label="Word documents">
+                {owned.map((item) => (
+                  <DocumentRow key={item.id} item={item} onRename={setRenameTarget} onDownload={handleDownload} onDelete={setDeleteTarget} />
+                ))}
+              </ul>
+            )}
+            {shared.length > 0 && (
+              <section className="dash-section" aria-labelledby="shared-documents-title">
+                <div className="dash-section-head">
+                  <h2 id="shared-documents-title">Shared with you</h2>
+                </div>
+                <ul className="import-list" aria-label="Word documents shared with you">
+                  {shared.map((item) => (
+                    <DocumentRow key={item.id} item={item} onRename={setRenameTarget} onDownload={handleDownload} onDelete={setDeleteTarget} />
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
         )}
 
         {!loading && imports.length > 0 && (

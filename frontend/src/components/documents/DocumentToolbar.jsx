@@ -32,6 +32,8 @@ function Toggle({ label, icon: Icon, pressed, disabled, onClick }) {
   );
 }
 
+// Picks close the menu first: closing hands focus back to its button,
+// and the pick then puts it back in the text so typing carries on.
 function ListMenu({ label, icon: Icon, styles, active, current, onPick, onRemove }) {
   return (
     <Popover
@@ -43,11 +45,11 @@ function ListMenu({ label, icon: Icon, styles, active, current, onPick, onRemove
       {(close) => (
         <div className="tb-list" role="group" aria-label={label} onMouseDown={keepCanvasFocus}>
           {styles.map((s) => (
-            <button key={s.id} type="button" className="menu-item" aria-label={s.label} aria-pressed={active && current === s.id} onClick={() => { onPick(s.id); close(); }}>
+            <button key={s.id} type="button" className="menu-item" aria-label={s.label} aria-pressed={active && current === s.id} onClick={() => { close(); onPick(s.id); }}>
               <span className="doc-list-sample">{s.sample}</span>{s.label}
             </button>
           ))}
-          {active && <button type="button" className="menu-item" onClick={() => { onRemove(); close(); }}>Remove list</button>}
+          {active && <button type="button" className="menu-item" onClick={() => { close(); onRemove(); }}>Remove list</button>}
         </div>
       )}
     </Popover>
@@ -157,7 +159,7 @@ function DocumentToolbar({ editor, onPageNumbers, onHeaderFooter, onPageBorder, 
           {(close) => (
             <div className="tb-list" role="group" aria-label="Line spacing" onMouseDown={keepCanvasFocus}>
               {LINE_SPACINGS.map((l) => (
-                <button key={l} type="button" className="menu-item" aria-pressed={state.line === l} onClick={() => { chain().setLineHeight(l).run(); close(); }}>
+                <button key={l} type="button" className="menu-item" aria-pressed={state.line === l} onClick={() => { close(); chain().setLineHeight(l).run(); }}>
                   {state.line === l ? <Check aria-hidden="true" /> : <span className="doc-menu-gap" />}{l.toFixed(l === 1.15 ? 2 : 1)}
                 </button>
               ))}

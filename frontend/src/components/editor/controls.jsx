@@ -30,15 +30,16 @@ export function ColorPopover({ label, icon: Icon, value, onPick, colors = PALETT
                 aria-label={c}
                 aria-pressed={value?.toLowerCase() === c}
                 onClick={() => {
-                  onPick(c);
+                  // Closing first, so a pick that focuses the text keeps it.
                   close();
+                  onPick(c);
                 }}
               />
             ))}
           </div>
           <div className="colorpop-foot">
             {allowNone && (
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { onPick(null); close(); }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { close(); onPick(null); }}>
                 <Ban aria-hidden="true" />{noneLabel}
               </button>
             )}

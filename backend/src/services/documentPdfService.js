@@ -279,13 +279,29 @@ export function exportDocumentToPdf(document) {
     y += base.after ?? PARA_GAP;
   }
 
+  function listNumber(n, style) {
+    if (style === 'lower-alpha' || style === 'upper-alpha') {
+      let out = '';
+      for (let v = n; v > 0; v = Math.floor((v - 1) / 26)) out = String.fromCharCode(97 + ((v - 1) % 26)) + out;
+      return style === 'upper-alpha' ? out.toUpperCase() : out;
+    }
+    if (style === 'lower-roman') {
+      const table = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']];
+      let v = n;
+      let out = '';
+      for (const [value, text] of table) while (v >= value) { out += text; v -= value; }
+      return out || String(n);
+    }
+    return String(n);
+  }
+
   function listBlock(node, ctx, level) {
     const ordered = node.type === 'orderedList';
     let n = node.attrs?.start || 1;
     const inner = { ...ctx, x: ctx.x + LIST_INDENT, width: ctx.width - LIST_INDENT };
     for (const item of node.content || []) {
       // Both markers exist in the standard PDF fonts.
-      const marker = ordered ? `${n}.` : level % 2 ? '-' : '•';
+      const marker = ordered ? `${listNumber(n, node.attrs?.listStyle)}.` : level % 2 ? '-' : '•';
       n += 1;
       (item.content || []).forEach((child, i) => {
         if (child.type === 'bulletList' || child.type === 'orderedList') listBlock(child, inner, level + 1);

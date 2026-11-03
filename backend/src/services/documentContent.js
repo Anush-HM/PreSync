@@ -38,6 +38,10 @@ export const SHAPES = ['rect', 'roundRect', 'ellipse', 'triangle', 'diamond', 'h
 const TAB_TYPES = ['left', 'start', 'center', 'right', 'end', 'decimal', 'bar', 'num'];
 const validTab = (t) => number(0, 4000)(t?.pos) && TAB_TYPES.includes(t?.type) && typeof t?.leader === 'string' && t.leader.length < 20;
 
+// The marker styles the editor's list menus offer.
+export const BULLET_STYLES = ['disc', 'circle', 'square', 'arrow'];
+export const NUMBER_STYLES = ['decimal', 'lower-alpha', 'lower-roman', 'upper-alpha'];
+
 const BLOCK_ATTRS = {
   indent: nullable(number(1, 8)),
   lineScale: nullable(number(0.2, 12)),
@@ -70,8 +74,8 @@ const NODES = {
   text: {},
   paragraph: { ...BLOCK_ATTRS, blockStyle: nullable(oneOf('title', 'subtitle', 'caption')) },
   heading: { ...BLOCK_ATTRS, level: number(1, 6) },
-  bulletList: {},
-  orderedList: { start: number(0, 100000), type: anything },
+  bulletList: { listStyle: nullable(oneOf(...BULLET_STYLES)) },
+  orderedList: { start: number(0, 100000), type: anything, listStyle: nullable(oneOf(...NUMBER_STYLES)) },
   listItem: {},
   blockquote: {},
   horizontalRule: {},
@@ -92,6 +96,8 @@ const MARKS = {
   underline: {},
   strike: {},
   badge: { tone: oneOf(...TONES) },
+  // Text a comment thread is attached to (see models/DocumentComment.js).
+  comment: { commentId: matches(/^[0-9a-f]{24}$/i) },
   textStyle: {
     color: nullable(matches(COLOR)),
     backgroundColor: nullable(matches(COLOR)),
@@ -100,42 +106,57 @@ const MARKS = {
   }
 };
 
-function cleanAttrs(attrs, allowed, label) {
+function cleanAttrs(attrs, allowed, label, lenient) {
   const out = {};
   for (const [key, value] of Object.entries(attrs || {})) {
     const check = allowed[key];
     if (check === undefined || value === undefined) continue;
-    if (!check(value)) throw new DocumentContentError(`Invalid ${key} on ${label}`);
+    if (!check(value)) {
+      if (lenient) continue;
+      throw new DocumentContentError(`Invalid ${key} on ${label}`);
+    }
     out[key] = value;
   }
   return out;
 }
 
 // Rebuilds the tree keeping only known nodes, marks and attributes.
-export function cleanContent(input) {
+// `lenient` drops what it does not know instead of refusing the whole
+// document: live co-editing saves use it, since a refusal there would
+// silently stop every later save.
+export function cleanContent(input, { lenient = false } = {}) {
   if (input?.type !== 'doc' || !Array.isArray(input.content)) throw new DocumentContentError('Content must be a document');
   let nodes = 0;
+  const refuse = (message) => {
+    if (lenient) return null;
+    throw new DocumentContentError(message);
+  };
   function clean(node, depth) {
     if (depth > MAX_DEPTH) throw new DocumentContentError('Content is nested too deeply');
     nodes += 1;
     if (nodes > MAX_NODES) throw new DocumentContentError('This document is too large');
     const allowed = NODES[node?.type];
-    if (!allowed) throw new DocumentContentError(`Unknown content: ${String(node?.type).slice(0, 40)}`);
+    if (!allowed) return refuse(`Unknown content: ${String(node?.type).slice(0, 40)}`);
     const out = { type: node.type };
     if (node.type === 'text') {
-      if (typeof node.text !== 'string' || !node.text) throw new DocumentContentError('Text must not be empty');
+      if (typeof node.text !== 'string' || !node.text) return refuse('Text must not be empty');
       out.text = node.text;
     }
-    const attrs = cleanAttrs(node.attrs, allowed, node.type);
+    const attrs = cleanAttrs(node.attrs, allowed, node.type, lenient);
     if (Object.keys(attrs).length) out.attrs = attrs;
     if (Array.isArray(node.marks) && node.marks.length) {
-      out.marks = node.marks.map((m) => {
-        if (!MARKS[m?.type]) throw new DocumentContentError(`Unknown formatting: ${String(m?.type).slice(0, 40)}`);
-        const markAttrs = cleanAttrs(m.attrs, MARKS[m.type], m.type);
-        return Object.keys(markAttrs).length ? { type: m.type, attrs: markAttrs } : { type: m.type };
-      });
+      const marks = [];
+      for (const m of node.marks) {
+        if (!MARKS[m?.type]) {
+          refuse(`Unknown formatting: ${String(m?.type).slice(0, 40)}`);
+          continue;
+        }
+        const markAttrs = cleanAttrs(m.attrs, MARKS[m.type], m.type, lenient);
+        marks.push(Object.keys(markAttrs).length ? { type: m.type, attrs: markAttrs } : { type: m.type });
+      }
+      if (marks.length) out.marks = marks;
     }
-    if (Array.isArray(node.content)) out.content = node.content.map((c) => clean(c, depth + 1));
+    if (Array.isArray(node.content)) out.content = node.content.map((c) => clean(c, depth + 1)).filter(Boolean);
     return out;
   }
   const cleaned = clean(input, 0);
