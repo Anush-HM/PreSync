@@ -5,7 +5,11 @@ import * as decoding from 'lib0/decoding.js';
 import * as syncProtocol from 'y-protocols/sync.js';
 import * as awarenessProtocol from 'y-protocols/awareness.js';
 import Deck from '../models/Deck.js';
+import Document from '../models/Document.js';
+import { roleOf } from '../services/documentAccess.js';
 import { getDoc, releaseDoc } from './docManager.js';
+import { getDocumentDoc, releaseDocumentDoc } from './documentManager.js';
+import { joinRoom } from './rooms.js';
 
 const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
@@ -14,7 +18,8 @@ const MESSAGE_AWARENESS = 1;
 // presenter/viewer broadcast (see sockets/index.js), which is Socket.io
 // only and never touches this server. Only authenticated editors ever
 // reach this path — viewers have no token and never connect here.
-const awarenessByDeck = new Map(); // deckId -> { awareness, conns }
+const awarenessByDeck = new Map(); // room key -> { awareness, conns }
+
 
 // Shares one Awareness per deck across all of its open sockets. It lives
 // exactly as long as the deck has a connection, so every socket on a deck
@@ -52,6 +57,42 @@ async function isEditorOf(deckId, userId) {
   );
 }
 
+const OBJECT_ID = /^[0-9a-f]{24}$/i;
+
+// What each kind of room needs: who may join (and whether only to read),
+// and where its shared Y.Doc comes from.
+const ROOMS = {
+  deck: {
+    async access(id, userId) {
+      return (await isEditorOf(id, userId)) ? 'edit' : null;
+    },
+    getDoc,
+    releaseDoc,
+    denied: 'Not a collaborator on this deck'
+  },
+  // Word documents: editors co-edit; people it is shared with to view
+  // follow the live text and show up as present, but their changes are
+  // never applied.
+  document: {
+    async access(id, userId) {
+      if (!OBJECT_ID.test(id)) return null;
+      const doc = await Document.findById(id).select('ownerId collaboratorIds viewerIds').lean();
+      const role = doc && roleOf(doc, userId);
+      if (!role) return null;
+      return role === 'viewer' ? 'read' : 'edit';
+    },
+    getDoc: getDocumentDoc,
+    releaseDoc: releaseDocumentDoc,
+    denied: 'You do not have access to this document'
+  }
+};
+
+function roomFor(pathname) {
+  const rest = pathname.slice('/yjs/'.length);
+  if (rest.startsWith('documents/')) return { kind: ROOMS.document, id: rest.slice('documents/'.length), key: `document:${rest.slice('documents/'.length)}` };
+  return { kind: ROOMS.deck, id: rest, key: rest };
+}
+
 export function attachYjsServer(httpServer) {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -64,7 +105,7 @@ export function attachYjsServer(httpServer) {
   });
 
   wss.on('connection', async (ws, req, pathname) => {
-    const deckId = pathname.slice('/yjs/'.length);
+    const { kind, id: deckId, key: roomKey } = roomFor(pathname);
 
     // Clients send their sync step 1 the moment the socket opens, which is
     // before we finish auth and loading the deck below. Buffer anything that
@@ -87,27 +128,29 @@ export function attachYjsServer(httpServer) {
       return;
     }
 
-    const allowed = await isEditorOf(deckId, userId).catch(() => false);
-    if (!allowed) {
-      ws.close(4003, 'Not a collaborator on this deck');
+    const access = await kind.access(deckId, userId).catch(() => null);
+    if (!access) {
+      ws.close(4003, kind.denied);
       return;
     }
+    const readOnly = access === 'read';
 
     let doc;
     try {
-      doc = await getDoc(deckId);
+      doc = await kind.getDoc(deckId);
     } catch (err) {
-      console.error(`Yjs failed to load deck ${deckId}:`, err);
-      ws.close(1011, 'Failed to load deck');
+      console.error(`Yjs failed to load ${roomKey}:`, err);
+      ws.close(1011, 'Failed to load');
       return;
     }
     // The socket may have dropped while we were loading the deck; its close
     // event has already fired, so release here or the refcount leaks.
     if (ws.readyState !== ws.OPEN) {
-      releaseDoc(deckId);
+      kind.releaseDoc(deckId);
       return;
     }
-    const awareness = getAwareness(deckId, doc);
+    const awareness = getAwareness(roomKey, doc);
+    const leaveRoom = joinRoom(roomKey, ws, userId);
     ws.binaryType = 'arraybuffer';
 
     function send(encoder) {
@@ -166,6 +209,17 @@ export function attachYjsServer(httpServer) {
         const messageType = decoding.readVarUint(decoder);
 
         if (messageType === MESSAGE_SYNC) {
+          // Read-only sockets may ask for the document (step 1) but their
+          // own changes (step 2 and updates) are dropped.
+          if (readOnly) {
+            const syncType = decoding.readVarUint(decoder);
+            if (syncType !== syncProtocol.messageYjsSyncStep1) return;
+            const encoder = encoding.createEncoder();
+            encoding.writeVarUint(encoder, MESSAGE_SYNC);
+            syncProtocol.readSyncStep1(decoder, encoder, doc);
+            send(encoder);
+            return;
+          }
           const encoder = encoding.createEncoder();
           encoding.writeVarUint(encoder, MESSAGE_SYNC);
           syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
@@ -180,13 +234,14 @@ export function attachYjsServer(httpServer) {
     earlyMessages.splice(0).forEach(handleMessage);
 
     ws.on('close', () => {
+      leaveRoom();
       doc.off('update', onDocUpdate);
       // Clear this socket's cursors; the remaining sockets' listeners relay
       // the removal to their editors.
       awarenessProtocol.removeAwarenessStates(awareness, Array.from(controlledIds), null);
       awareness.off('update', onAwarenessUpdate);
-      releaseAwareness(deckId);
-      releaseDoc(deckId);
+      releaseAwareness(roomKey);
+      kind.releaseDoc(deckId);
     });
   });
 

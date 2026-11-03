@@ -13,7 +13,8 @@ import TemplateGallery from '../components/templates/TemplateGallery.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
 import { listDecks, createDeck, deleteDeck, duplicateDeck } from '../data/decksApi.js';
 import { listImports } from '../data/importsApi.js';
-import { createDocument } from '../data/documentsApi.js';
+import { createDocument, downloadDocument, listDocuments } from '../data/documentsApi.js';
+import DocumentRow from '../components/documents/DocumentRow.jsx';
 import { getCurrentUser } from '../data/apiConfig.js';
 import { greetingFor, plural } from '../data/format.js';
 import { ASPECT_RATIOS } from '../data/slideFormat.js';
@@ -22,7 +23,7 @@ import './DecksPage.css';
 const VIEWS = {
   home: { title: null, subtitle: 'Pick up where you left off, or start something new.' },
   mine: { title: 'My presentations', subtitle: 'Presentations you own.' },
-  shared: { title: 'Shared with me', subtitle: 'Presentations other people invited you to co-edit.' }
+  shared: { title: 'Shared with me', subtitle: 'Presentations and Word documents other people shared with you.' }
 };
 
 const SORTS = {
@@ -213,6 +214,21 @@ function DecksPage({ view = 'home' }) {
   const [showTemplates, setShowTemplates] = useState(false);
 
   useEffect(() => { refreshDecks(); }, []);
+
+  // Shared With Me also lists Word documents shared with the user.
+  const [sharedDocs, setSharedDocs] = useState([]);
+  useEffect(() => {
+    if (view !== 'shared') return;
+    listDocuments().then((docs) => setSharedDocs(docs.filter((d) => !d.isOwner))).catch(() => setSharedDocs([]));
+  }, [view]);
+
+  async function downloadShared(item, format) {
+    try {
+      await downloadDocument(item.id, format, item.title);
+    } catch (err) {
+      toast.error(err.message || 'Could not download this document');
+    }
+  }
 
   // Recent imports are a secondary list; a failure here shouldn't block the page.
   useEffect(() => {
@@ -453,10 +469,17 @@ function DecksPage({ view = 'home' }) {
                     <button type="button" className="btn btn-ghost" onClick={() => setQuery('')}>Clear search</button>
                   </>
                 ) : view === 'shared' ? (
-                  <>
-                    <h2>Nothing shared with you yet</h2>
-                    <p>When someone invites you to co-edit a presentation, it shows up here.</p>
-                  </>
+                  sharedDocs.length ? (
+                    <>
+                      <h2>No presentations shared with you</h2>
+                      <p>Word documents shared with you are listed below.</p>
+                    </>
+                  ) : (
+                    <>
+                      <h2>Nothing shared with you yet</h2>
+                      <p>When someone shares a presentation or a Word document with you, it shows up here.</p>
+                    </>
+                  )
                 ) : (
                   <>
                     <h2>No presentations here yet</h2>
@@ -467,6 +490,19 @@ function DecksPage({ view = 'home' }) {
               </div>
             )}
           </>
+        )}
+        {view === 'shared' && sharedDocs.length > 0 && (
+          <section className="dash-section" aria-labelledby="shared-docs-title">
+            <div className="dash-section-head">
+              <h2 id="shared-docs-title">Word documents</h2>
+              <Link to="/documents" className="dash-link">All documents <ArrowRight /></Link>
+            </div>
+            <ul className="import-list" aria-label="Word documents shared with you">
+              {sharedDocs.map((item) => (
+                <DocumentRow key={item.id} item={item} onRename={() => navigate(`/documents/${item.id}`)} onDownload={downloadShared} onDelete={() => {}} />
+              ))}
+            </ul>
+          </section>
         )}
       </div>
 

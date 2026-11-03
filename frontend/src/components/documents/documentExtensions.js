@@ -5,6 +5,8 @@ import Image from '@tiptap/extension-image';
 import TextAlign from '@tiptap/extension-text-align';
 import { TextStyleKit } from '@tiptap/extension-text-style';
 import { TableKit } from '@tiptap/extension-table';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 import { ImageFigure, ShapeFigure } from './FigureViews.jsx';
 import { Pagination } from './pagination.js';
 
@@ -153,6 +155,38 @@ const Badge = Mark.create({
   }
 });
 
+// Text a comment thread is about. The thread itself lives on the server
+// (documentsApi comments); the mark only says where it is.
+export const CommentMark = Mark.create({
+  name: 'comment',
+  inclusive: false,
+  addAttributes() {
+    return { commentId: { default: null, parseHTML: (el) => el.getAttribute('data-comment-id'), renderHTML: (a) => ({ 'data-comment-id': a.commentId }) } };
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-comment-id]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes, { class: 'doc-comment' }), 0];
+  },
+  addCommands() {
+    return {
+      setComment: (commentId) => ({ commands }) => commands.setMark(this.name, { commentId }),
+      // Takes one thread's mark off wherever it is in the document.
+      unsetCommentEverywhere: (commentId) => ({ tr, state, dispatch }) => {
+        const type = state.schema.marks.comment;
+        state.doc.descendants((node, pos) => {
+          if (!node.isText) return;
+          const mark = node.marks.find((m) => m.type === type && m.attrs.commentId === commentId);
+          if (mark) tr.removeMark(pos, pos + node.nodeSize, mark);
+        });
+        if (dispatch) dispatch(tr);
+        return true;
+      }
+    };
+  }
+});
+
 const Callout = Node.create({
   name: 'callout',
   group: 'block',
@@ -275,13 +309,14 @@ const DocumentImage = Image.extend({
   }
 });
 
-export const documentExtensions = [
-  StarterKit.configure({
-    heading: { levels: [1, 2, 3, 4, 5, 6] },
-    code: false,
-    codeBlock: false,
-    link: false
-  }),
+const STARTER_KIT = {
+  heading: { levels: [1, 2, 3, 4, 5, 6] },
+  code: false,
+  codeBlock: false,
+  link: false
+};
+
+const sharedExtensions = [
   TextStyleKit.configure({ lineHeight: false }),
   TextAlign.configure({ types: ['heading', 'paragraph'] }),
   TableKit.configure({ table: { resizable: true } }),
@@ -291,8 +326,27 @@ export const documentExtensions = [
   Callout,
   PageBreak,
   Shape,
+  CommentMark,
   Pagination
 ];
+
+export const documentExtensions = [StarterKit.configure(STARTER_KIT), ...sharedExtensions];
+
+// For showing a stored document read-only, off the page sheets.
+export const previewExtensions = documentExtensions.filter((e) => e !== Pagination);
+
+// With `collab` ({ doc, awareness } from connectDocumentDoc, plus `user`
+// { name, color }), the editor works on the live shared copy: its own
+// undo history replaces StarterKit's, and other people's cursors show.
+export function buildDocumentExtensions(collab) {
+  if (!collab) return documentExtensions;
+  return [
+    StarterKit.configure({ ...STARTER_KIT, undoRedo: false }),
+    ...sharedExtensions,
+    Collaboration.configure({ document: collab.doc, field: 'default' }),
+    CollaborationCaret.configure({ provider: collab, user: collab.user })
+  ];
+}
 
 const FALLBACK_SIZE = { paragraph: 11, title: 26, subtitle: 14, caption: 9, 1: 20, 2: 16, 3: 13, 4: 12, 5: 11, 6: 11 };
 

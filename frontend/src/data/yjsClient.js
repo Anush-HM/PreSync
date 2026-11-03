@@ -9,11 +9,18 @@ const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
 const RECONNECT_DELAY_MS = 1500;
 
+// Close codes from backend/src/yjs/server.js that retrying cannot fix.
+const DENIED_CODES = new Set([4001, 4003]);
+const ACCESS_CHANGED = 4005;
+
 // Connects a deck's Y.Doc to the backend's Yjs server. Returns
 // { doc, awareness, disconnect, onStatus }, where onStatus(cb) reports
-// 'connecting' | 'synced' | 'offline' and returns an unsubscribe. Reconnects on drop so background
-// editors don't lose the live session over a flaky connection.
-export function connectYjsDoc(deckId) {
+// 'connecting' | 'synced' | 'offline' | 'denied' | 'changed' (the owner
+// changed this person's access) and returns an
+// unsubscribe. Reconnects on drop so background editors don't lose the
+// live session over a flaky connection. `room` picks another kind of
+// shared document (Word documents use `documents/<id>`).
+export function connectYjsDoc(deckId, { room = deckId } = {}) {
   const doc = new Y.Doc();
   const awareness = new awarenessProtocol.Awareness(doc);
 
@@ -35,7 +42,7 @@ export function connectYjsDoc(deckId) {
   }
 
   function open() {
-    ws = new WebSocket(`${WS_BASE}/yjs/${deckId}?token=${encodeURIComponent(getAuthToken())}`);
+    ws = new WebSocket(`${WS_BASE}/yjs/${room}?token=${encodeURIComponent(getAuthToken())}`);
     ws.binaryType = 'arraybuffer';
 
     ws.addEventListener('open', () => {
@@ -60,8 +67,16 @@ export function connectYjsDoc(deckId) {
       }
     });
 
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (event) => {
       if (!shouldReconnect) return;
+      if (DENIED_CODES.has(event?.code)) {
+        setStatus('denied');
+        return;
+      }
+      if (event?.code === ACCESS_CHANGED) {
+        setStatus('changed');
+        return;
+      }
       setStatus('offline');
       reconnectTimer = setTimeout(open, RECONNECT_DELAY_MS);
     });
@@ -87,6 +102,7 @@ export function connectYjsDoc(deckId) {
   open();
 
   function disconnect() {
+    if (!shouldReconnect) return;
     shouldReconnect = false;
     if (reconnectTimer) clearTimeout(reconnectTimer);
     awarenessProtocol.removeAwarenessStates(awareness, [doc.clientID], null);
@@ -102,6 +118,9 @@ export function connectYjsDoc(deckId) {
 
   return { doc, awareness, disconnect, onStatus };
 }
+
+// A Word document's live copy (see backend/src/yjs/documentYjs.js).
+export const connectDocumentDoc = (documentId) => connectYjsDoc(documentId, { room: `documents/${documentId}` });
 
 // --- Helpers for reading/writing the shared slide/block shape ---------
 // Mirrors the backend's docManager.js plain<->Y.Map mapping so both

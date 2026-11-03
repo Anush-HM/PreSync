@@ -9,6 +9,9 @@ const documentSchema = new mongoose.Schema(
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     // Other users who may edit this document (the owner always can).
     collaboratorIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    // Users who may read it, follow live edits and comments, and download
+    // it, but not change it.
+    viewerIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     content: { type: mongoose.Schema.Types.Mixed, required: true },
     // Page size and margins in px at 96 dpi: { width, height, margins }.
     page: { type: mongoose.Schema.Types.Mixed, required: true },
@@ -24,5 +27,6 @@ const documentSchema = new mongoose.Schema(
 
 documentSchema.index({ ownerId: 1, updatedAt: -1 });
 documentSchema.index({ collaboratorIds: 1, updatedAt: -1 });
+documentSchema.index({ viewerIds: 1, updatedAt: -1 });
 
 export default mongoose.model('Document', documentSchema);
