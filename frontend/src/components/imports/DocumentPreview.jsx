@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { runCss } from '../../data/slideFormat.js';
 import { ChartSvg, Runs, TableBlock } from '../SlideView.jsx';
 import { CHART_FONT, chartSummary } from '../../data/chartLayout.js';
@@ -34,13 +34,71 @@ function fieldRuns(runs, pageNo, pageCount) {
   });
 }
 
+// Runs split at their tabs: each tab becomes a box that layoutTabs()
+// sizes to reach the paragraph's next tab stop, and the text between
+// tabs is wrapped so its width can be measured.
+function TabbedRuns({ runs }) {
+  if (!runs.some((r) => r.text.includes('\t'))) return <Runs runs={runs} scale={1} />;
+  const segments = [[]];
+  const tabs = [];
+  for (const run of runs) {
+    run.text.split('\t').forEach((part, i) => {
+      if (i > 0) {
+        tabs.push(run.style);
+        segments.push([]);
+      }
+      if (part) segments[segments.length - 1].push({ ...run, text: part });
+    });
+  }
+  return segments.map((seg, i) => (
+    <span key={i}>
+      {i > 0 && <span className="docp-tab" style={tabs[i - 1] ? runCss(tabs[i - 1]) : undefined} aria-hidden="true">{'\u00a0'}</span>}
+      <span className="docp-seg"><Runs runs={seg} scale={1} /></span>
+    </span>
+  ));
+}
+
+const DEFAULT_TAB = 48; // Word's default stops: every half inch
+
+// Sizes the tabs of a paragraph the way Word places text at tab stops:
+// a left stop starts the text there, a right stop ends it there and a
+// centre stop centres it. Stops count from the paragraph's left edge
+// (the text column), in unscaled page px.
+function layoutTabs(p, stops, scale) {
+  const tabs = p.querySelectorAll('.docp-tab');
+  if (!tabs.length) return;
+  tabs.forEach((t) => { t.style.width = '0px'; });
+  const left = p.getBoundingClientRect().left;
+  tabs.forEach((tab) => {
+    const at = tab.getBoundingClientRect();
+    const x = (at.left - left) / scale;
+    const seg = tab.nextElementSibling;
+    const segRect = seg?.getBoundingClientRect();
+    // Text that wraps onto another line has no width on this one.
+    const sameLine = segRect && Math.abs((segRect.top + segRect.bottom) / 2 - (at.top + at.bottom) / 2) < segRect.height / 2;
+    const textWidth = sameLine && seg.getClientRects().length <= 1 ? segRect.width / scale : 0;
+    const stop = (stops || []).find((s) => s.pos > x + 1);
+    let width = stop ? stop.pos - x : (Math.floor(x / DEFAULT_TAB) + 1) * DEFAULT_TAB - x;
+    // A couple of px short of a right stop, so text ending on the margin doesn't wrap.
+    if (stop && ['right', 'end', 'decimal'].includes(stop.type)) width -= textWidth + 2;
+    else if (stop?.type === 'center') width -= textWidth / 2;
+    tab.style.width = `${Math.max(1, width)}px`;
+    tab.classList.toggle('has-leader', !!stop?.leader && stop.leader !== 'none');
+  });
+}
+
 function Paragraph({ block, pageNo = 1, pageCount = 1, marker, className }) {
   const runs = block.runs?.length ? fieldRuns(block.runs, pageNo, pageCount) : [{ text: block.text || '', style: null }];
   const empty = runs.every((r) => !r.text);
+  const hasTabs = runs.some((r) => r.text.includes('\t'));
   return (
-    <p className={`${className}${block.layout ? '' : ' is-legacy'}`} style={paragraphCss(block.layout)}>
+    <p
+      className={`${className}${block.layout ? '' : ' is-legacy'}${marker ? ' has-slide-marker' : ''}`}
+      style={paragraphCss(block.layout)}
+      data-tabs={hasTabs ? JSON.stringify(block.layout?.tabs || []) : undefined}
+    >
       {marker}
-      {empty ? '​' : <Runs runs={runs} scale={1} />}
+      {empty ? '\u200b' : <TabbedRuns runs={runs} />}
     </p>
   );
 }
@@ -60,10 +118,11 @@ function ListItem({ item }) {
     </span>
   );
   const runs = item.runs?.length ? item.runs : [{ text: item.text, style: null }];
+  const hasTabs = runs.some((r) => r.text.includes('\t'));
   return (
-    <p className={`doc-li${item.layout ? '' : ' is-legacy'}`} style={style}>
+    <p className={`doc-li${item.layout ? '' : ' is-legacy'}`} style={style} data-tabs={hasTabs ? JSON.stringify(item.layout?.tabs || []) : undefined}>
       {markerBox}
-      <Runs runs={runs} scale={1} />
+      <TabbedRuns runs={runs} />
     </p>
   );
 }
@@ -82,11 +141,30 @@ function FlatTable({ rows }) {
   );
 }
 
+// Where a picture sits: in line (aligned), floated with text wrapping
+// beside it, or free at an offset over the text, as it was in Word.
+function Picture({ b, img }) {
+  const size = img.widthPx ? { width: img.widthPx, aspectRatio: img.heightPx ? `${img.widthPx} / ${img.heightPx}` : undefined } : undefined;
+  const picture = <img className="doc-img" src={img.dataUrl} alt="Picture from the document" style={size} />;
+  const f = b.float;
+  if (f?.wrap === 'square') return <div className={`docp-float is-${f.align === 'right' ? 'right' : 'left'}`}>{picture}</div>;
+  if (f?.wrap === 'front') {
+    return (
+      <div className={`docp-free${f.behind ? ' is-behind' : ''}`}>
+        <div className="docp-free-box" style={{ left: f.x || 0, top: f.y || 0 }}>{picture}</div>
+      </div>
+    );
+  }
+  const align = f?.align || b.layout?.align;
+  return <p className="doc-img-wrap" style={align && align !== 'justify' ? { textAlign: align } : undefined}>{picture}</p>;
+}
+
 function Block({ b, imageById, slideStart }) {
-  const tag = slideStart ? <span className="doc-slide-marker mono">New slide</span> : null;
+  // Sits in the left margin, so it never moves or wraps the heading.
+  const tag = slideStart ? <span className="doc-slide-marker mono" title="The suggested outline starts a new slide here">New slide</span> : null;
   switch (b.type) {
     case 'title':
-      return <Paragraph block={b} className="doc-title" />;
+      return <Paragraph block={b} className="docp-title" />;
     case 'subtitle':
       return <Paragraph block={b} className="doc-subtitle" />;
     case 'heading':
@@ -124,16 +202,7 @@ function Block({ b, imageById, slideStart }) {
     case 'image': {
       const img = imageById.get(b.imageId);
       if (!img) return null;
-      return (
-        <p className="doc-img-wrap">
-          <img
-            className="doc-img"
-            src={img.dataUrl}
-            alt="Picture from the document"
-            style={img.widthPx ? { width: img.widthPx, aspectRatio: img.heightPx ? `${img.widthPx} / ${img.heightPx}` : undefined } : undefined}
-          />
-        </p>
-      );
+      return <Picture b={b} img={img} />;
     }
     default:
       return null;
@@ -177,6 +246,21 @@ function DocumentPreview({ blocks, images, headings, page, header, footer }) {
   const [heights, setHeights] = useState([]);
   const [scale, setScale] = useState(1);
 
+  // Text widths change once web fonts arrive: lay out again then.
+  const [fontsLoaded, setFontsLoaded] = useState(0);
+  useEffect(() => {
+    const fonts = typeof document !== 'undefined' ? document.fonts : null;
+    if (!fonts) return undefined;
+    let live = true;
+    const bump = () => { if (live) setFontsLoaded((n) => n + 1); };
+    fonts.ready?.then(bump);
+    fonts.addEventListener?.('loadingdone', bump);
+    return () => {
+      live = false;
+      fonts.removeEventListener?.('loadingdone', bump);
+    };
+  }, []);
+
   // Measure each block at the page's text width, including margins.
   useLayoutEffect(() => {
     const root = measureRef.current;
@@ -186,7 +270,7 @@ function DocumentPreview({ blocks, images, headings, page, header, footer }) {
       return el.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
     });
     setHeights((prev) => (prev.length === next.length && prev.every((h, i) => h === next[i]) ? prev : next));
-  }, [blocks, size.width]);
+  }, [blocks, size.width, fontsLoaded]);
 
   // Fit the page to the panel width on narrow screens.
   useLayoutEffect(() => {
@@ -199,6 +283,17 @@ function DocumentPreview({ blocks, images, headings, page, header, footer }) {
     return () => ro.disconnect();
   }, [size.width]);
 
+  // Tab stops need the laid-out text, so they are sized after each render.
+  useLayoutEffect(() => {
+    const root = wrapRef.current;
+    if (!root) return;
+    for (const p of root.querySelectorAll('p[data-tabs]')) {
+      let stops = [];
+      try { stops = JSON.parse(p.dataset.tabs); } catch { /* default stops */ }
+      layoutTabs(p, stops, p.closest('.doc-measure') ? 1 : scale);
+    }
+  });
+
   const pages = paginate(blocks, heights, contentHeight);
   const pageCount = pages.length;
   const textWidth = size.width - m.left - m.right;
@@ -207,7 +302,7 @@ function DocumentPreview({ blocks, images, headings, page, header, footer }) {
     <div className="doc-pages" ref={wrapRef} aria-label="Document preview">
       <div className="doc-measure" ref={measureRef} aria-hidden="true" style={{ width: textWidth }}>
         {blocks.map((b, i) => (
-          <div key={i} className="doc-flow">
+          <div key={i} className="docp-block">
             <Block b={b} imageById={imageById} slideStart={slideStarts.has(i)} />
           </div>
         ))}
@@ -230,21 +325,21 @@ function DocumentPreview({ blocks, images, headings, page, header, footer }) {
               }}
             >
               {header?.length ? (
-                <header className="doc-header" style={{ top: m.header, left: m.left, right: m.right }}>
+                <header className="docp-header" style={{ top: m.header, left: m.left, right: m.right }}>
                   {header.map((para, i) => (
                     <Paragraph key={i} block={para} pageNo={p + 1} pageCount={pageCount} className="doc-p" />
                   ))}
                 </header>
               ) : null}
-              <div className="doc-flow-page">
+              <div className="docp-flow-page">
                 {indices.map((i) => (
-                  <div key={i} className="doc-flow">
+                  <div key={i} className="docp-block">
                     <Block b={blocks[i]} imageById={imageById} slideStart={slideStarts.has(i)} />
                   </div>
                 ))}
               </div>
               {footer?.length ? (
-                <footer className="doc-footer" style={{ bottom: m.footer, left: m.left, right: m.right }}>
+                <footer className="docp-footer" style={{ bottom: m.footer, left: m.left, right: m.right }}>
                   {footer.map((para, i) => (
                     <Paragraph key={i} block={para} pageNo={p + 1} pageCount={pageCount} className="doc-p" />
                   ))}

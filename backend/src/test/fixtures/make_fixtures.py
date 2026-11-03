@@ -344,6 +344,92 @@ def build_docx():
     print('wrote', out)
 
 
+def build_academic_docx():
+    """A college report front matter, the way such reports are usually
+    typed: a floating logo beside a centred heading, signature lines and a
+    table of contents laid out with tab stops, manual line breaks, and
+    runs whose own font only names the complex-script face (so their
+    Latin face comes from the style)."""
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
+    from docx.oxml import OxmlElement, parse_xml
+    from docx.shared import Inches as DInches, Pt as DPt
+
+    doc = Document()
+    section = doc.sections[0]
+    section.page_width = DInches(8.27)
+    section.page_height = DInches(11.69)
+    section.left_margin = section.right_margin = DInches(1)
+    normal = doc.styles['Normal']
+    normal.font.name = SERIF
+    normal.font.size = DPt(12)
+
+    def cs_only(run):
+        rpr = run._r.get_or_add_rPr()
+        fonts = OxmlElement('w:rFonts')
+        fonts.set(qn('w:cs'), SERIF)
+        rpr.insert(0, fonts)
+        return run
+
+    # A logo floating at the left margin, square wrapping, next to the heading.
+    pic_par = doc.add_paragraph()
+    inline = pic_par.add_run().add_picture(logo_png(), width=DInches(1.1))._inline
+    graphic = inline.find(qn('a:graphic'))
+    extent = inline.find(qn('wp:extent'))
+    anchor = parse_xml(
+        '<wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+        'distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="2" '
+        'behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">'
+        '<wp:simplePos x="0" y="0"/>'
+        '<wp:positionH relativeFrom="margin"><wp:posOffset>0</wp:posOffset></wp:positionH>'
+        '<wp:positionV relativeFrom="paragraph"><wp:posOffset>381000</wp:posOffset></wp:positionV>'
+        f'<wp:extent cx="{extent.get("cx")}" cy="{extent.get("cy")}"/>'
+        '<wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapSquare wrapText="bothSides"/>'
+        '<wp:docPr id="10" name="Logo"/><wp:cNvGraphicFramePr/></wp:anchor>')
+    anchor.append(graphic)
+    inline.getparent().replace(inline, anchor)
+
+    h = doc.add_heading('VISVESVARAYA TECHNOLOGICAL UNIVERSITY', 1)
+    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cs_only(p.add_run('Jnana Sangama, Belagavi – 590 018.'))
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    cs_only(p.add_run('This is to certify that '))
+    r = cs_only(p.add_run('STUDENT NAME (USN)'))
+    r.bold = True
+    cs_only(p.add_run(' has successfully completed the Information & Network Security project.'))
+    p.add_run().add_break()
+    cs_only(p.add_run('Approved for the academic year 2026-27.'))
+
+    # Signature lines: a centre stop and a right stop.
+    for left, right, bold in (('Signature of the Guide', 'Signature of the HOD', False),
+                              ('Mr. Guide Name', 'Dr. HOD Name', True)):
+        p = doc.add_paragraph()
+        stops = p.paragraph_format.tab_stops
+        stops.add_tab_stop(DInches(6.27), WD_TAB_ALIGNMENT.RIGHT)
+        r = cs_only(p.add_run(f'{left}\t{right}'))
+        r.bold = bold
+
+    p = doc.add_paragraph()
+    cs_only(p.add_run('Student Name')).bold = True
+    p.add_run().add_break()
+    cs_only(p.add_run('USN')).bold = True
+
+    doc.add_heading('CONTENTS', 1)
+    for i, (title, page) in enumerate((('Certificate', ''), ('Acknowledgment', 'i'), ('Abstract', 'ii'))):
+        p = doc.add_paragraph()
+        p.paragraph_format.tab_stops.add_tab_stop(DInches(6.27), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS)
+        cs_only(p.add_run(f'{i + 1}. {title}\t{page}')).bold = True
+
+    out = os.path.join(HERE, 'academic-report.docx')
+    doc.save(out)
+    print('wrote', out)
+
+
 if __name__ == '__main__':
     build_pptx()
     build_docx()
+    build_academic_docx()

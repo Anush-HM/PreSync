@@ -230,10 +230,45 @@ const Shape = Node.create({
   }
 });
 
+// How a picture sits among the text: 'inline' (its own line, aligned),
+// 'square' (text wraps beside it) or 'front' (placed freely over the
+// text, offsetX/offsetY px from where it is anchored).
+const numberAttr = (name, data) => ({
+  default: null,
+  parseHTML: (el) => (el.getAttribute(data) === null ? null : Number(el.getAttribute(data))),
+  renderHTML: (a) => (a[name] === null || a[name] === undefined ? {} : { [data]: a[name] })
+});
+const placementAttrs = {
+  wrap: { default: null, parseHTML: (el) => el.getAttribute('data-wrap'), renderHTML: (a) => (a.wrap ? { 'data-wrap': a.wrap } : {}) },
+  offsetX: numberAttr('offsetX', 'data-offset-x'),
+  offsetY: numberAttr('offsetY', 'data-offset-y')
+};
+
 const DocumentImage = Image.extend({
-  draggable: true,
+  // Moved with its own pointer handling in FigureViews, which also lets
+  // a picture be placed anywhere on the page.
+  draggable: false,
   addAttributes() {
-    return { ...this.parent?.(), ...figureAttrs };
+    return { ...this.parent?.(), ...figureAttrs, ...placementAttrs };
+  },
+  // Arrow keys nudge a selected free picture (Shift for bigger steps).
+  addKeyboardShortcuts() {
+    const nudge = (dx, dy) => ({ editor }) => {
+      const { selection } = editor.state;
+      const node = selection.node;
+      if (node?.type.name !== this.name || node.attrs.wrap !== 'front') return false;
+      return editor.commands.updateAttributes(this.name, { offsetX: (node.attrs.offsetX || 0) + dx, offsetY: (node.attrs.offsetY || 0) + dy });
+    };
+    return {
+      ArrowLeft: nudge(-1, 0),
+      ArrowRight: nudge(1, 0),
+      ArrowUp: nudge(0, -1),
+      ArrowDown: nudge(0, 1),
+      'Shift-ArrowLeft': nudge(-10, 0),
+      'Shift-ArrowRight': nudge(10, 0),
+      'Shift-ArrowUp': nudge(0, -10),
+      'Shift-ArrowDown': nudge(0, 10)
+    };
   },
   addNodeView() {
     return ReactNodeViewRenderer(ImageFigure);
