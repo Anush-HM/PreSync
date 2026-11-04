@@ -10,7 +10,7 @@
 ![Express](https://img.shields.io/badge/Express-000000?logo=express&logoColor=white)
 ![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white)
 ![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?logo=socketdotio&logoColor=white)
-![Tests](https://github.com/Yashwanthdot7/PreSync/actions/workflows/backend-tests.yml/badge.svg)
+![Tests](https://github.com/Anush-HM/PreSync/actions/workflows/backend-tests.yml/badge.svg)
 
 </div>
 
@@ -52,7 +52,7 @@ See [docs/FEATURES.md](docs/FEATURES.md) for the full feature reference.
 ### Installation
 
 ```bash
-git clone https://github.com/Yashwanthdot7/PreSync.git
+git clone https://github.com/Anush-HM/PreSync.git
 cd PreSync
 npm install
 npm run install:all
