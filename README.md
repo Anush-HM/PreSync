@@ -1,6 +1,6 @@
 <div align="center">
 
-# PreSync
+# 🎞️ PreSync
 
 **Real-time collaborative presentations and documents, with live presenting and an AI Copilot.**
 
@@ -16,22 +16,22 @@
 
 ---
 
-## About
+## 📖 About
 
 PreSync lets teams build slide decks and documents together in real time, import existing PowerPoint, PDF and Word files, and present live to an audience that joins with a code. An AI Copilot suggests edits that apply only when you approve them.
 
-## Features
+## ✨ Features
 
-- **Slide editor:** text, shapes, tables, charts, pictures, layouts, themes, templates, smart guides and full undo/redo.
-- **Real-time collaboration:** co-editing with live cursors, comments, version history and sharing.
-- **Import and export:** import `.pptx`, `.pdf` and `.docx` as editable content; export to PDF, PPTX, DOCX, PNG and JPEG.
-- **Word documents:** a paginated editor with headers, footers, page numbers, tables and pictures.
-- **Live presenting:** presenter view with notes and next slide; the audience joins by code, link or QR code, with live Q&A.
-- **AI Copilot:** rewrites, summaries, speaker notes, deck generation and design checks, applied only on approval.
+- 🎨 **Slide editor:** text, shapes, tables, charts, pictures, layouts, themes, templates, smart guides and full undo/redo.
+- 👥 **Real-time collaboration:** co-editing with live cursors, comments, version history and sharing.
+- 🔄 **Import and export:** import `.pptx`, `.pdf` and `.docx` as editable content; export to PDF, PPTX, DOCX, PNG and JPEG.
+- 📝 **Word documents:** a paginated editor with headers, footers, page numbers, tables and pictures.
+- 📡 **Live presenting:** presenter view with notes and next slide; the audience joins by code, link or QR code, with live Q&A.
+- 🤖 **AI Copilot:** rewrites, summaries, speaker notes, deck generation and design checks, applied only on approval.
 
-See [docs/FEATURES.md](docs/FEATURES.md) for the full feature reference.
+📚 See [docs/FEATURES.md](docs/FEATURES.md) for the full feature reference.
 
-## Tech stack
+## 🛠️ Tech stack
 
 | Layer | Technologies |
 | --- | --- |
@@ -41,15 +41,15 @@ See [docs/FEATURES.md](docs/FEATURES.md) for the full feature reference.
 | AI | Anthropic SDK |
 | Testing | Vitest, Testing Library, ESLint, GitHub Actions |
 
-## Getting started
+## 🚀 Getting started
 
-### Prerequisites
+### 📋 Prerequisites
 
 - Node.js 18 or newer
 - MongoDB, local or hosted. For a quick local instance: `docker run -d -p 27017:27017 --name presync-mongo mongo:7`
 - An Anthropic API key (optional, only for AI features)
 
-### Installation
+### 📦 Installation
 
 ```bash
 git clone https://github.com/Anush-HM/PreSync.git
@@ -59,7 +59,7 @@ npm run install:all
 cp backend/.env.example backend/.env
 ```
 
-### Environment variables
+### 🔐 Environment variables
 
 Set these in `backend/.env`:
 
@@ -73,7 +73,7 @@ Set these in `backend/.env`:
 
 Optional AI settings (`AI_MODEL`, `AI_EFFORT`, `AI_RATE_LIMIT_PER_MINUTE` and more) are documented in [`backend/.env.example`](backend/.env.example). To point the frontend at a different backend, set `VITE_API_URL` in `frontend/.env`.
 
-### Run
+### ▶️ Run
 
 ```bash
 npm run dev
@@ -81,7 +81,7 @@ npm run dev
 
 The frontend opens at **http://localhost:5173** and the API runs at **http://localhost:4000**.
 
-## Scripts
+## 📜 Scripts
 
 | Command | Description |
 | --- | --- |
@@ -92,7 +92,7 @@ The frontend opens at **http://localhost:5173** and the API runs at **http://loc
 | `npm run lint --prefix frontend` | Lint the frontend |
 | `npm run build --prefix frontend` | Build the frontend for production |
 
-## Project structure
+## 📁 Project structure
 
 ```
 PreSync/
@@ -116,7 +116,7 @@ PreSync/
 └── docs/                  # Feature reference
 ```
 
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repo and create a branch from `main`.
 2. Make your changes and add tests where they apply.
