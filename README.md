@@ -1,151 +1,306 @@
 # PreSync
 
-Collaborative presentation tool: an Express + MongoDB backend with Socket.IO and Yjs for live sync, and a React (Vite) frontend.
+**PreSync is a real-time collaborative presentation and document workspace.** Teams build slide decks and Word-style documents together, import existing PowerPoint, PDF and Word files, present live to an audience that joins with a code, and get help from an AI Copilot that proposes changes you approve before they apply.
 
-## Prerequisites
+It is a full-stack JavaScript app: an Express + MongoDB backend with Socket.IO and Yjs for live sync, and a React (Vite) frontend built on Fabric.js for slides and TipTap for documents.
 
-- Node.js 18 or newer
-- MongoDB running locally (default `mongodb://localhost:27017`), e.g. `brew services start mongodb-community` or `docker run -d -p 27017:27017 --name presync-mongo mongo:7`
-- Optional: an Anthropic API key, used by AI Copilot in the editor and to draft answers to audience questions
+---
 
-## Setup
+## Contents
+
+- [Features](#features)
+- [Tech stack](#tech-stack)
+- [Architecture](#architecture)
+- [Project structure](#project-structure)
+- [Getting started](#getting-started)
+- [Configuration](#configuration)
+- [Scripts](#scripts)
+- [Testing](#testing)
+- [API overview](#api-overview)
+- [Contributing](#contributing)
+
+For the detailed behaviour of every feature (formatting options, import fidelity, export limits, Copilot privacy rules), see **[docs/FEATURES.md](docs/FEATURES.md)**.
+
+---
+
+## Features
+
+### Slide editor
+- Canvas editor with text, 27 shapes, tables, native charts, pictures, dividers and an elements library (stickers, recolourable icons, emoji).
+- Rich text formatting per character, with a searchable font picker, lists, spacing and a format painter.
+- 12 layouts, 8 themes, smart alignment guides, grouping, locking, layer order and a command palette (`Ctrl+K`).
+- Full undo/redo, autosave through the live session, and six starter templates plus your own saved templates.
+
+### Real-time collaboration
+- Co-editing over Yjs (CRDT), with live cursors and each collaborator's selection outlined in their colour.
+- Comment threads pinned to slides or elements, with replies and resolve/reopen.
+- Named and automatic version history with slide-by-slide preview and restore.
+- Share decks and documents with other PreSync users as editor or viewer.
+
+### Import and export
+- **Import** `.pptx` and `.pdf` (up to 25MB): text, formatting, tables, shapes, charts, SmartArt, pictures, backgrounds and speaker notes are reconstructed as editable slides. You review the analysis before anything is created. Import is deterministic and uses no AI.
+- **Export** decks to `.pdf`, `.pptx` (editable text, tables and native charts) or a Word outline `.docx`, and the current slide to PNG or JPEG.
+
+### Word documents
+- A paginated TipTap editor with headings, lists, tables, pictures, shapes, headers/footers, page numbers and borders.
+- Import `.docx`, export `.docx` and `.pdf`, live co-editing, comments on text ranges, sharing and version history.
+
+### Live presenting
+- *Present* opens a presenter view with the current and next slide, speaker notes, viewer count and an audience Q&A queue.
+- The audience joins with a room code, link or QR code, with no account needed, and follows along on any screen with private per-slide notes.
+- Presenters can have AI draft answers to audience questions, grounded only in the current slide and its neighbours.
+
+### AI Copilot
+- An assistant beside the canvas that works on your selection, slide or whole deck: rewrite, shorten, summarise, write speaker notes, suggest layouts and more.
+- Every change arrives as a preview card and applies only when you approve it, through the same collaborative operations as manual edits.
+- Generates new decks from a topic and an editable outline, and runs a local design check (overflow, overlaps, contrast, tiny type) without AI.
+- Context is trimmed server-side, proposed actions are validated against a whitelist, and requests are rate limited per user.
+
+---
+
+## Tech stack
+
+| Layer | Technologies |
+| --- | --- |
+| Frontend | React 18, Vite, React Router, Fabric.js (slide canvas), TipTap (document editor), Yjs + y-protocols, Socket.IO client, lucide-react |
+| Backend | Node.js (ES modules), Express 4, Mongoose 8 / MongoDB, Socket.IO, `ws` (Yjs WebSocket server), JWT + bcrypt auth, Multer uploads |
+| Documents | JSZip + `@xmldom/xmldom` (OOXML parsing), PDF.js (PDF import), `@napi-rs/canvas` (optional, page rendering), PDFKit (PDF export), PptxGenJS (PPTX export) |
+| AI | Anthropic SDK (`@anthropic-ai/sdk`) behind a provider adapter |
+| Testing and CI | Vitest, Testing Library, jsdom, ESLint, GitHub Actions |
+
+---
+
+## Architecture
+
+```
+                      ┌───────────────────────────────────────────┐
+                      │            React frontend (Vite)          │
+                      │  Fabric slide editor · TipTap doc editor  │
+                      └──────┬──────────────┬──────────────┬──────┘
+                    REST/JSON│   WebSocket  │   Socket.IO  │
+                             │  (Yjs sync)  │  (live rooms)│
+                      ┌──────▼──────────────▼──────────────▼──────┐
+                      │        Node.js HTTP server (:4000)        │
+                      │  Express API │ Yjs server │ Socket.IO     │
+                      │  /api/*      │ /yjs/...   │ presenter/    │
+                      │              │            │ viewer events │
+                      └──────┬──────────────┬──────────────┬──────┘
+                             │              │              │
+                       ┌─────▼─────┐  ┌─────▼─────┐  ┌─────▼──────┐
+                       │  MongoDB  │  │ Import/   │  │ Anthropic  │
+                       │ (Mongoose)│  │ export    │  │ API        │
+                       └───────────┘  │ services  │  │ (optional) │
+                                      └───────────┘  └────────────┘
+```
+
+One HTTP server (`backend/src/server.js`) hosts three independent layers:
+
+1. **REST API (Express).** Auth, decks, documents, imports, templates, rooms and AI routes under `/api/*`, built in `backend/src/app.js`. Controllers throw freely and a central error handler maps validation errors to `400` and oversized bodies to `413`.
+2. **Yjs co-editing server (`ws`).** Handles WebSocket upgrades on `/yjs/:deckId` and `/yjs/documents/:id`. Connections need a valid JWT and edit access, and viewers never connect here. The server keeps one shared Y.Doc and awareness per deck or document, and writes it back to MongoDB shortly after changes and when the last editor leaves.
+3. **Socket.IO live sessions.** Presenter and viewer traffic for live rooms: slide changes, viewer counts and audience Q&A. Each session code has a broadcast channel for everyone and a presenter-only channel for private Q&A drafts, so viewers have no way to reach presenter data. All socket input is validated in `sockets/validation.js`.
+
+**Data model.** MongoDB collections cover `User`, `Deck` (slides embedded via `slideSchema`), `DeckVersion`, `Comment`, `Document`, `DocumentVersion`, `DocumentComment`, `ImportedDocument`, `Template`, `Room`, `Viewer`, `Question` and `AiConversation`.
+
+**AI boundary.** The model never writes to the database or runs code. The backend trims the editor context, wraps it in a data block the model is told never to take instructions from, and validates every proposed action (`backend/src/ai/actions.js`). The browser applies only the actions the user approves.
+
+---
+
+## Project structure
+
+```
+presync/
+├── package.json              # Root scripts: run both apps, install all
+├── backend/
+│   ├── .env.example          # Copy to .env and fill in
+│   └── src/
+│       ├── server.js         # Entry point: HTTP + Socket.IO + Yjs
+│       ├── app.js            # Express app factory (used by tests too)
+│       ├── config/db.js      # MongoDB connection
+│       ├── routes/           # Express routers (+ route tests)
+│       ├── controllers/      # Request handlers
+│       ├── models/           # Mongoose schemas
+│       ├── middleware/       # Auth (JWT), uploads, async wrapper
+│       ├── services/         # PPTX/PDF/DOCX import, PDF/PPTX/DOCX export, Q&A
+│       ├── sockets/          # Socket.IO live-session events
+│       ├── yjs/              # Yjs WebSocket server and doc managers
+│       ├── ai/               # Copilot config, prompts, context, validation, providers
+│       └── test/             # Test helpers and fixture files
+├── frontend/
+│   ├── index.html
+│   ├── vite.config.js
+│   └── src/
+│       ├── App.jsx           # Routes
+│       ├── pages/            # Landing, decks, editor, documents, presenter, viewer…
+│       ├── components/
+│       │   ├── editor/       # Slide editor UI (toolbar, panels, Fabric blocks)
+│       │   ├── documents/    # Word editor UI (TipTap extensions, pagination)
+│       │   ├── copilot/      # AI Copilot panel and action cards
+│       │   ├── collab/       # Comments, version history, export dialog
+│       │   ├── imports/      # Import dialog and review
+│       │   ├── live/         # Invite, QR code, connection state
+│       │   ├── templates/    # Template gallery
+│       │   ├── layout/       # App shell / sidebar
+│       │   └── ui/           # Shared primitives (dialog, menu, toast…)
+│       ├── data/             # API clients, Yjs client, editor operations, layouts, themes, fonts
+│       └── styles/           # Theme tokens (theme.css)
+├── docs/FEATURES.md          # Detailed feature reference
+└── .github/workflows/        # CI: backend and frontend tests
+```
+
+---
+
+## Getting started
+
+### Prerequisites
+
+- **Node.js 18+** (CI uses Node 22)
+- **MongoDB**, local or hosted. For a quick local instance:
+  ```bash
+  docker run -d -p 27017:27017 --name presync-mongo mongo:7
+  ```
+- *Optional:* an **Anthropic API key** for AI Copilot and AI-drafted Q&A answers.
+- *Optional, for better PDF export fonts on Linux:* `fonts-crosextra-carlito`, `fonts-crosextra-caladea`, `fonts-liberation`.
+
+### Install
 
 ```bash
-# Install root, backend and frontend dependencies
+git clone https://github.com/Yashwanthdot7/PreSync.git
+cd PreSync
+
+# Root tooling, then backend and frontend dependencies
 npm install
 npm run install:all
+```
 
-# Create the backend env file and fill it in
+You can also install each app on its own with `npm install` inside `backend/` and `frontend/`.
+
+### Configure
+
+```bash
 cp backend/.env.example backend/.env
 ```
 
-Edit `backend/.env`:
+At minimum, set `MONGO_URI`, `JWT_SECRET` and `CLIENT_ORIGIN` (see [Configuration](#configuration)). To generate a secret:
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `PORT` | no | Backend port, defaults to `4000` |
-| `MONGO_URI` | yes | MongoDB connection string |
-| `JWT_SECRET` | yes | Long random string used to sign login tokens |
-| `CLIENT_ORIGIN` | yes | Frontend origin(s) allowed by CORS, comma-separated |
-| `ANTHROPIC_API_KEY` | no | Enables AI Copilot and AI-drafted Q&A answers; without it Copilot shows a setup message and the drafter returns `NOT_IN_DECK` |
-| `AI_PROVIDER` | no | Copilot's model provider adapter, defaults to `anthropic` (the only one implemented) |
-| `AI_MODEL` | no | Model Copilot uses, defaults to `claude-opus-5-5` |
-| `AI_EFFORT` | no | `low`, `medium` (default), `high`, `xhigh` or `max` |
-| `AI_MAX_OUTPUT_TOKENS` | no | Longest Copilot reply, defaults to `8000` |
-| `AI_RATE_LIMIT_PER_MINUTE` | no | Copilot requests per user per minute, defaults to `10` |
-| `AI_REFUSAL_FALLBACK` | no | `default` (retry a declined request on Anthropic's recommended fallback model) or `off` |
-| `AI_STORE_HISTORY` | no | `true` (default) saves Copilot conversations; `false` keeps them in the browser tab only |
-| `AI_COPILOT_ENABLED` | no | `false` turns Copilot off even when a key is set |
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
 
-The frontend talks to `http://localhost:4000` by default. To point it elsewhere, set `VITE_API_URL` in `frontend/.env`.
-
-## Run
+### Run
 
 ```bash
 npm run dev
 ```
 
-This starts the backend (`node --watch`, port 4000) and the frontend (Vite, port 5173) together.
+This starts the backend on **http://localhost:4000** (with `node --watch`) and the frontend on **http://localhost:5173** (Vite, opens in your browser). Register an account on the login page to get started. `GET /health` returns `{ "ok": true }` when the backend is up.
 
-## Importing, editing and exporting decks
+---
 
-- **Import:** PowerPoint (`.pptx`) and PDF (`.pdf`), up to 25MB, from the dashboard. Word files never become slides: they open in the document editor (see *Word documents*). The file is analysed first (`POST /api/imports`) and the user reviews the result before anything is created:
-  - *PowerPoint:* text boxes with position, size, rotation, insets and vertical anchoring; fonts, sizes and formatting per run, following the slide → layout → master inheritance; bullets and automatic numbering; tables (merged cells, fills, borders, built-in table styles); shapes (preset and custom geometry, fills, gradients, outlines); cropped pictures; colour, gradient and picture backgrounds; and speaker notes. Charts (column, bar, line, area, pie, doughnut, scatter; clustered or stacked) are read from their cached data and redrawn as chart blocks with their colours, title, legend and labels; 3-D and combo charts are drawn simplified and say so. SmartArt is redrawn as ordinary, editable shapes from the layout PowerPoint saves with it. Embedded objects (spreadsheets, Visio drawings…) show their preview picture. Anything still unreadable becomes a labelled placeholder and is listed in the review. *Open in editor* keeps the slides as extracted; *Generate from outline* rebuilds them as a fresh, consistently laid-out deck.
-  - *PDF:* each page's drawing (pictures, shapes, charts) is rendered with PDF.js as the slide background, with the page's text on top as editable, aligned text boxes (fonts, sizes, bold/italic, colours, lists and the page title). Scanned pages without real text keep their full render. Rendering needs the optional `@napi-rs/canvas` package; without it PDFs import as text only.
-  - Legacy `.doc` and `.ppt` are refused with a prompt to re-save them. Imports are kept on the **Documents** page, so the same file never has to be uploaded twice. Analysis is deterministic and uses no AI.
-- **Edit:** the format bar above the slide changes with the selection.
-  - *Text:* font menu (search, categories, favourites, recently used, each font drawn in its own face), size, bold/italic/underline/strikethrough, colour, highlight, alignment, line and paragraph spacing, bulleted and numbered lists with indent levels (Tab / Shift+Tab), superscript and subscript, clear formatting and a format painter. Formatting applies to the selected characters while typing, or to whole text boxes.
-  - *Elements* (Insert › Elements): search 26 original stickers and decorations, 50 line icons you can recolour, and 119 emoji, by name or meaning ("growth", "security"), filtered by kind and category. Recently used elements and the pictures already in the deck are kept at the top. Stickers and icons are inserted as pictures, so they export to PDF and PPTX. Emoji are inserted as text in the viewer's own emoji font, so they look slightly different on each system.
-  - *Smart guides:* a dragged element snaps to the slide's edges and centre and to other elements' edges and centres, and a guide line shows what it lined up with. Hold Alt to move freely, or turn snapping off under **More** (⋯). Snapping applies to moving, not resizing.
-  - *Command palette* (Ctrl+K / ⌘K) runs any editor command by name: insert, layouts, themes, align, group, export, present and more. **Keyboard shortcuts** (Ctrl+/) lists every shortcut.
-  - *Insert:* text styles (title, heading, body, list, quote, caption), 27 shapes including lines and arrows, tables (size picker), charts (with sample data), pictures (upload, drag onto the slide or paste), dividers, and new slides from a layout.
-  - *Tables:* type into cells in the side panel (Tab moves on, Tab in the last cell adds a row), select ranges with Shift-click, insert and delete rows and columns, merge and split cells, cell fill, text colour, bold, horizontal and vertical alignment, padding, borders (all, outer, inner, none; colour and width), four table styles and a header-row switch. Paste a spreadsheet range into any cell.
-  - *Charts:* change the type and grouping, edit the data sheet (or paste a range), series colours, title, legend, data labels and percent format.
-  - *Pictures:* replace, crop each edge, flip, opacity, border, shadow, alt text, keep-proportions and reset to original proportions.
-  - *Arrange:* exact position, size and rotation; align to the slide or to each other; distribute; group (Ctrl+G / Ctrl+Shift+G); lock; layer order; arrow keys nudge (Shift for 10px).
-  - *Slides:* 12 layouts that move existing content into place without deleting anything, 8 themes (colours and fonts only, for one slide or all), background colour, rename and hide slides (hidden slides are skipped when presenting and left out of PDFs), reorder, duplicate and speaker notes.
-  - Undo/redo (Ctrl+Z / Ctrl+Shift+Z) covers every edit, including layouts and themes, as single steps. Edits autosave through the live co-editing session; **Save** (Ctrl+S) writes them to the database immediately.
-  - Fonts: the web fonts in the font menu are open-licence families (SIL Open Font License 1.1, Permanent Marker under Apache 2.0) loaded from Google Fonts the first time a slide uses them; PreSync does not bundle or redistribute them. Office font names use the device's copy or an open metric-compatible stand-in. The full list with each licence is in `frontend/src/data/fonts.js`. Layouts, themes, table styles, shapes, templates, stickers and icons are PreSync originals, and their licences are recorded in the source (`frontend/src/data/assetLibrary.js`).
-- **Review and collaborate:**
-  - *Comments* (speech-bubble button): comment on a slide, or on the selected element. Threads support replies, resolve and reopen, and only the author can edit their text; the author or the deck owner can delete a thread. Open threads show as pins on the slide. Everyone editing sees new comments within moments (`/api/decks/:id/comments`). Viewers of a live session never see comments.
-  - *Version history* (**More › Version history**): save named versions, and Save also keeps an automatic version at most every 10 minutes when something changed. You can preview any version slide by slide. Restoring one replaces the slides for everyone, saves what was there first as a "Before restoring" version, and can be undone with Ctrl+Z. Each deck keeps up to 100 versions, and the oldest automatic ones are dropped first (`/api/decks/:id/versions`).
-  - *Live selections:* while co-editing, each collaborator's selected element is outlined in their colour with their name, next to their cursor.
-- **Templates:** *Templates* on the dashboard starts a presentation from one of six starter templates (startup pitch, lesson plan, project update, quarterly review, workshop, portfolio). They are PreSync originals built from its own layouts and themes, and they become ordinary, editable slides. **More › Save as template** in the editor saves the open presentation, with everyone's latest edits, as one of your own templates (`/api/templates`). Saved templates are private to you, up to 50 each, and listed under *My templates*.
-- **Export:** *Export* in the editor downloads the deck as `.pdf`, `.pptx` or a Word outline `.docx` (`GET /api/decks/:id/export?format=pdf|pptx|docx`, with optional `hidden=1` to include hidden slides and `notes=1|0` for speaker notes), or the current slide as a PNG or JPEG image (drawn in the browser at twice the slide's size). PPTX keeps text editable with its per-run formatting (including highlight, superscript and subscript), plus tables, native (editable) charts, shapes, pictures (with crop, transparency, shadow and alt text), picture backgrounds, hidden slides and speaker notes (gradients export as their first colour; picture borders are not exported to PPTX). The Word outline is a document to read or edit rather than a copy of the slides: slide titles become headings, followed by the text with its formatting, tables, each chart's data as a table, pictures and speaker notes. Layout and shapes are not kept, and slides that only exist as a picture are included as that picture, labelled. *Export options…* shows what each format keeps and lets you include hidden slides and speaker notes; in PDF, notes become a notes page after each slide that has them. PDF draws the same content, including gradients, picture crops, transparency and borders, and leaves out hidden slides (picture shadows and text highlight are not drawn in PDF). It embeds Carlito, Caladea and Liberation fonts when the server has them installed (`fonts-crosextra-carlito`, `fonts-crosextra-caladea`, `fonts-liberation`; other font folders via `PDF_FONT_DIRS`), so text keeps the widths of Calibri, Cambria, Arial, Times New Roman and Courier New; otherwise it falls back to the standard PDF fonts, which cover Latin-1 text only.
+## Configuration
 
-## Word documents
+### Backend (`backend/.env`)
 
-Word documents are independent of presentations. `/documents` lists them; **New Word document** starts a blank one and **Import Word document** opens a `.docx` for editing at `/documents/:id`.
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `PORT` | no | `4000` | Port for the API, Socket.IO and Yjs servers |
+| `MONGO_URI` | **yes** | | MongoDB connection string, e.g. `mongodb://localhost:27017/presync` |
+| `JWT_SECRET` | **yes** | | Long random string used to sign login tokens |
+| `CLIENT_ORIGIN` | **yes** | | Frontend origin(s) allowed by CORS, comma-separated |
+| `ANTHROPIC_API_KEY` | no | | Enables AI Copilot and AI-drafted Q&A. Without it, Copilot shows a setup message and the Q&A drafter returns `NOT_IN_DECK` |
+| `AI_PROVIDER` | no | `anthropic` | Copilot provider adapter (only `anthropic` is implemented) |
+| `AI_MODEL` | no | `claude-opus-5-5` | Model Copilot uses |
+| `AI_EFFORT` | no | `medium` | `low`, `medium`, `high`, `xhigh` or `max` |
+| `AI_MAX_OUTPUT_TOKENS` | no | `8000` | Longest Copilot reply (1000 to 32000) |
+| `AI_RATE_LIMIT_PER_MINUTE` | no | `10` | Copilot requests per user per minute |
+| `AI_REFUSAL_FALLBACK` | no | `default` | `default` retries a declined request on the recommended fallback model; `off` disables it |
+| `AI_STORE_HISTORY` | no | `true` | Save Copilot conversations (without slide content) |
+| `AI_COPILOT_ENABLED` | no | `true` | `false` turns Copilot off even when a key is set |
+| `PDF_FONT_DIRS` | no | | Extra font folders for PDF export |
 
-- **Editor:** built on TipTap. Fonts, sizes, line spacing, bold/italic/underline/strike, alignment and colour; title, headings, lists (with bullet and number styles, which export to .docx and PDF), blockquotes, captions, dividers and page breaks; tables (grid or exact size, merge, split, shading, column resize); pictures (PNG, JPEG, GIF up to 1.5MB, with resize and alignment); shapes, badges and callout cards. A4 or Letter. Changes save on their own a moment after each edit.
-- **Pages:** the editor shows separate sheets, with text flowing onto the next one (`components/documents/pagination.js`); `Ctrl+Enter` inserts a page break. Double-click a top or bottom margin to edit the header and footer (left, centre and right text with title, date and page tokens, and a different first page). Insert > Page has page numbers, and the toolbar has the page border. All of this exports: `.docx` uses native header and footer parts, `PAGE`/`NUMPAGES` fields and `w:pgBorders`, except that Word cannot border chosen pages, so a specific-pages border exports on every page.
-- **Import:** `POST /api/documents/import-docx` keeps headings, run formatting, lists, tables with merges and shading, pictures, page breaks, page size and margins; charts become tables of their data. Header and footer text comes in as the three slots. Text boxes, equations, footnotes, comments and SmartArt are not imported, and the editor says so when a file had any.
-- **Export:** `GET /api/documents/:id/export/docx` and `/export/pdf`. Shapes survive export but not a later re-import. The PDF embeds an installed font when it can (Windows fonts, or Liberation/Carlito on Linux; `PDF_FONT_DIRS` adds folders) and otherwise uses the standard PDF fonts, which cover Latin text only.
-- **Page numbers in Word:** Word recalculates its own pages, so a page can break in a slightly different place there than in the editor or PDF.
-- **Sharing:** **Share** in the editor gives someone with a PreSync account *Can edit* or *Can view* access by email; the owner can change or remove it, and that person's open editor reloads with their new access. Documents shared with you are listed under *Shared with you* on the Documents page and on **Shared With Me**.
-- **Co-editing:** the editor opens the document's live copy (Yjs over `/yjs/documents/:id`, `backend/src/yjs/documentManager.js`), so everyone with access sees each other's text, title, page size, header/footer and border changes as they happen, with each person's cursor and name in the text and who else is here in the header. The server writes the live copy to the database a moment after each change, when the last person leaves, and before a download. Undo only undoes your own changes. If the live connection can't be made, the editor says so and saves each change over the API instead.
-- **View only:** people who can view follow the live document read-only, without the toolbar, and can download it and read comments. Their changes are never applied by the server.
-- **Comments:** select text and open the comments panel to start a thread on it; the text is highlighted for everyone and clicking it opens the thread. Threads support replies, resolve and reopen; the author or the owner can delete one. Everyone with the document open sees comment changes within moments.
-- **Version history:** save named versions; **Save** also keeps an automatic one at most every 10 minutes when something changed. Open any version to read it, and restore it for everyone; what was there first is kept as a "Before restoring" version. Up to 100 versions per document.
-- **API:** `POST`/`GET /api/documents`, `GET`/`PUT`/`DELETE /api/documents/:id`, `POST /:id/save`, `POST /:id/share` and `PATCH`/`DELETE /:id/share/:userId`, `/:id/comments` (with `/replies`), `/:id/versions` (with `/restore`). Content is stored as the editor's JSON tree, validated by `backend/src/services/documentContent.js`, up to about 15MB per document including pictures.
+The API key stays on the server and is never sent to the browser. `backend/.env` is gitignored, so never commit real secrets.
 
-## AI Copilot
+### Frontend (`frontend/.env`, optional)
 
-*Copilot* in the editor's top bar opens an assistant beside the canvas (an overlay below 1400px). It works on what you are editing: the selected text or objects, the current slide, or the whole deck, shown and switchable above the message box.
+| Variable | Default | Description |
+| --- | --- | --- |
+| `VITE_API_URL` | `http://localhost:4000` | Backend origin. WebSocket URLs are derived from it |
 
-- **Assist:** ask in your own words or pick a suggested prompt. It can rewrite, shorten, expand or fix the selected text, convert it to bullets or a table, suggest titles, write speaker notes, introductions and conclusions, summarise slides or the deck, recommend a layout, and suggest stickers, icons and emoji from PreSync's library. Each answer is labelled as coming from your presentation, general knowledge, or both, with links to the slides it used.
-- **Proposed changes** arrive as cards with a preview (before and after text, before and after slide thumbnails, a table preview, or asset tiles). Nothing changes until you apply one; *Undo* on the card or Ctrl+Z reverts it. Changes go through the same collaborative operations as manual edits, so co-editors see them live, autosave and *Save* store them, and an action whose text was edited by someone else in the meantime is refused instead of overwriting it.
-- **Create deck:** enter a topic, audience, purpose, slide count, tone and optional style. Copilot drafts an outline that you can edit, reorder and trim, then pick colours and where the slides go (after the current slide or at the end; an untouched blank deck can be replaced). Existing slides are never overwritten.
-- **Check design** runs the editor's own checks on the current slide, without AI: text running off the slide or out of its box (from measured text heights), overlaps, edges a few pixels out of line, tiny type, too many fonts or words, and low contrast. Fixes that can be computed are offered as an *Apply fixes* card. The same report is sent with AI requests so design advice is based on real geometry.
+---
 
-**Privacy and safety.** The first time, Copilot explains which provider receives the content and asks to continue. Each request sends only what it needs: the active slide in detail, the selection, slide titles, and for deck-wide questions the slides most related to the request (others abridged). The server trims that again, keeps it inside a data block that the model is told never to take instructions from, and validates every proposed change against the editor's supported operations (`backend/src/ai/actions.js`), dropping anything that names blocks, layouts or assets that don't exist. The model never runs code or writes to the database; the browser applies approved changes. Conversations are saved per user and deck without slide content, are private to that user, are deleted with the deck, and can be cleared from the panel. Requests are rate limited per user, and neither prompts nor document text are logged.
+## Scripts
 
-**API** (signed-in editors only): `GET /api/ai/status`, `POST /api/ai/decks/:deckId/assist`, `GET|POST|DELETE /api/ai/decks/:deckId/conversations`, `GET|DELETE /api/ai/conversations/:id`, and `PATCH /api/ai/conversations/:id/messages/:messageId/actions/:index` to record whether a suggestion was applied.
+| Location | Command | What it does |
+| --- | --- | --- |
+| root | `npm run dev` | Runs backend and frontend together (via `concurrently`) |
+| root | `npm run install:all` | Installs backend and frontend dependencies |
+| `backend/` | `npm run dev` | Starts the API with file watching |
+| `backend/` | `npm start` | Starts the API (production) |
+| `backend/` | `npm test` | Runs backend tests (Vitest) |
+| `frontend/` | `npm run dev` | Starts the Vite dev server |
+| `frontend/` | `npm run build` | Builds the production bundle into `frontend/dist` |
+| `frontend/` | `npm run preview` | Serves the production build locally |
+| `frontend/` | `npm run lint` | Runs ESLint with zero warnings allowed |
+| `frontend/` | `npm test` | Runs frontend tests (Vitest + jsdom + Testing Library) |
 
-**Code map.** Backend: `src/ai/` (config, provider adapter in `providers/`, context limits, prompt, structured response and action validation, rate limiter), `src/controllers/aiController.js`, `src/routes/aiRoutes.js`, `src/models/AiConversation.js`. Frontend: `src/components/copilot/` (panel, action cards, outline builder, editor bridge), `src/data/copilotContext.js` (what is sent), `src/data/copilotActions.js` (previews and edits on the Y.Doc), `src/data/layoutAnalysis.js` (design checks), `src/data/copilotLayouts.js` (layouts and colour themes) and `src/data/assetLibrary.js` (stickers, icons and emoji with licensing). Adding a provider means a new file in `backend/src/ai/providers/` exposing `generateJson()`.
+---
 
-**Limits.** Selection rewrites need the selection from the current session (a suggestion reloaded from history can't replace text blindly). Copilot doesn't see pictures' content, only their size and position, and it doesn't edit inside existing tables. *Undo* on a card reverts the most recent Copilot change.
-
-## Design system
-
-The UI follows the *Dark Forest Studio* theme: charcoal surfaces, forest green for primary actions and selection, crimson for live and destructive states. All colours, radii, shadows and fonts are CSS custom properties in `frontend/src/styles/theme.css`; shared primitives (dialog, confirm dialog, toast, menu, avatar, logo) live in `frontend/src/components/ui/`. Icons come from [`lucide-react`](https://lucide.dev).
-
-Signed-in pages use the sidebar layout in `frontend/src/components/layout/AppShell.jsx`:
-
-| Route | Page |
-| --- | --- |
-| `/decks` | Dashboard: recent and shared presentations, search, filter, sort |
-| `/decks/mine` | Presentations you own |
-| `/decks/shared` | Presentations shared with you |
-| `/documents` | Imported files (`GET /api/imports`) |
-| `/imports/:id` | Review an import: analysis, outline editor, document or slide preview |
-| `/sessions` | Your live and recent sessions (`GET /api/rooms/mine`) |
-
-The editor (`/editor/:deckId`) has its own full-screen layout:
-
-- **Left:** slide thumbnails, with keyboard navigation and a per-slide menu for duplicate, move and delete.
-- **Centre:** the Fabric canvas, with zoom and *Fit*.
-- **Right:** a formatting panel that changes with what is selected.
-
-Below 1100px the formatting panel opens as an overlay. Below 768px the slide list does too.
-
-*Insert → Image* embeds PNG, JPEG or GIF files up to 1.5MB.
-
-**Live sessions**
-
-- *Present* in the editor saves the deck and opens the presenter view (`/presenter/:code`). It shows:
-  - The current slide, next-slide preview and speaker notes.
-  - Viewer count and connection state.
-  - The audience Q&A queue.
-  - *Invite*, with the code, a join link (`/join?code=…`) and a QR code.
-- *End session* asks for confirmation first.
-- The audience view (`/view/:code`) scales the slide to any screen and lets viewers catch up when the presenter moves on. It has private per-slide notes and Q&A.
-- Both views show connecting, reconnecting and ended states. socket.io reconnects automatically.
-
-## Tests
+## Testing
 
 ```bash
 npm test --prefix backend
 npm test --prefix frontend
 npm run lint --prefix frontend
 ```
+
+- **Backend** tests serve the real Express app on a random port (`backend/src/test/httpServer.js`) and mock the Mongoose models, so **no database is needed**. They cover routes, sockets, the Yjs servers, the AI layer, and import/export fidelity against fixture files in `backend/src/test/fixtures/`.
+- **Frontend** tests run in jsdom with Testing Library and cover pages, editor UI, collaboration panels, Copilot and the pure editor operations in `src/data/`.
+- **CI** (`.github/workflows/backend-tests.yml`) runs on every pull request and on pushes to `main`. It runs the backend tests, then the frontend lint, tests and production build, on Node 22.
+
+---
+
+## API overview
+
+All routes are under `/api` and, apart from auth and joining a live room, need an `Authorization: Bearer <token>` header.
+
+| Area | Base path | Highlights |
+| --- | --- | --- |
+| Auth | `/api/auth` | `POST /register`, `POST /login` |
+| Decks | `/api/decks` | CRUD, `/save`, `/duplicate`, `/export?format=pdf\|pptx\|docx`, `/collaborators`, `/versions`, `/comments` |
+| Imports | `/api/imports` | Upload and analyse a file, edit its outline, create a deck from it |
+| Documents | `/api/documents` | CRUD, `/import-docx`, `/export/docx\|pdf`, `/share`, `/comments`, `/versions` |
+| Templates | `/api/templates` | List, save, delete, create a deck from a template |
+| Rooms | `/api/rooms` | `/go-live`, `/:roomId/end`, `/mine`, public `/:code`, `/:code/join`, viewer notes |
+| AI | `/api/ai` | `/status`, `/decks/:deckId/assist`, conversations |
+
+Real-time endpoints: Yjs WebSockets at `/yjs/:deckId` and `/yjs/documents/:id`, and Socket.IO events `presenter:join`, `viewer:join`, `presenter:slide-change`, `question:submit`, `question:send` and `question:dismiss`.
+
+---
+
+## Contributing
+
+Contributions are welcome. To propose a change:
+
+1. **Fork** the repository and create a branch from `main`, e.g. `feature/slide-transitions` or `fix/pdf-export-fonts`.
+2. **Install and run** the app locally as described in [Getting started](#getting-started).
+3. **Make your change** and follow the existing conventions:
+   - ES modules throughout, with backend code split into routes → controllers → services/models.
+   - Keep editor operations in `frontend/src/data/` pure and tested; UI lives in `components/` and `pages/`.
+   - Use the CSS custom properties in `frontend/src/styles/theme.css` rather than hard-coded colours.
+   - Validate any new socket input in `backend/src/sockets/validation.js`, and any new Copilot action in `backend/src/ai/actions.js`.
+4. **Add or update tests** next to the code you change (`*.test.js` / `*.test.jsx`).
+5. **Check everything passes** before opening a PR:
+   ```bash
+   npm test --prefix backend
+   npm run lint --prefix frontend
+   npm test --prefix frontend
+   npm run build --prefix frontend
+   ```
+6. **Open a pull request** against `main` that describes what changed and why, with screenshots for UI changes. CI must be green before merge.
+
+Please report bugs and feature requests through GitHub Issues, with steps to reproduce and your browser and Node versions.
+
+---
+
+## Licensing notes
+
+The web fonts offered in the editor are open-licence families loaded from Google Fonts, not bundled. Layouts, themes, templates, stickers and icons are PreSync originals. Licences for each are recorded in `frontend/src/data/fonts.js` and `frontend/src/data/assetLibrary.js`. The repository doesn't include a project licence file yet.
